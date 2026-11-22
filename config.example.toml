@@ -18,12 +18,13 @@ color = "color"            # color | gray
 format = "pdf"             # pdf | jpeg
 source = "auto"            # auto | platen | adf
 size = "a4"                # a4 | letter | legal | 10x15 | 13x18
-open_after_scan = "off"    # off | folder | file (desktop PC only: open the result)
+open_after_scan = false    # true: open the folder after a scan (desktop PC only)
 # File name of a scan without extension (--filename / PUSHSCAN_FILENAME).
 # Fields: {name} (panel name), {date} (2026-11-22), {time} (183005) and
 # {now:FORMAT} with strftime codes. Existing files are never overwritten (-1, -2 ...).
 # A [[target]] can set its own filename, it wins over this one.
-filename = "scan_{now:%Y%m%d_%H%M%S}"   # e.g. scan_20261122_183005.pdf
+# Date and time codes: %Y year, %m month, %d day, %H hour, %M minute, %S second.
+filename = "scan_{now:%Y-%m-%d_%H-%M-%S}"   # e.g. scan_2026-11-22_18-30-05.pdf
 
 # Document type "Document" on the printer panel (Doc. type).
 [defaults.document]
@@ -68,8 +69,8 @@ name = "Scans"
 # "Auto scan" (the preset wins over the panel there).
 [[target]]
 name = "Paperless"
-# filename = "{name}_{date}_{time}"   # this target only, e.g. Paperless_2026-11-22_183005.pdf
-open_after_scan = "off"   # this target only: never open after a scan (off | folder | file)
+# filename = "archive_{now:%Y%m%d}"   # this target only, e.g. archive_20261122.pdf
+open_after_scan = false   # this target only: never open after a scan
 
 [target.document]
 multipage = true
@@ -82,7 +83,7 @@ multipage = true           # dialog for auto scan too
 # Relative output is resolved against the base output (/scans/archive).
 [[target]]
 name = "Archive"
-output = "archive"
+output = "archive"   # a subfolder of the scan folder (output)
 
 [target.document]
 multipage = false

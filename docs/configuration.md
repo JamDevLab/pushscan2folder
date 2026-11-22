@@ -143,7 +143,7 @@ environment wins over the [configuration file](#configuration-file). More in
 | `--targets`    | `PUSHSCAN_TARGETS`    | -                   | run           | Several panel entries, each with its own folder and optional preset, see [Multiple targets](#multiple-targets). Replaces `--name` for `run` |
 | `--ignore-panel` | `PUSHSCAN_IGNORE_PANEL` | off             | run           | Ignore the panel settings and always use the four options above (`--format`, `--color`, `--resolution`, `--source`). Env var: `1`, `true` or `yes`. Also disables multi-page scans |
 | `--multipage`  | `PUSHSCAN_MULTIPAGE`  | `document`          | run           | `document`, `auto`, `both` or `off`, see [Multi-page scans](#multi-page-scans-from-the-platen) |
-| `--open-after-scan` | `PUSHSCAN_OPEN_AFTER_SCAN` | `off`       | run, start    | `off`, `folder` or `file`. Desktop PC only: after a job is saved, open the folder (Windows: Explorer with the new file selected) or the file, once per job. On Linux it needs `DISPLAY` or `WAYLAND_DISPLAY`. A failure only logs a warning. Docker has no desktop, keep it `off` |
+| `--open-after-scan` | `PUSHSCAN_OPEN_AFTER_SCAN` | `false`     | run, start    | `true` or `false` (also `yes`/`no`, `1`/`0`, `on`/`off`; the old `folder` and `file` count as `true`). Desktop PC only: after a job is saved, open the folder (Windows: Explorer with the new file selected), once per job. On Linux it needs `DISPLAY` or `WAYLAND_DISPLAY`. A failure only logs a warning. Docker has no desktop, keep it `false` |
 | `--filename`   | `PUSHSCAN_FILENAME`   | `scan_{now:%Y%m%d_%H%M%S}` | run    | Template for the file name of a scan, without the extension, see [File names](#file-names) |
 | `--heartbeat-file` | `PUSHSCAN_HEARTBEAT_FILE` | -          | run, health   | File that `run` touches after every successful contact with the printer, and that `health` checks. The Docker image sets it, see [Docker](docker.md#healthcheck) |
 | `--max-age`    | -                  | `120`               | health        | Seconds after which `health` calls the heartbeat file too old |
@@ -184,7 +184,7 @@ the file and the key, so typos are caught.
 | `[defaults]` `format` | `pdf`, `jpeg` | `--format` |
 | `[defaults]` `source` | `auto`, `platen`, `adf` | `--source` |
 | `[defaults]` `size` | `a4`, `letter`, `legal`, `10x15`, `13x18` | scan area without panel data |
-| `[defaults]` `open_after_scan` | `off`, `folder`, `file` | `--open-after-scan` |
+| `[defaults]` `open_after_scan` | `true`, `false` (the old `"off"`, `"folder"`, `"file"` are still read) | `--open-after-scan` |
 | `[defaults]` `filename` | template, see [File names](#file-names) | `--filename` |
 | `[defaults.document]` `multipage` | `true` / `false`, built-in `true` | `--multipage` (panel document type *Document*) |
 | `[defaults.auto]` `multipage` | `true` / `false`, built-in `false` | `--multipage` (panel document type *Auto*) |
@@ -198,7 +198,7 @@ the file and the key, so typos are caught.
 | `[[target]]` `name` | required, max 31 chars, unique | `NAME` |
 | `[[target]]` `output` | folder; `"."` is the output directory itself; default `<output>/<name>` | `NAME=DIR` |
 | `[[target]]` `filename` | template, see [File names](#file-names); wins over `[defaults]` for this target | - |
-| `[[target]]` `open_after_scan` | `off`, `folder`, `file`; wins over `[defaults]` for this target, for example `off` for an archive folder | - |
+| `[[target]]` `open_after_scan` | `true`, `false`; wins over `[defaults]` for this target, for example `false` for an archive folder | - |
 | `[target.document]` `multipage` | `true` / `false` | `mp:` for document type *Document* |
 | `[target.auto]` `resolution`, `format`, `size` | as above | the `@preset` options |
 | `[target.auto]` `multipage` | `true` / `false` | `mp:` for document type *Auto scan* |

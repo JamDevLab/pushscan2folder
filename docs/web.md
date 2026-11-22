@@ -149,7 +149,7 @@ Whether the targets can be edited depends on where they come from:
   editable; if the file does not exist yet, the first save creates it.
 
 Each target card also has "Open after a scan" (`open_after_scan` of the target;
-"Default" uses the Settings page value).
+"Default" uses the Settings page value, "Yes" and "No" decide for this target). On the Settings page "Open after scan" is a check box; unticked is saved as `false`, because a check box cannot say "not set".
 
 Comments in the config file are lost when saving from the Targets or Settings
 form, except the short header and the commented examples, which are written

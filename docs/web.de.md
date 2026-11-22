@@ -161,7 +161,7 @@ Ob sich die Ziele bearbeiten lassen, hängt davon ab, woher sie kommen:
   Speichern sie an.
 
 Jede Zielkarte hat außerdem "Open after a scan" (`open_after_scan` des Ziels;
-"Default" nimmt den Wert der Einstellungsseite).
+"Default" nimmt den Wert der Einstellungsseite, "Yes" und "No" entscheiden für dieses Ziel). Auf der Einstellungsseite ist "Open after scan" ein Kontrollkästchen; ohne Haken wird `false` gespeichert, weil ein Kontrollkästchen "nicht gesetzt" nicht ausdrücken kann.
 
 Kommentare in der Konfigurationsdatei gehen beim Speichern über das Ziel- oder
 Einstellungsformular verloren, bis auf den kurzen Kopf und die auskommentierten

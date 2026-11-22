@@ -14,7 +14,7 @@ All notable changes are documented here. The format follows
   the Windows uninstaller), quit. The separate "setup" and "stop" entries
   of the installer are gone.
 - `open_after_scan` per `[[target]]` (also in the web target editor), for
-  example `"off"` for an archive folder. It wins over `[defaults]`.
+  example `false` for an archive folder. It wins over `[defaults]`.
 - The config file that setup and the web page write starts with a short header
   (changes apply while running, only `[web]` and `verbose` need a restart) and
   has commented examples for `open_after_scan`, `filename`, `resolution`,
@@ -74,6 +74,16 @@ All notable changes are documented here. The format follows
   unchanged. See [Configuration](docs/configuration.md#older-config-files).
 - Web page settings: the multi-page dialog is two check boxes (document type
   Document and Auto) instead of a list with document, auto, both and off.
+- `open_after_scan` is `true` or `false` now (config file, web page, setup,
+  `--open-after-scan`, `PUSHSCAN_OPEN_AFTER_SCAN`). `true` opens the folder (on
+  Windows with the new file selected). The `"file"` mode, which opened the scan
+  itself, is gone. Old values still work: `"off"` is `false`, `"folder"` and
+  `"file"` are `true`; a warning lists them and setup or the web page write the
+  new form. The web Settings page has a check box, a target card has Default,
+  Yes and No.
+- The commented examples in the config file show how the date and time in
+  `filename` are set, and that the example target folder is a subfolder of the
+  scan folder.
 - The example config and the docs use the trim values tested on a TR8550:
   `trim_right = 1` and `trim_bottom = 2` (mm).
 

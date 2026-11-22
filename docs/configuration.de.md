@@ -147,7 +147,7 @@ Mehr unter [Vorrang](#vorrang).
 | `--targets`    | `PUSHSCAN_TARGETS`    | -                   | run           | Mehrere Einträge auf dem Bedienfeld, jeder mit eigenem Ordner und optionaler Voreinstellung, siehe [Mehrere Ziele](#mehrere-ziele). Ersetzt `--name` für `run` |
 | `--ignore-panel` | `PUSHSCAN_IGNORE_PANEL` | aus             | run           | Ignoriert die Einstellungen vom Bedienfeld und nutzt immer die vier Optionen oben (`--format`, `--color`, `--resolution`, `--source`). Umgebungsvariable: `1`, `true` oder `yes`. Deaktiviert auch mehrseitige Scans |
 | `--multipage`  | `PUSHSCAN_MULTIPAGE`  | `document`          | run           | `document`, `auto`, `both` oder `off`, siehe [Mehrseitige Scans](#mehrseitige-scans-vom-vorlagenglas) |
-| `--open-after-scan` | `PUSHSCAN_OPEN_AFTER_SCAN` | `off`       | run, start    | `off`, `folder` oder `file`. Nur für Desktop-PCs: nach dem Speichern eines Auftrags den Ordner (Windows: Explorer mit markierter neuer Datei) oder die Datei öffnen, einmal pro Auftrag. Unter Linux ist `DISPLAY` oder `WAYLAND_DISPLAY` nötig. Ein Fehler schreibt nur eine Warnung. Docker hat keinen Desktop, dort `off` lassen |
+| `--open-after-scan` | `PUSHSCAN_OPEN_AFTER_SCAN` | `false`     | run, start    | `true` oder `false` (auch `yes`/`no`, `1`/`0`, `on`/`off`; die alten `folder` und `file` zählen als `true`). Nur für Desktop-PCs: nach dem Speichern eines Auftrags den Ordner öffnen (Windows: Explorer mit markierter neuer Datei), einmal pro Auftrag. Unter Linux ist `DISPLAY` oder `WAYLAND_DISPLAY` nötig. Ein Fehler schreibt nur eine Warnung. Docker hat keinen Desktop, dort `false` lassen |
 | `--filename`   | `PUSHSCAN_FILENAME`   | `scan_{now:%Y%m%d_%H%M%S}` | run    | Vorlage für den Dateinamen eines Scans, ohne Endung, siehe [Dateinamen](#dateinamen) |
 | `--heartbeat-file` | `PUSHSCAN_HEARTBEAT_FILE` | -          | run, health   | Datei, die `run` nach jedem erfolgreichen Kontakt mit dem Drucker berührt und die `health` prüft. Das Docker-Image setzt sie, siehe [Docker](docker.de.md#healthcheck) |
 | `--max-age`    | -                  | `120`               | health        | Sekunden, nach denen `health` die Heartbeat-Datei für zu alt hält |
@@ -190,7 +190,7 @@ Meldung abgelehnt, die Datei und Schlüssel nennt, damit Tippfehler auffallen.
 | `[defaults]` `format` | `pdf`, `jpeg` | `--format` |
 | `[defaults]` `source` | `auto`, `platen`, `adf` | `--source` |
 | `[defaults]` `size` | `a4`, `letter`, `legal`, `10x15`, `13x18` | Scanbereich ohne Daten vom Bedienfeld |
-| `[defaults]` `open_after_scan` | `off`, `folder`, `file` | `--open-after-scan` |
+| `[defaults]` `open_after_scan` | `true`, `false` (die alten `"off"`, `"folder"`, `"file"` werden weiter gelesen) | `--open-after-scan` |
 | `[defaults]` `filename` | Vorlage, siehe [Dateinamen](#dateinamen) | `--filename` |
 | `[defaults.document]` `multipage` | `true` / `false`, eingebaut `true` | `--multipage` (Dokumenttyp *Dokument* am Bedienfeld) |
 | `[defaults.auto]` `multipage` | `true` / `false`, eingebaut `false` | `--multipage` (Dokumenttyp *Automatisch* am Bedienfeld) |
@@ -204,7 +204,7 @@ Meldung abgelehnt, die Datei und Schlüssel nennt, damit Tippfehler auffallen.
 | `[[target]]` `name` | erforderlich, max. 31 Zeichen, eindeutig | `NAME` |
 | `[[target]]` `output` | Ordner; `"."` ist der Ausgabeordner selbst; Standard `<output>/<name>` | `NAME=DIR` |
 | `[[target]]` `filename` | Vorlage, siehe [Dateinamen](#dateinamen); gilt vor `[defaults]` für dieses Ziel | - |
-| `[[target]]` `open_after_scan` | `off`, `folder`, `file`; gilt vor `[defaults]` für dieses Ziel, etwa `off` für einen Archivordner | - |
+| `[[target]]` `open_after_scan` | `true`, `false`; gilt vor `[defaults]` für dieses Ziel, etwa `false` für einen Archivordner | - |
 | `[target.document]` `multipage` | `true` / `false` | `mp:` für den Dokumenttyp *Dokument* |
 | `[target.auto]` `resolution`, `format`, `size` | wie oben | die `@preset`-Optionen |
 | `[target.auto]` `multipage` | `true` / `false` | `mp:` für den Dokumenttyp *Automatisch* |
