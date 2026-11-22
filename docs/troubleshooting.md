@@ -21,8 +21,9 @@ GitHub ask for the details. To report a new printer model, see
 - Protocol details and open questions are in [PROTOCOL.md](PROTOCOL.md).
 - Panel names: 31 characters, about 25 visible, ASCII letters, digits, space,
   `-`, `_`, `@` only. See [Panel names](configuration.md#panel-names).
-- The tool contacts only the printer. Discovery is not implemented, so you must
-  give the printer address.
+- The tool contacts only the printer. Only `pushscan2folder setup` searches the
+  network (mDNS), and only to suggest an address. For `run` you must give the
+  printer address.
 
 ## Known behaviour
 
@@ -46,6 +47,22 @@ GitHub ask for the details. To report a new printer model, see
 
 ## Common problems
 
+- Setup finds no printer: the search uses mDNS (Bonjour), which a firewall,
+  a VPN, a guest network or a router setting can block, and it works only in
+  the same network. Enter the IP address, it is shown in the network settings
+  on the printer panel. On Windows, the firewall may ask once to allow the
+  program, see [Finding the printer](windows.md#finding-the-printer).
+- The container shows `unhealthy` in `docker ps`: the printer was not
+  reachable for 2 minutes, for example because it is switched off or the
+  network is down. See [Healthcheck](docker.md#healthcheck).
+- A foreground `run` refuses to start because the background instance runs:
+  both would register the same panel names. Run `pushscan2folder stop` first,
+  see [Run in the background](windows.md#run-in-the-background).
+- The log shows an address like `172.x.x.1` for web logins in Docker: see
+  [Client address in the log](docker.md#client-address-in-the-log).
+- The scan has an unexpected file name: see [File names](configuration.md#file-names).
+  A target's own `filename` wins over `[defaults]`, and `PUSHSCAN_FILENAME` or
+  `--filename` win over the config file.
 - The name does not show up on the panel: names with characters other than
   letters, digits, space, `-`, `_` and `@` are rejected, see
   [Panel names](configuration.md#panel-names). After a printer restart the

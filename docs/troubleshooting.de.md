@@ -25,8 +25,9 @@ melden, siehe [CONTRIBUTING.md](../CONTRIBUTING.md) (auf Englisch).
 - Namen auf dem Bedienfeld: 31 Zeichen, etwa 25 sichtbar, nur ASCII-Buchstaben,
   Ziffern, Leerzeichen, `-`, `_`, `@`. Siehe
   [Namen auf dem Bedienfeld](configuration.de.md#namen-auf-dem-bedienfeld).
-- Das Tool kontaktiert nur den Drucker. Eine automatische Suche ist nicht
-  implementiert, daher musst du die Adresse des Druckers angeben.
+- Das Tool kontaktiert nur den Drucker. Nur `pushscan2folder setup` sucht im
+  Netz (mDNS), und das nur, um eine Adresse vorzuschlagen. Für `run` musst du
+  die Adresse des Druckers angeben.
 
 ## Bekanntes Verhalten
 
@@ -53,6 +54,25 @@ melden, siehe [CONTRIBUTING.md](../CONTRIBUTING.md) (auf Englisch).
 
 ## Häufige Probleme
 
+- Das Setup findet keinen Drucker: Die Suche nutzt mDNS (Bonjour), das eine
+  Firewall, ein VPN, ein Gastnetz oder eine Router-Einstellung blockieren kann,
+  und sie funktioniert nur im selben Netz. Gib die IP-Adresse ein, sie steht in
+  den Netzwerkeinstellungen am Bedienfeld des Druckers. Unter Windows fragt die
+  Firewall eventuell einmal, ob das Programm erlaubt sein soll, siehe
+  [Den Drucker finden](windows.de.md#den-drucker-finden).
+- Der Container zeigt in `docker ps` `unhealthy`: Der Drucker war 2 Minuten lang
+  nicht erreichbar, zum Beispiel weil er ausgeschaltet ist oder das Netzwerk
+  ausgefallen ist. Siehe [Healthcheck](docker.de.md#healthcheck).
+- Ein `run` im Vordergrund startet nicht, weil die Hintergrundinstanz läuft:
+  Beide würden dieselben Namen am Bedienfeld anmelden. Führe zuerst
+  `pushscan2folder stop` aus, siehe
+  [Im Hintergrund laufen](windows.de.md#im-hintergrund-laufen).
+- Das Log zeigt in Docker für Web-Anmeldungen eine Adresse wie `172.x.x.1`:
+  siehe [Client-Adresse im Log](docker.de.md#client-adresse-im-log).
+- Der Scan hat einen unerwarteten Dateinamen: siehe
+  [Dateinamen](configuration.de.md#dateinamen). Das `filename` eines Ziels hat
+  Vorrang vor `[defaults]`, und `PUSHSCAN_FILENAME` oder `--filename` haben
+  Vorrang vor der Konfigurationsdatei.
 - Der Name erscheint nicht auf dem Bedienfeld: Namen mit anderen Zeichen als
   Buchstaben, Ziffern, Leerzeichen, `-`, `_` und `@` werden abgelehnt, siehe
   [Namen auf dem Bedienfeld](configuration.de.md#namen-auf-dem-bedienfeld).

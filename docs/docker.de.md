@@ -113,6 +113,39 @@ Zum Scannen braucht der Container keine Port-Weiterleitung, er verbindet sich
 nur ausgehend mit dem Drucker auf TCP 80. Port 8080 ist nur für die
 [Weboberfläche](web.de.md). Dockers Standard-Bridge-Netzwerk funktioniert.
 
+## Healthcheck
+
+Das Image setzt `PUSHSCAN_HEARTBEAT_FILE=/tmp/pushscan2folder.alive` und hat
+einen `HEALTHCHECK`, der alle 30 Sekunden `pushscan2folder health` ausführt, mit
+60 Sekunden Startzeit und 3 Wiederholungen. Der laufende Dienst berührt die
+Heartbeat-Datei nach jedem erfolgreichen Kontakt mit dem Drucker. Das geschieht
+in jedem Abfragezyklus, auch während ein Scan läuft. `health` endet mit 0, wenn
+die Datei jünger als 120 Sekunden ist, sonst mit 1, und gibt den Grund aus
+(siehe [Konfiguration](configuration.de.md#unterbefehle)).
+
+`docker ps` zeigt `healthy` oder `unhealthy`. `unhealthy` heißt, dass der
+Drucker 2 Minuten lang nicht erreichbar war, zum Beispiel weil er ausgeschaltet
+ist oder das Netzwerk ausgefallen ist. Antwortet der Drucker wieder, wird der
+Container wieder `healthy`. Docker startet einen `unhealthy`-Container nicht von
+selbst neu, und ein Neustart würde hier auch nicht helfen.
+
+## Client-Adresse im Log
+
+Hinter Docker kann die Logzeile "web login from 172.x.x.1" das Gateway des
+Docker-Netzwerks zeigen statt der Adresse des echten Clients. Das passiert, wenn
+Dockers Userland-Proxy (`docker-proxy`) die Verbindung weiterleitet, zum
+Beispiel bei Rootless Docker, bei einer Verbindung über IPv6 auf eine
+IPv4-Portzuordnung oder bei manchen NAS-Systemen. Das Programm schreibt diese
+Adresse nur ins Log. Die Anmeldesperre gilt global und nicht pro Adresse (siehe
+[Sicherheitsmodell](web.de.md#sicherheitsmodell)), es geht also nichts kaputt.
+
+Um die echte Adresse zu sehen, gibt es diese Möglichkeiten:
+
+- Unter Linux `network_mode: host`. Entferne dann die `ports:`-Zuordnung, denn
+  die Weboberfläche lauscht direkt auf dem Host.
+- Über IPv4 verbinden.
+- Einen Reverse-Proxy vor den Container setzen.
+
 ## Paperless-ngx
 
 Binde den Consume-Ordner von paperless innerhalb des Ausgabeverzeichnisses ein

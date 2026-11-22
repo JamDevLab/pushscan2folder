@@ -32,7 +32,7 @@ Weil der Installer nicht signiert ist, zeigt Windows SmartScreen beim Start even
 
 "pushscan2folder" im Startmenü starten (oder das Desktop-Symbol, oder `pushscan2folder.exe` im Programmordner). Es öffnet sich ein Konsolenfenster. Gibt es noch keine Konfigurationsdatei, begrüßt dich das Programm und stellt ein paar Fragen (das ist der Befehl `setup`):
 
-- IP-Adresse oder Hostname des Druckers (wird sofort geprüft; du kannst neu eingeben oder trotzdem weitermachen),
+- der Drucker: Das Setup sucht zuerst im Netz nach eSCL-Scannern und listet die, die antworten, mit einer Nummer auf (siehe [Den Drucker finden](#den-drucker-finden)); du wählst eine Nummer oder gibst die IP-Adresse oder den Hostnamen ein. Die Adresse wird sofort geprüft; du kannst neu eingeben oder trotzdem weitermachen,
 - der Name, der am Druckerdisplay erscheint (Standard `BENUTZER  PCNAME`),
 - der Ordner für Scans (Standard `Dokumente\Scans`; die Scans landen direkt in diesem Ordner, nicht in einem Unterordner),
 - ob die Weboberfläche an sein soll (Standard nein; wenn ja: Port, Bind-Adresse und ein Passwort, zweimal eingegeben),
@@ -45,7 +45,7 @@ Beim nächsten Start per Doppelklick oder aus dem Startmenü findet das Programm
 
 - `1` diese Einstellungen verwenden (Standard),
 - `2` sie ändern (die Setup-Fragen, deine Namen und Ordner bleiben erhalten),
-- `3` neu anfangen mit einer neuen Konfiguration. Die alte Datei bleibt als `config.toml.bak` erhalten.
+- `3` neu anfangen mit einer neuen Konfiguration. Die alte Datei bleibt als `config.toml.bak` erhalten. Fängst du noch einmal neu an, bleibt die ältere Kopie bestehen und die nächste heißt `config.toml.2.bak`, danach `config.toml.3.bak` und so weiter.
 
 Ist die Konfigurationsdatei defekt, sagt das Programm das und bietet an, neu anzufangen, ebenfalls mit der `.bak`-Kopie. Läuft das Programm schon im Hintergrund, sagt es das und verweist dich auf `pushscan2folder stop`, bevor du die Einstellungen ändern kannst.
 
@@ -89,7 +89,19 @@ Ein per Doppelklick gestartetes Programm lebt in seinem Konsolenfenster, und mit
 
 Die Instanz hält eine Lock-Datei, eine PID-Datei und die Stopp-Anforderungsdatei in `%LOCALAPPDATA%\pushscan2folder\`. Das Lock hält der laufende Prozess, und Windows gibt es frei, wenn er endet. Eine übrig gebliebene Datei nach einem Absturz oder Neustart blockiert den nächsten `start` deshalb nie.
 
-Ein `run` im Vordergrund gehört nicht dazu. Es nutzt das Lock nicht, `stop` beendet es nicht, und `start` bemerkt es nicht. Beides nicht für denselben Namen gleichzeitig starten.
+Ein `run` im Vordergrund nutzt das Lock nicht, `stop` beendet es nicht, und `start` bemerkt es nicht. Beide würden dieselben Namen am Drucker anmelden, deshalb startet ein `run` im Vordergrund nicht, solange die Hintergrundinstanz läuft. Es sagt das und verweist auf `pushscan2folder stop`.
+
+## Den Drucker finden
+
+Ist noch kein Drucker eingetragen, sucht `pushscan2folder setup` (und der erste Doppelklick) im lokalen Netz mit mDNS (Bonjour, Dienst `_uscan._tcp`) nach eSCL-Scannern. Das dauert etwa 2 Sekunden. Jeder Scanner, der antwortet, wird mit Adresse, Modell und einer Nummer aufgelistet:
+
+```
+Searching the network for scanners (eSCL, a few seconds) ...
+  1  192.168.1.50  Canon TR8500 series
+Number of your printer, or its IP address [1]:
+```
+
+Gib die Nummer ein, oder eine IP-Adresse, wenn dein Drucker nicht aufgeführt ist. Antwortet niemand, fragt das Setup wie bisher nach der IP-Adresse. Ein Firewall-Filter für Multicast oder ein VPN kann der Grund sein. Die IP-Adresse steht in den Netzwerkeinstellungen am Bedienfeld des Druckers. Die Windows-Firewall fragt für diese Suche eventuell einmal, ob das Programm erlaubt sein soll.
 
 ## Ordner nach dem Scan öffnen
 

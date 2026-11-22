@@ -23,6 +23,11 @@ format = "pdf"             # pdf | jpeg
 source = "auto"            # auto | platen | adf
 size = "a4"                # a4 | letter | legal | 10x15 | 13x18
 open_after_scan = "off"    # off | folder | file (desktop PC only: open the result)
+# File name of a scan without extension (--filename / PUSHSCAN_FILENAME).
+# Fields: {name} (panel name), {date} (2026-11-22), {time} (183005) and
+# {now:FORMAT} with strftime codes. Existing files are never overwritten (-1, -2 ...).
+# A [[target]] can set its own filename, it wins over this one.
+filename = "scan_{now:%Y%m%d_%H%M%S}"   # e.g. scan_20261122_183005.pdf
 # Trim: cut off a border at the glass edge by scanning a smaller area
 # (platen only, not the ADF). In mm, 0 to 50; 0 means no trim.
 trim_left = 0              # mm
@@ -52,6 +57,7 @@ name = "Scans"
 [[target]]
 name = "Paperless"
 document_multipage = true
+# filename = "{name}_{date}_{time}"   # this target only, e.g. Paperless_2026-11-22_183005.pdf
 
 [target.auto]
 resolution = 300

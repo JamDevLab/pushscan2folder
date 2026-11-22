@@ -97,9 +97,13 @@ error, so a typo cannot turn a protection off.
   service switches to the new list before its next poll cycle (shown as
   "pending" until then). The per-target Auto scan options show the current
   default, for example "Default (300 dpi)", which comes from the Settings page.
+  The editor has no field for the file name template of a target. A `filename`
+  that a target has in the config file is kept when you save.
 - Settings (`/settings`) edits `resolution`, `color`, `format`, `source`,
-  `size`, `open_after_scan` and the four `trim_*` values of `[defaults]`, and `multipage`,
-  `ignore_panel` and `interval`, each with a short explanation. Values are
+  `size`, `open_after_scan`, `filename` (shown as "File name", see
+  [File names](configuration.md#file-names)) and the four `trim_*` values of
+  `[defaults]`, and `multipage`, `ignore_panel` and `interval`, each with a short
+  explanation. Values are
   validated with the same rules as the config file; an empty field removes the
   key. `printer` and the base `output` folder are shown read-only. If an
   environment variable or command line option overrides a value (for example
@@ -187,5 +191,7 @@ The provided `docker-compose.yml` is prepared for the web page
 web lines and the port to turn it on. Mount a
 directory for the config, not a single file: a single-file bind mount cannot be
 replaced atomically, so the program would fall back to rewriting it in place. The directory must be writable for the user set in `user:`. Do not set
-`PUSHSCAN_TARGETS` when you edit the targets on the web page. More in
+`PUSHSCAN_TARGETS` when you edit the targets on the web page. Behind Docker, the
+log can show the gateway of the Docker network as the client address, see
+[Client address in the log](docker.md#client-address-in-the-log). More in
 [Docker](docker.md).

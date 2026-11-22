@@ -15,6 +15,7 @@ Zurück zur [README](../README.de.md).
 - [Mehrere Ziele](#mehrere-ziele)
 - [Namen auf dem Bedienfeld](#namen-auf-dem-bedienfeld)
 - [Voreinstellungen pro Ziel](#voreinstellungen-pro-ziel)
+- [Dateinamen](#dateinamen)
 
 ## Unterbefehle
 
@@ -45,6 +46,15 @@ Die weiteren Unterbefehle:
 PYTHONPATH=src python3 -m pushscan2folder setup
 ```
 
+Ist noch kein Drucker eingetragen, sucht das Setup zuerst im lokalen Netz mit
+mDNS (Bonjour, Dienst `_uscan._tcp`) nach eSCL-Scannern. Die Suche dauert etwa
+2 Sekunden. Sie listet Adresse und Modell jedes gefundenen Scanners mit einer
+Nummer auf, und du gibst diese Nummer oder eine IP-Adresse ein. Antwortet
+niemand, fragt das Setup wie bisher nach der IP-Adresse. Ein Firewall-Filter für
+Multicast oder ein VPN kann der Grund sein. Die IP-Adresse steht in den
+Netzwerkeinstellungen am Bedienfeld des Druckers. Die Suche braucht nur die
+Python-Standardbibliothek.
+
 Das Passwort der Weboberfläche kommt nie in `config.toml`: Das Setup legt es in
 `web_password.txt` neben der Konfigurationsdatei ab (Modus 0600, wo möglich) und
 trägt die Datei in `[web] password_file` ein. Hat die Datei schon
@@ -70,7 +80,9 @@ sonst `$XDG_STATE_HOME/pushscan2folder/pushscan2folder.log`, Standard
 `~/.local/state/...`), sofern nicht `--log-file` angegeben ist. `stop` schreibt eine
 Stopp-Anforderungsdatei, die die Abfrageschleife einmal pro Sekunde prüft, und
 bricht den Prozess nur ab, wenn er nach 30 Sekunden nicht beendet ist. `status`
-endet mit 0, wenn die Instanz läuft, sonst mit 1.
+endet mit 0, wenn die Instanz läuft, sonst mit 1. Ein `run` im Vordergrund
+startet nicht, solange die Hintergrundinstanz läuft, weil beide dieselben Namen
+anmelden würden. Es verweist auf `pushscan2folder stop`.
 
 ```sh
 # Beendet die Instanz, entfernt den Windows-Autostart-Eintrag und fragt dann
@@ -81,6 +93,16 @@ PYTHONPATH=src python3 -m pushscan2folder uninstall --yes [--purge]
 ```
 
 Scans werden nie gelöscht, und ein Ordner, der einen Scan-Ordner enthält, bleibt erhalten.
+
+`health` prüft, ob der laufende Dienst kürzlich mit dem Drucker gesprochen hat.
+Der Docker-Healthcheck nutzt es (siehe [Docker](docker.de.md#healthcheck)):
+
+```sh
+# Exit-Code 0, wenn die Heartbeat-Datei jünger als --max-age Sekunden ist
+# (Standard 120), sonst 1. Der Grund wird ausgegeben.
+PYTHONPATH=src python3 -m pushscan2folder health \
+  --heartbeat-file /tmp/pushscan2folder.alive [--max-age 120]
+```
 
 `probe` und `scan` dienen der Fehlersuche:
 
@@ -117,6 +139,9 @@ Mehr unter [Vorrang](#vorrang).
 | `--ignore-panel` | `PUSHSCAN_IGNORE_PANEL` | aus             | run           | Ignoriert die Einstellungen vom Bedienfeld und nutzt immer die vier Optionen oben (`--format`, `--color`, `--resolution`, `--source`). Umgebungsvariable: `1`, `true` oder `yes`. Deaktiviert auch mehrseitige Scans |
 | `--multipage`  | `PUSHSCAN_MULTIPAGE`  | `document`          | run           | `document`, `auto`, `both` oder `off`, siehe [Mehrseitige Scans](#mehrseitige-scans-vom-vorlagenglas) |
 | `--open-after-scan` | `PUSHSCAN_OPEN_AFTER_SCAN` | `off`       | run, start    | `off`, `folder` oder `file`. Nur für Desktop-PCs: nach dem Speichern eines Auftrags den Ordner (Windows: Explorer mit markierter neuer Datei) oder die Datei öffnen, einmal pro Auftrag. Unter Linux ist `DISPLAY` oder `WAYLAND_DISPLAY` nötig. Ein Fehler schreibt nur eine Warnung. Docker hat keinen Desktop, dort `off` lassen |
+| `--filename`   | `PUSHSCAN_FILENAME`   | `scan_{now:%Y%m%d_%H%M%S}` | run    | Vorlage für den Dateinamen eines Scans, ohne Endung, siehe [Dateinamen](#dateinamen) |
+| `--heartbeat-file` | `PUSHSCAN_HEARTBEAT_FILE` | -          | run, health   | Datei, die `run` nach jedem erfolgreichen Kontakt mit dem Drucker berührt und die `health` prüft. Das Docker-Image setzt sie, siehe [Docker](docker.de.md#healthcheck) |
+| `--max-age`    | -                  | `120`               | health        | Sekunden, nach denen `health` die Heartbeat-Datei für zu alt hält |
 | `--no-pause`   | `PUSHSCAN_NO_PAUSE`   | aus                 | alle          | Windows: nicht auf Enter warten, bevor sich ein nur für dieses Programm geöffnetes Konsolenfenster schließt. Der Autostart-Eintrag setzt es |
 | `--web`        | `PUSHSCAN_WEB`        | aus                 | run           | Stellt die [Weboberfläche](web.de.md) bereit. Umgebungsvariable: `1`, `true` oder `yes` |
 | `--web-port`   | `PUSHSCAN_WEB_PORT`   | `8080`              | run           | Port der Weboberfläche |
@@ -160,6 +185,7 @@ Meldung abgelehnt, die Datei und Schlüssel nennt, damit Tippfehler auffallen.
 | `[defaults]` `source` | `auto`, `platen`, `adf` | `--source` |
 | `[defaults]` `size` | `a4`, `letter`, `legal`, `10x15`, `13x18` | Scanbereich ohne Daten vom Bedienfeld |
 | `[defaults]` `open_after_scan` | `off`, `folder`, `file` | `--open-after-scan` |
+| `[defaults]` `filename` | Vorlage, siehe [Dateinamen](#dateinamen) | `--filename` |
 | `[defaults]` `trim_left`, `trim_top`, `trim_right`, `trim_bottom` | Zahl, mm, 0 bis 50 | `--trim` |
 | `[web]` `enabled` | `true` / `false` | `--web` |
 | `[web]` `bind` | Adresse, Standard `0.0.0.0` | `--web-bind` |
@@ -167,6 +193,7 @@ Meldung abgelehnt, die Datei und Schlüssel nennt, damit Tippfehler auffallen.
 | `[web]` `password_file` | Datei mit dem Passwort; relativ zur Konfigurationsdatei. Das Passwort selbst ist nie ein Schlüssel | `PUSHSCAN_WEB_PASSWORD_FILE` |
 | `[[target]]` `name` | erforderlich, max. 31 Zeichen, eindeutig | `NAME` |
 | `[[target]]` `output` | Ordner; `"."` ist der Ausgabeordner selbst; Standard `<output>/<name>` | `NAME=DIR` |
+| `[[target]]` `filename` | Vorlage, siehe [Dateinamen](#dateinamen); gilt vor `[defaults]` für dieses Ziel | - |
 | `[[target]]` `document_multipage` | `true` / `false` | `mp:` für den Dokumenttyp *Dokument* |
 | `[target.auto]` `resolution`, `format`, `size` | wie oben | die `@preset`-Optionen |
 | `[target.auto]` `multipage` | `true` / `false` | `mp:` für den Dokumenttyp *Automatisch* |
@@ -349,3 +376,54 @@ Ausgabeordners ein, in Docker zum Beispiel mit
 auf der [Weboberfläche](web.de.md) wählen. Ein absoluter Pfad wie `Paperless=/consume`
 funktioniert ebenfalls, aber nur über die Kommandozeile oder die
 Konfigurationsdatei.
+
+## Dateinamen
+
+Die Vorlage für den Namen einer Scan-Datei legst du mit `filename` in
+`[defaults]`, mit `--filename` oder mit `PUSHSCAN_FILENAME` fest. Ein
+`filename` in einem `[[target]]` gilt nur für dieses Ziel und hat Vorrang vor
+den anderen Einstellungen. Sonst gilt der übliche Vorrang (siehe
+[Vorrang](#vorrang)). Auf der [Weboberfläche](web.de.md#seiten) hat die
+Einstellungsseite ein Feld "File name".
+
+Der Standard ist `scan_{now:%Y%m%d_%H%M%S}`. Er ergibt dieselben Namen wie
+bisher, zum Beispiel `scan_20261122_183005.pdf`. Die Vorlage hat keine Endung,
+denn die Endung kommt vom Format (`.pdf` oder `.jpg`).
+
+| Feld | Bedeutung | Beispiel |
+|------|-----------|----------|
+| `{name}` | der Name vom Bedienfeld, als Dateiname tauglich gemacht | `My PC` ergibt `My_PC` |
+| `{date}` | das Datum | `2026-11-22` |
+| `{time}` | die Uhrzeit | `183005` |
+| `{now:FORMAT}` | Datum und Uhrzeit mit Python-`strftime`-Codes | `{now:%Y%m%d_%H%M%S}` ergibt `20261122_183005` |
+
+```toml
+[defaults]
+filename = "{name}_{date}_{time}"     # My_PC_2026-11-22_183005.pdf
+
+[[target]]
+name = "Paperless"
+filename = "scan_{now:%Y%m%d_%H%M%S}"   # dieses Ziel behält den Standardstil
+```
+
+Weitere Felder gibt es nicht. Attributzugriff wie `{now.year}` und
+Positionsfelder wie `{}` werden abgelehnt, ebenso eine Vorlage, die einen
+leeren Namen ergibt. Das Programm prüft die Vorlage beim Start, ein Fehler
+stoppt es also mit einer Meldung und nicht mitten in einem Scan.
+
+Das Ergebnis wird für das Dateisystem bereinigt:
+
+- Zeichen, die Windows in Dateinamen nicht erlaubt (`<>:"/\|?*` und
+  Steuerzeichen), werden auf jedem System zu `_`. Leerzeichen und Punkte am
+  Anfang und am Ende fallen weg.
+- Der Name wird auf 120 Zeichen gekürzt.
+- Ein Gerätename wie `CON` bekommt ein `_` davor, wie bei den
+  [Ordnernamen](windows.de.md#wo-liegt-was) unter Windows.
+- Ein Auftrag mit mehreren JPEG-Dateien bekommt `_01`, `_02` und so weiter nach
+  dem Namen.
+- Eine vorhandene Datei wird nie überschrieben. Stattdessen wird `-1`, `-2` und
+  so weiter an den Namen gehängt, zum Beispiel `scan_20261122_183005-1.pdf`.
+
+Der Ziel-Editor auf der Weboberfläche hat kein Feld für die Vorlage eines
+Ziels. Beim Speichern der Ziele auf der Weboberfläche bleibt das `filename`
+erhalten, das ein Ziel in der Datei hat.

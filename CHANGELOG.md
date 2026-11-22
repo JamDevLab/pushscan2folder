@@ -5,6 +5,45 @@ All notable changes are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- File name template: `[defaults] filename`, `filename` per `[[target]]` (the
+  target's own wins), `--filename TEMPLATE`, `PUSHSCAN_FILENAME` and a "File
+  name" field on the web Settings page. The default `scan_{now:%Y%m%d_%H%M%S}`
+  gives the same names as before. Fields: `{name}`, `{date}`, `{time}` and
+  `{now:FORMAT}` with `strftime` codes, for example
+  `filename = "{name}_{date}_{time}"`. Characters not allowed in Windows file
+  names become `_`, the name is cut to 120 characters and device names such as
+  `CON` get a `_` in front. An existing file is never overwritten. The web
+  target editor has no field for the template of a target and keeps the one
+  from the file. See [Configuration](docs/configuration.md#file-names).
+- Docker healthcheck: the image sets `PUSHSCAN_HEARTBEAT_FILE` and runs
+  `pushscan2folder health` every 30 seconds. `run` touches the heartbeat file
+  (`--heartbeat-file`, `PUSHSCAN_HEARTBEAT_FILE`) after every successful
+  contact with the printer. `health [--heartbeat-file PATH] [--max-age SECONDS]`
+  exits with 0 if the file is younger than `--max-age` (default 120 s), else
+  with 1 and prints why. `docker ps` shows `healthy` or `unhealthy`. See
+  [Docker](docs/docker.md#healthcheck).
+- Printer search in setup: if no printer is configured yet, `pushscan2folder
+  setup` (and the first double click on Windows) looks for eSCL scanners in the
+  local network with mDNS (Bonjour, `_uscan._tcp`, about 2 seconds, standard
+  library only) and lists them to pick by number. If nothing answers, it asks
+  for the IP address as before.
+- Dependabot for GitHub Actions and the Docker base image (monthly).
+
+### Fixed
+
+- Setup's question "Start automatically when you log in to Windows?" removed
+  the autostart entry instead of creating it (since 0.2.0).
+- `--install-autostart` with run options but without a subcommand failed.
+- A foreground `run` now refuses to start while the background instance runs,
+  because both would register the same panel names, and points to
+  `pushscan2folder stop`.
+- Setup checks the bind address of the web page (an IP address or `localhost`,
+  no port).
+- A second "start over" in setup keeps the older backup (`config.toml.2.bak` and
+  so on) instead of overwriting `config.toml.bak`.
+
 ## [0.2.0] - 2026-11-22
 
 Windows support: an installer, background mode, a setup dialog and an

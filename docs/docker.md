@@ -110,6 +110,39 @@ Scanning needs no port mapping; the container only connects out to the
 printer on TCP 80. Port 8080 is only for the [web page](web.md). Docker's
 default bridge networking works.
 
+## Healthcheck
+
+The image sets `PUSHSCAN_HEARTBEAT_FILE=/tmp/pushscan2folder.alive` and has a
+`HEALTHCHECK` that runs `pushscan2folder health` every 30 seconds, with a start
+period of 60 seconds and 3 retries. The running service touches the heartbeat
+file after every successful contact with the printer. That happens in each
+poll cycle, also while a scan runs. `health` exits with 0 if the file is
+younger than 120 seconds and with 1 if not, and it prints the reason (see
+[Configuration](configuration.md#subcommands)).
+
+`docker ps` shows `healthy` or `unhealthy`. `unhealthy` means the printer was
+not reachable for 2 minutes, for example because it is switched off or the
+network is down. It turns `healthy` again when the printer answers. Docker does
+not restart an unhealthy container by itself, and a restart would not help in
+this case.
+
+## Client address in the log
+
+Behind Docker, the log line "web login from 172.x.x.1" can show the gateway of
+the Docker network instead of the address of the real client. This happens when
+Docker's userland proxy (`docker-proxy`) forwards the connection, for example
+with rootless Docker, with a connection over IPv6 to an IPv4 port mapping, or
+on some NAS systems. The program only logs this address. The login lockout is
+global and not per address (see [Security model](web.md#security-model)), so
+nothing breaks.
+
+To see the real address, use one of these:
+
+- On Linux, `network_mode: host`. Remove the `ports:` mapping then, because the
+  web page listens on the host directly.
+- Connect over IPv4.
+- Put a reverse proxy in front of the container.
+
 ## Paperless-ngx
 
 Mount the paperless consume folder inside the output directory and use a

@@ -104,9 +104,14 @@ Fehler, damit ein Tippfehler keinen Schutz ausschaltet.
   nächsten Abfragezyklus zur neuen Liste (bis dahin als "pending" angezeigt).
   Die Optionen für *Automatisch* je Ziel zeigen den aktuellen Standardwert,
   etwa "Default (300 dpi)"; er stammt von der Einstellungsseite.
+  Der Editor hat kein Feld für die Dateinamen-Vorlage eines Ziels. Ein
+  `filename`, das ein Ziel in der Konfigurationsdatei hat, bleibt beim Speichern
+  erhalten.
 - Einstellungen (`/settings`) bearbeitet `resolution`, `color`, `format`,
-  `source`, `size`, `open_after_scan` und die vier `trim_*`-Werte aus `[defaults]` sowie
-  `multipage`, `ignore_panel` und `interval`, jeweils mit kurzer Erklärung. Die
+  `source`, `size`, `open_after_scan`, `filename` (angezeigt als "File name",
+  siehe [Dateinamen](configuration.de.md#dateinamen)) und die vier
+  `trim_*`-Werte aus `[defaults]` sowie `multipage`, `ignore_panel` und
+  `interval`, jeweils mit kurzer Erklärung. Die
   Werte werden mit denselben Regeln wie die Konfigurationsdatei geprüft; ein
   leeres Feld entfernt den Schlüssel. `printer` und der Basis-Ausgabeordner
   `output` werden nur angezeigt. Überschreibt eine Umgebungsvariable oder
@@ -203,4 +208,7 @@ Konfiguration ein Verzeichnis ein, keine einzelne Datei: Eine einzeln
 eingebundene Datei lässt sich nicht atomar ersetzen, dann schreibt das Programm
 sie direkt neu. Das Verzeichnis muss für den Benutzer
 aus `user:` beschreibbar sein. Setze `PUSHSCAN_TARGETS` nicht, wenn du die
-Ziele auf der Weboberfläche bearbeitest. Mehr unter [Docker](docker.de.md).
+Ziele auf der Weboberfläche bearbeitest. Hinter Docker kann das Log das Gateway
+des Docker-Netzwerks als Client-Adresse zeigen, siehe
+[Client-Adresse im Log](docker.de.md#client-adresse-im-log). Mehr unter
+[Docker](docker.de.md).

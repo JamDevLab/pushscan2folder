@@ -15,6 +15,7 @@ Back to the [README](../README.md).
 - [Multiple targets](#multiple-targets)
 - [Panel names](#panel-names)
 - [Presets per target](#presets-per-target)
+- [File names](#file-names)
 
 ## Subcommands
 
@@ -44,6 +45,14 @@ The other subcommands:
 PYTHONPATH=src python3 -m pushscan2folder setup
 ```
 
+If no printer is configured yet, setup first searches the local network for
+eSCL scanners with mDNS (Bonjour, service `_uscan._tcp`). The search takes
+about 2 seconds. It lists the address and model of each scanner it finds with a
+number, and you type that number or an IP address. If nothing answers, setup
+asks for the IP address as before. A firewall that blocks multicast or a VPN
+can be the reason. The IP address is shown in the network settings on the
+printer panel. The search needs only the Python standard library.
+
 The password of the web page is never written to `config.toml`: setup stores it
 in `web_password.txt` next to the config file (mode 0600 where supported) and
 names that file in `[web] password_file`. If the file already has `[[target]]`
@@ -69,7 +78,9 @@ is already running. The log goes to the state folder
 `~/.local/state/...`, elsewhere) unless `--log-file` is given. `stop` writes a
 stop request file that the poll loop checks once per second and terminates the
 process only if it has not ended after 30 seconds. `status` exits with 0 if the
-instance runs and 1 if not.
+instance runs and 1 if not. A foreground `run` refuses to start while the
+background instance runs, because both would register the same names. It
+points to `pushscan2folder stop`.
 
 ```sh
 # Stop the instance, remove the Windows autostart entry, then ask (default no)
@@ -80,6 +91,16 @@ PYTHONPATH=src python3 -m pushscan2folder uninstall --yes [--purge]
 ```
 
 Scans are never deleted, and a folder that contains a scan folder is kept.
+
+`health` checks whether the running service has talked to the printer
+recently. It is used by the Docker healthcheck (see [Docker](docker.md#healthcheck)):
+
+```sh
+# Exit code 0 if the heartbeat file is younger than --max-age seconds
+# (default 120), otherwise 1. It prints the reason.
+PYTHONPATH=src python3 -m pushscan2folder health \
+  --heartbeat-file /tmp/pushscan2folder.alive [--max-age 120]
+```
 
 `probe` and `scan` are for debugging:
 
@@ -116,6 +137,9 @@ environment wins over the [configuration file](#configuration-file). More in
 | `--ignore-panel` | `PUSHSCAN_IGNORE_PANEL` | off             | run           | Ignore the panel settings and always use the four options above (`--format`, `--color`, `--resolution`, `--source`). Env var: `1`, `true` or `yes`. Also disables multi-page scans |
 | `--multipage`  | `PUSHSCAN_MULTIPAGE`  | `document`          | run           | `document`, `auto`, `both` or `off`, see [Multi-page scans](#multi-page-scans-from-the-platen) |
 | `--open-after-scan` | `PUSHSCAN_OPEN_AFTER_SCAN` | `off`       | run, start    | `off`, `folder` or `file`. Desktop PC only: after a job is saved, open the folder (Windows: Explorer with the new file selected) or the file, once per job. On Linux it needs `DISPLAY` or `WAYLAND_DISPLAY`. A failure only logs a warning. Docker has no desktop, keep it `off` |
+| `--filename`   | `PUSHSCAN_FILENAME`   | `scan_{now:%Y%m%d_%H%M%S}` | run    | Template for the file name of a scan, without the extension, see [File names](#file-names) |
+| `--heartbeat-file` | `PUSHSCAN_HEARTBEAT_FILE` | -          | run, health   | File that `run` touches after every successful contact with the printer, and that `health` checks. The Docker image sets it, see [Docker](docker.md#healthcheck) |
+| `--max-age`    | -                  | `120`               | health        | Seconds after which `health` calls the heartbeat file too old |
 | `--no-pause`   | `PUSHSCAN_NO_PAUSE`   | off                 | all           | Windows: never wait for Enter before a console window opened for this program closes. The autostart entry sets it |
 | `--web`        | `PUSHSCAN_WEB`        | off                 | run           | Serve the [web page](web.md). Env var: `1`, `true` or `yes` |
 | `--web-port`   | `PUSHSCAN_WEB_PORT`   | `8080`              | run           | Port of the web page |
@@ -157,6 +181,7 @@ the file and the key, so typos are caught.
 | `[defaults]` `source` | `auto`, `platen`, `adf` | `--source` |
 | `[defaults]` `size` | `a4`, `letter`, `legal`, `10x15`, `13x18` | scan area without panel data |
 | `[defaults]` `open_after_scan` | `off`, `folder`, `file` | `--open-after-scan` |
+| `[defaults]` `filename` | template, see [File names](#file-names) | `--filename` |
 | `[defaults]` `trim_left`, `trim_top`, `trim_right`, `trim_bottom` | number, mm, 0 to 50 | `--trim` |
 | `[web]` `enabled` | `true` / `false` | `--web` |
 | `[web]` `bind` | address, default `0.0.0.0` | `--web-bind` |
@@ -164,6 +189,7 @@ the file and the key, so typos are caught.
 | `[web]` `password_file` | file holding the password; relative to the config file. The password itself is never a key | `PUSHSCAN_WEB_PASSWORD_FILE` |
 | `[[target]]` `name` | required, max 31 chars, unique | `NAME` |
 | `[[target]]` `output` | folder; `"."` is the output directory itself; default `<output>/<name>` | `NAME=DIR` |
+| `[[target]]` `filename` | template, see [File names](#file-names); wins over `[defaults]` for this target | - |
 | `[[target]]` `document_multipage` | `true` / `false` | `mp:` for document type *Document* |
 | `[target.auto]` `resolution`, `format`, `size` | as above | the `@preset` options |
 | `[target.auto]` `multipage` | `true` / `false` | `mp:` for document type *Auto scan* |
@@ -328,3 +354,52 @@ example `- /path/to/paperless/consume:/scans/Paperless` in Docker (see
 folder inside the output directory can also be chosen on the
 [web page](web.md); an absolute one like `Paperless=/consume` works too, but
 only from the command line or the config file.
+
+## File names
+
+The template for the name of a scan file is set with `filename` in
+`[defaults]`, `--filename` or `PUSHSCAN_FILENAME`. A `filename` in a
+`[[target]]` applies to that target only and wins over the other settings. The
+usual precedence applies otherwise (see [Precedence](#precedence)). On the
+[web page](web.md#pages) the Settings page has a "File name" field.
+
+The default is `scan_{now:%Y%m%d_%H%M%S}`, which gives the same names as
+before, for example `scan_20261122_183005.pdf`. The template has no extension,
+because the extension comes from the format (`.pdf` or `.jpg`).
+
+| Field | Meaning | Example |
+|-------|---------|---------|
+| `{name}` | the panel name, made safe for a file name | `My PC` gives `My_PC` |
+| `{date}` | the date | `2026-11-22` |
+| `{time}` | the time | `183005` |
+| `{now:FORMAT}` | the date and time with Python `strftime` codes | `{now:%Y%m%d_%H%M%S}` gives `20261122_183005` |
+
+```toml
+[defaults]
+filename = "{name}_{date}_{time}"     # My_PC_2026-11-22_183005.pdf
+
+[[target]]
+name = "Paperless"
+filename = "scan_{now:%Y%m%d_%H%M%S}"   # this target keeps the default style
+```
+
+No other fields exist. Attribute access such as `{now.year}` and positional
+fields such as `{}` are rejected, and so is a template that gives an empty
+name. The program checks the template at startup, so a mistake stops it with an
+error message and not in the middle of a scan.
+
+The result is made safe for the file system:
+
+- Characters that Windows does not allow in file names (`<>:"/\|?*` and
+  control characters) become `_`, on every system. Spaces and dots at the start
+  and the end are removed.
+- The name is cut to 120 characters.
+- A device name such as `CON` gets a `_` in front, as with
+  [folder names](windows.md#where-files-go) on Windows.
+- A job of several JPEG files gets `_01`, `_02` and so on after the name.
+- An existing file is never overwritten. A `-1`, `-2` and so on is added to the
+  name instead, for example `scan_20261122_183005-1.pdf`.
+
+The target editor on the web page has no field for the template of a target.
+Saving the targets on the web page keeps the `filename` that a target has in
+the file.

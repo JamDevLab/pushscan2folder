@@ -32,7 +32,7 @@ Because the installer is unsigned, Windows SmartScreen may show "Windows protect
 
 Start "pushscan2folder" from the Start menu (or the desktop icon, or `pushscan2folder.exe` in the program folder). A console window opens. When there is no config file yet, the program says hello and asks a few questions (this is the `setup` command):
 
-- the IP address or host name of the printer (it is checked right away, and you can type it again or continue anyway),
+- the printer: setup first searches the network for eSCL scanners and lists the ones that answer with a number (see [Finding the printer](#finding-the-printer)); you pick a number or type the IP address or host name. The address is checked right away, and you can type it again or continue anyway,
 - the name that appears on the printer panel (default `USER  PCNAME`),
 - the folder for scans (default `Documents\Scans`; the scans go straight into this folder, not into a subfolder),
 - whether to turn on the web page (default no; if yes: port, bind address and a password typed twice),
@@ -45,7 +45,7 @@ The next time you start it by double click or from the Start menu, the program f
 
 - `1` use these settings (default),
 - `2` change them (the setup questions, with your panel names and folders kept),
-- `3` start over with a new configuration. The old file is kept as `config.toml.bak`.
+- `3` start over with a new configuration. The old file is kept as `config.toml.bak`. If you start over again, the older copy stays and the next one is named `config.toml.2.bak`, then `config.toml.3.bak`, and so on.
 
 If the config file is broken, the program says so and offers to start over, also keeping the `.bak` copy. If the program already runs in the background, it says so and tells you to run `pushscan2folder stop` first to change the settings.
 
@@ -89,7 +89,19 @@ A program started by double click lives in its console window, and closing the w
 
 The instance keeps a lock file, a PID file and the stop request file in `%LOCALAPPDATA%\pushscan2folder\`. The lock is held by the running process and dropped by Windows when it ends, so a leftover file after a crash or reboot never blocks the next `start`.
 
-A foreground `run` is not part of this. It does not use the lock, `stop` does not stop it, and `start` does not notice it. Do not run both for the same name.
+A foreground `run` does not use the lock, `stop` does not stop it, and `start` does not notice it. Both would register the same names on the printer, so a foreground `run` refuses to start while the background instance runs. It says so and points to `pushscan2folder stop`.
+
+## Finding the printer
+
+If no printer is configured yet, `pushscan2folder setup` (and the first double click) searches the local network for eSCL scanners with mDNS (Bonjour, service `_uscan._tcp`). This takes about 2 seconds. Each scanner that answers is listed with its address and model and a number:
+
+```
+Searching the network for scanners (eSCL, a few seconds) ...
+  1  192.168.1.50  Canon TR8500 series
+Number of your printer, or its IP address [1]:
+```
+
+Type the number, or type an IP address if your printer is not listed. If nothing answers, setup asks for the IP address as before. A firewall that blocks multicast, or a VPN, can be the reason. The IP address is shown in the network settings on the printer panel. Windows Firewall may ask once whether to allow the program for this search.
 
 ## Open the folder after a scan
 
