@@ -11,12 +11,17 @@ COPY src/ /app/src/
 
 ENV PYTHONPATH=/app/src \
     PYTHONUNBUFFERED=1 \
-    PUSHSCAN_OUTPUT=/scans
+    PUSHSCAN_OUTPUT=/scans \
+    PUSHSCAN_HEARTBEAT_FILE=/tmp/pushscan2folder.alive
 
 VOLUME /scans
 # Optional web page (PUSHSCAN_WEB=1)
 EXPOSE 8080
 USER scanner
+
+# Healthy while the program reaches the printer (heartbeat file, see `health`).
+HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
+    CMD ["python", "-m", "pushscan2folder", "health"]
 
 ENTRYPOINT ["python", "-m", "pushscan2folder"]
 CMD ["run"]

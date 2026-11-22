@@ -275,6 +275,9 @@ class PushScanService:
                  filename: str = DEFAULT_FILENAME):
         self.trim = trim or Trim()
         self.filename = filename
+        # Optional file touched after every successful contact with the
+        # printer (`pushscan2folder health`, the Docker healthcheck).
+        self.heartbeat: Path | None = None
         self.open_after_scan = open_after_scan
         # Optional callable: True asks the loop to stop (background `stop`).
         self.stop_check: Callable[[], bool] | None = None
@@ -423,6 +426,7 @@ class PushScanService:
                     self.register(target)
                     continue
                 resp = self.chmp.poll(target.session)
+                self.beat()
                 if resp.scan_requested:
                     log.warning("scan request for %r during a running scan ignored", target.name)
                 elif resp.status != STATUS_OK:
@@ -542,6 +546,7 @@ class PushScanService:
                 self.step()
                 backoff = self.interval
                 self.status.poll_ok()
+                self.beat()
             except Exception as exc:
                 log.warning("printer not reachable (%s), retrying in %.0fs", exc, backoff)
                 self.status.poll_failed(str(exc))
@@ -552,6 +557,15 @@ class PushScanService:
             self.status.set_targets(self.targets)
             self._wait(backoff)
         self.release()
+
+    def beat(self) -> None:
+        """Mark the printer as reachable just now (heartbeat file)."""
+        if self.heartbeat is None:
+            return
+        try:
+            self.heartbeat.write_text(f"{time.time():.0f}\n", encoding="ascii")
+        except OSError as exc:
+            log.debug("heartbeat file %s: %s", self.heartbeat, exc)
 
     def _wait(self, seconds: float) -> None:
         """Sleep between poll cycles, but end early on stop() or a stop request."""

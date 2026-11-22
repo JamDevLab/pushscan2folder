@@ -135,6 +135,26 @@ class ServiceTests(unittest.TestCase):
         self.assertIsNone(self.service.targets[0].session)
 
 
+    def test_heartbeat_after_successful_polls(self):
+        beat = Path(self.tmp.name) / "alive"
+        self.service.heartbeat = beat
+        t = threading.Thread(target=self.service.run)
+        t.start()
+        threading.Timer(0.2, self.service.stop).start()
+        t.join(5)
+        self.assertTrue(beat.is_file())
+
+    def test_no_heartbeat_when_the_printer_is_unreachable(self):
+        beat = Path(self.tmp.name) / "alive"
+        svc = PushScanService(ChmpClient("127.0.0.1", 1), EsclClient("127.0.0.1", 1),
+                              [Target("A", Path(self.tmp.name))], ScanSettings(), interval=0.01)
+        svc.heartbeat = beat
+        t = threading.Thread(target=svc.run)
+        t.start()
+        threading.Timer(0.2, svc.stop).start()
+        t.join(5)
+        self.assertFalse(beat.exists())
+
     def test_long_escl_scan_keeps_registrations_alive(self):
         from pushscan2folder import service as service_module
         old = service_module.KEEPALIVE_INTERVAL

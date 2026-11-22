@@ -10,6 +10,7 @@ import signal
 import socket
 import subprocess
 import sys
+import time
 import traceback
 from pathlib import Path
 
@@ -81,7 +82,7 @@ def find_config(argv=None) -> Config:
     return load_config(path) if path.is_file() else Config()
 
 
-COMMANDS = ("run", "probe", "scan", "setup", "start", "stop", "status", "uninstall")
+COMMANDS = ("run", "probe", "scan", "setup", "start", "stop", "status", "uninstall", "health")
 # Global options (before the subcommand): name -> takes a value.
 GLOBAL_OPTIONS = {"--config": True, "--printer": True, "--name": True, "--log-file": True,
                   "--verbose": False, "-v": False, "--install-autostart": False,
@@ -183,7 +184,7 @@ def build_parser(cfg: Config | None = None) -> argparse.ArgumentParser:
     p.add_argument("--remove-autostart", action="store_true",
                    help="Windows only: remove the logon entry, then exit")
     sub = p.add_subparsers(dest="cmd", required=True,
-                           metavar="{run,start,stop,status,probe,scan,setup,uninstall}",
+                           metavar="{run,start,stop,status,probe,scan,setup,uninstall,health}",
                            description="without a subcommand, run is used")
     output_default = env("OUTPUT") or cfg.output or default_output()
 
@@ -213,6 +214,9 @@ def build_parser(cfg: Config | None = None) -> argparse.ArgumentParser:
                          default=multipage_env(cfg.multipage),
                          help="document types for which platen scans offer further pages "
                               "on the panel (default: document)")
+        opts.add_argument("--heartbeat-file", default=env("HEARTBEAT_FILE"), metavar="PATH",
+                          help="touch this file after every successful contact with the "
+                               "printer, for `pushscan2folder health` (the Docker image sets it)")
         opts.add_argument("--filename", default=env("FILENAME", cfg.filename or DEFAULT_FILENAME),
                           metavar="TEMPLATE",
                           help="file name of a scan without extension, with the fields "
@@ -245,6 +249,12 @@ def build_parser(cfg: Config | None = None) -> argparse.ArgumentParser:
     uninstall_p.add_argument("--purge", action="store_true",
                              help="with --yes: also delete the settings and log folders")
     sub.add_parser("setup", help="ask a few questions and write the config file")
+    health = sub.add_parser("health", help="exit 0 if a running instance reached the printer "
+                                           "recently (Docker healthcheck)")
+    health.add_argument("--heartbeat-file", default=env("HEARTBEAT_FILE"), metavar="PATH",
+                        help="the file given to run (default: PUSHSCAN_HEARTBEAT_FILE)")
+    health.add_argument("--max-age", type=float, default=HEALTH_MAX_AGE, metavar="SECONDS",
+                        help=f"older than this is unhealthy (default: {HEALTH_MAX_AGE:g})")
 
     probe = sub.add_parser("probe", help="register, poll once and release (debug)")
     probe.add_argument("--keep", action="store_true", help="do not release the session")
@@ -256,7 +266,7 @@ def build_parser(cfg: Config | None = None) -> argparse.ArgumentParser:
     return p
 
 
-NO_CONFIG_COMMANDS = ("setup", "stop", "status", "uninstall")
+NO_CONFIG_COMMANDS = ("setup", "stop", "status", "uninstall", "health")
 
 
 def parse_args(argv=None) -> tuple[argparse.Namespace, Config]:
@@ -658,6 +668,26 @@ def uninstall_main(args: argparse.Namespace, argv: list[str],
         remove_autostart=remove_autostart_message if windows else None, **kwargs)
 
 
+HEALTH_MAX_AGE = 120.0  # seconds; the printer drops a name after about 60 s
+
+
+def health_main(args: argparse.Namespace, now: float | None = None) -> int:
+    """`health`: 0 if the heartbeat file is fresh, 1 otherwise (with a reason)."""
+    if not args.heartbeat_file:
+        print("unhealthy: no heartbeat file (set PUSHSCAN_HEARTBEAT_FILE or --heartbeat-file)")
+        return 1
+    try:
+        age = (time.time() if now is None else now) - os.path.getmtime(args.heartbeat_file)
+    except OSError:
+        print("unhealthy: no contact with the printer yet")
+        return 1
+    if age > args.max_age:
+        print(f"unhealthy: last contact with the printer {age:.0f} s ago")
+        return 1
+    print(f"healthy: last contact with the printer {max(age, 0):.0f} s ago")
+    return 0
+
+
 def manual_start(raw: list[str]) -> bool:
     """Started without any argument by hand, with a console to talk to and
     no settings from the environment."""
@@ -742,6 +772,8 @@ def _main(argv=None) -> int:
         return status_main()
     if args.cmd == "uninstall":
         return uninstall_main(args, raw)
+    if args.cmd == "health":
+        return health_main(args)
     if getattr(args, "multipage", "off") not in MULTIPAGE_MODES:
         print(f"error: invalid PUSHSCAN_MULTIPAGE {args.multipage!r}", file=sys.stderr)
         return 2
@@ -821,6 +853,8 @@ def _main(argv=None) -> int:
 
     install_signal_handlers(service)
     used_config = config_path if args.config or config_path.is_file() else None
+    if getattr(args, "heartbeat_file", None):
+        service.heartbeat = Path(args.heartbeat_file)
     inst = background.Instance()
     if args.background:
         service.stop_check = inst.stop_requested  # `pushscan2folder stop`

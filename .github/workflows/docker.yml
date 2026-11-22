@@ -61,3 +61,7 @@ jobs:
         run: |
           docker build -t pushscan2folder:test .
           docker run --rm pushscan2folder:test --version
+          # no printer contact yet: the healthcheck must report unhealthy (exit 1)
+          set +e; docker run --rm pushscan2folder:test health; code=$?; set -e
+          test "$code" -eq 1
+          docker inspect --format '{{json .Config.Healthcheck}}' pushscan2folder:test

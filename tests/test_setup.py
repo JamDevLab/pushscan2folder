@@ -391,6 +391,30 @@ class FilenameOptionTests(unittest.TestCase):
         self.assertIn("--filename", err.getvalue())
 
 
+class HealthTests(unittest.TestCase):
+    def health(self, path, now, max_age=120.0):
+        args = mock.Mock(heartbeat_file=path, max_age=max_age)
+        with redirect_stdout(io.StringIO()) as out:
+            return cli.health_main(args, now=now), out.getvalue()
+
+    def test_fresh_stale_missing(self):
+        with tempfile.TemporaryDirectory() as d:
+            beat = Path(d) / "alive"
+            self.assertEqual(self.health(str(beat), 0)[0], 1)          # no file yet
+            beat.write_text("1\n")
+            mtime = os.path.getmtime(beat)
+            code, out = self.health(str(beat), mtime + 30)
+            self.assertEqual(code, 0, out)
+            code, out = self.health(str(beat), mtime + 500)
+            self.assertEqual(code, 1)
+            self.assertIn("500 s ago", out)
+        self.assertEqual(self.health(None, 0)[0], 1)
+
+    def test_cli_parses_health(self):
+        args, _ = cli.parse_args(["health", "--heartbeat-file", "x", "--max-age", "60"])
+        self.assertEqual((args.cmd, args.heartbeat_file, args.max_age), ("health", "x", 60.0))
+
+
 class GreetingTests(unittest.TestCase):
     def setUp(self):
         tmp = tempfile.TemporaryDirectory()
