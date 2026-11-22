@@ -40,8 +40,8 @@ from .config import (COLORS, FORMATS, SAME_FOLDER, SOURCES, Config, ConfigError,
 from .desktop import OPEN_MODES
 from .platform_support import component_problem
 from .protocol import PANEL_CHARS, VISIBLE_NAME_CHARS, check_name
-from .service import (MULTIPAGE_MODES, RESOLUTIONS, TRIM_MAX_MM, check_targets,
-                      safe_dirname)
+from .service import (DEFAULT_FILENAME, MULTIPAGE_MODES, RESOLUTIONS, TRIM_MAX_MM,
+                      check_targets, safe_dirname)
 from .status import LogBuffer
 
 log = logging.getLogger(__name__)
@@ -421,6 +421,11 @@ def apply_targets(ctx: WebContext, rows: list[Row]) -> tuple[list[TargetSpec], l
     specs, errors = specs_from_rows(rows, ctx.output, locked_specs(cfg, ctx.output))
     if errors:
         return specs, errors
+    # The form has no file name field: keep a target's own template from the file.
+    on_disk = {spec.name: spec for spec in cfg.targets}
+    for spec in specs:
+        if spec.filename is None and spec.name in on_disk:
+            spec.filename = on_disk[spec.name].filename
     cfg.targets = list(specs)
     targets = cfg.build_targets(ctx.output, ctx.multipage_mode)
     try:
@@ -439,11 +444,12 @@ def apply_targets(ctx: WebContext, rows: list[Row]) -> tuple[list[TargetSpec], l
 # Built-in values used when a key is not set anywhere.
 BUILTIN = {"resolution": "300", "color": "color", "format": "pdf", "source": "auto",
            "size": "a4", "multipage": "document", "interval": "4", "open_after_scan": "off",
+           "filename": DEFAULT_FILENAME,
            "trim_left": "0", "trim_top": "0", "trim_right": "0", "trim_bottom": "0"}
 TRIM_KEYS = ("trim_left", "trim_top", "trim_right", "trim_bottom")
 # Config keys the settings form edits (top level and [defaults]).
 SETTING_KEYS = ("interval", "ignore_panel", "multipage", "resolution", "color", "format",
-                "source", "size", "open_after_scan") + TRIM_KEYS
+                "source", "size", "open_after_scan", "filename") + TRIM_KEYS
 NUMBER_KEYS = ("interval",) + TRIM_KEYS
 
 
@@ -1105,9 +1111,10 @@ def _field(label: str, control: str, key: str, help_text: str, ctx: WebContext) 
             f'<p class="hint">{esc(help_text)}</p>{note}</div>')
 
 
-def _text_input(name: str, value: str, placeholder: str) -> str:
-    return (f'<input type="text" name="{esc(name)}" value="{esc(value)}" inputmode="decimal" '
-            f'placeholder="{esc(placeholder)}" maxlength="12">')
+def _text_input(name: str, value: str, placeholder: str, numeric: bool = True) -> str:
+    kind = 'inputmode="decimal" maxlength="12"' if numeric else 'maxlength="120"'
+    return (f'<input type="text" name="{esc(name)}" value="{esc(value)}" {kind} '
+            f'placeholder="{esc(placeholder)}">')
 
 
 def _setting_select(key: str, value: str, options: list[tuple[str, str]]) -> str:
@@ -1193,6 +1200,11 @@ def render_settings(ctx: WebContext, csrf: str, values: dict[str, str] | None = 
         _field("Poll interval (seconds)", _text_input("interval", v("interval"), "4"),
                "interval", "How often the printer is asked for scan requests. Must be "
                "greater than 0.", ctx),
+        _field("File name", _text_input("filename", v("filename"), DEFAULT_FILENAME, numeric=False),
+               "filename", "Name of a scan without extension. Fields: {name} (panel "
+               "name), {date} (2026-11-22), {time} (183000) and {now:...} with strftime "
+               "codes. An existing file is never overwritten, a -1, -2 ... is added. "
+               "Targets can set their own in the config file.", ctx),
         _field("Open after scan", sel("open_after_scan", v("open_after_scan"),
                                       [(m, m) for m in OPEN_MODES]), "open_after_scan",
                "off, folder (opens the folder, on Windows with the new file selected) or "

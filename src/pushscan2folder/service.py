@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import logging
 import re
+import string
 import threading
 import time
 from dataclasses import dataclass, field, replace
@@ -86,10 +87,53 @@ def parse_trim(text: str | None) -> Trim:
     return Trim(**values)
 
 
-def output_names(directory: Path, fmt: str, count: int, now: datetime) -> list[Path]:
-    """scan_YYYYmmdd_HHMMSS[_NN].ext, never overwriting existing files."""
+DEFAULT_FILENAME = "scan_{now:%Y%m%d_%H%M%S}"
+MAX_FILENAME_CHARS = 120
+_FILENAME_FIELDS = ("name", "date", "time", "now")
+
+
+class _FilenameFormatter(string.Formatter):
+    """str.format with only the plain fields of _FILENAME_FIELDS: no attribute
+    or index access ({now.__class__}) and no positional fields."""
+
+    def get_field(self, field_name, args, kwargs):
+        if field_name not in _FILENAME_FIELDS:
+            raise ValueError(f"unknown field {{{field_name}}}: use "
+                             + ", ".join("{" + f + "}" for f in _FILENAME_FIELDS))
+        return kwargs[field_name], field_name
+
+
+def render_filename(template: str, name: str, now: datetime) -> str:
+    """The file name (without extension) for a scan of target `name` at `now`.
+    Fields: {name} (panel name as a safe file name), {date} (2026-11-22),
+    {time} (183000), {now:FORMAT} (strftime codes, e.g. {now:%Y%m%d_%H%M%S}).
+    Characters that are not allowed in a Windows file name become "_".
+    Raises ValueError for a template that cannot be used."""
+    try:
+        text = _FilenameFormatter().format(
+            template, name=safe_dirname(name), date=now.strftime("%Y-%m-%d"),
+            time=now.strftime("%H%M%S"), now=now)
+    except (ValueError, IndexError, KeyError) as exc:
+        raise ValueError(f"file name {template!r}: {exc}") from None
+    text = re.sub(r'[<>:"/\\|?*\x00-\x1f\x7f]', "_", text).strip(" .")
+    if is_reserved_name(text):
+        text = "_" + text
+    if not text:
+        raise ValueError(f"file name {template!r} gives an empty name")
+    return text[:MAX_FILENAME_CHARS]
+
+
+def check_filename(template: str) -> None:
+    """Raise ValueError if `template` cannot be used as a file name template."""
+    render_filename(template, "scan", datetime(2026, 1, 2, 3, 4, 5))
+
+
+def output_names(directory: Path, fmt: str, count: int, now: datetime,
+                 template: str = DEFAULT_FILENAME, name: str = "scan") -> list[Path]:
+    """TEMPLATE[_NN].ext (default scan_YYYYmmdd_HHMMSS), never overwriting
+    existing files: a "-1", "-2" ... is added instead."""
     ext = EXTENSIONS[FORMATS[fmt]]
-    stem = now.strftime("scan_%Y%m%d_%H%M%S")
+    stem = render_filename(template, name, now)
     names = []
     for i in range(count):
         base = stem if count == 1 else f"{stem}_{i + 1:02d}"
@@ -146,6 +190,7 @@ class Target:
     session: int | None = None
     preset: dict = field(default_factory=dict)
     multipage: frozenset[str] | None = None
+    filename: str | None = None  # file name template; None = the global one
 
 
 def parse_preset(text: str) -> tuple[dict, frozenset[str] | None]:
@@ -226,8 +271,10 @@ class PushScanService:
                  settings: ScanSettings, interval: float = 4.0, auto_source: bool = True,
                  use_panel: bool = True, native: NativeScanner | None = None,
                  multipage: frozenset[str] = frozenset({"document"}),
-                 trim: Trim | None = None, open_after_scan: str = "off"):
+                 trim: Trim | None = None, open_after_scan: str = "off",
+                 filename: str = DEFAULT_FILENAME):
         self.trim = trim or Trim()
+        self.filename = filename
         self.open_after_scan = open_after_scan
         # Optional callable: True asks the loop to stop (background `stop`).
         self.stop_check: Callable[[], bool] | None = None
@@ -458,7 +505,8 @@ class PushScanService:
         if not complete:
             return []
         outdir.mkdir(parents=True, exist_ok=True)
-        paths = output_names(outdir, settings.fmt, len(complete), datetime.now())
+        paths = output_names(outdir, settings.fmt, len(complete), datetime.now(),
+                             target.filename or self.filename, target.name)
         for path, data in zip(paths, complete):
             path.write_bytes(data)
             log.info("saved %s", path)

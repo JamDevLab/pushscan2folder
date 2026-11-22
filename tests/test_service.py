@@ -10,6 +10,7 @@ from pushscan2folder import escl, protocol
 from pushscan2folder.client import ChmpClient
 from pushscan2folder.escl import EsclClient, ScanSettings
 from pushscan2folder.service import (PushScanService, Target, Trim, check_targets, output_names,
+                                     render_filename, check_filename,
                                      parse_trim,
                                     parse_targets, safe_dirname)
 
@@ -382,6 +383,32 @@ class HelperTests(unittest.TestCase):
                              "scan_20261122_000103-1.pdf")
             names = [p.name for p in output_names(Path(d), "jpeg", 2, now)]
             self.assertEqual(names, ["scan_20261122_000103_01.jpg", "scan_20261122_000103_02.jpg"])
+
+    def test_filename_template(self):
+        now = datetime(2026, 11, 22, 18, 30, 5)
+        self.assertEqual(render_filename("scan_{now:%Y%m%d_%H%M%S}", "x", now),
+                         "scan_20261122_183005")
+        self.assertEqual(render_filename("{name}_{date}_{time}", "My PC", now),
+                         "My_PC_2026-11-22_183005")
+        # characters Windows does not allow, and device names
+        self.assertEqual(render_filename("a/b\\c:d", "x", now), "a_b_c_d")
+        self.assertEqual(render_filename("con", "x", now), "_con")
+        self.assertEqual(len(render_filename("x" * 300, "x", now)), 120)
+
+    def test_filename_template_rejects_unsafe_fields(self):
+        for bad in ("{now.__class__}", "{0}", "{}", "{foo}", "{now:{x}}", "{", "  ", "{name[0]}"):
+            with self.assertRaises(ValueError, msg=bad):
+                check_filename(bad)
+        check_filename("{name}")
+
+    def test_output_names_with_template(self):
+        with tempfile.TemporaryDirectory() as d:
+            now = datetime(2026, 11, 22, 0, 1, 3)
+            first = output_names(Path(d), "pdf", 1, now, "{name}", "Rechnung")[0]
+            self.assertEqual(first.name, "Rechnung.pdf")
+            first.write_bytes(b"x")
+            self.assertEqual(output_names(Path(d), "pdf", 1, now, "{name}", "Rechnung")[0].name,
+                             "Rechnung-1.pdf")
 
     def test_job_path(self):
         self.assertEqual(escl.job_path("http://1.2.3.4/eSCL/ScanJobs/x/"), "/eSCL/ScanJobs/x")

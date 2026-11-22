@@ -15,7 +15,7 @@ from .desktop import OPEN_MODES
 from .platform_support import replace_file
 from .protocol import check_name
 from .service import (MULTIPAGE_MODES, RESOLUTIONS, TRIM_MAX_MM, Target, Trim,
-                      safe_dirname)
+                      check_filename, safe_dirname)
 
 
 COLORS = ("color", "gray")
@@ -38,6 +38,7 @@ class TargetSpec:
     preset: dict = field(default_factory=dict)
     document_multipage: bool | None = None
     auto_multipage: bool | None = None
+    filename: str | None = None
 
 
 @dataclass
@@ -53,6 +54,7 @@ class Config:
     format: str | None = None
     source: str | None = None
     open_after_scan: str | None = None
+    filename: str | None = None
     size: str | None = None
     trim_left: float | None = None
     trim_top: float | None = None
@@ -86,7 +88,7 @@ class Config:
                         modes.discard(key)
                 multipage = frozenset(modes)
             result.append(Target(spec.name, outdir, preset=dict(spec.preset),
-                                 multipage=multipage))
+                                 multipage=multipage, filename=spec.filename))
         return result
 
 
@@ -158,6 +160,15 @@ class _Reader:
             raise self._bad(key, "a port number from 1 to 65535")
         return value
 
+    def filename(self, key: str) -> str | None:
+        value = self.str_(key)
+        if value is not None:
+            try:
+                check_filename(value)
+            except ValueError as exc:
+                raise self._bad(key, f"a file name template ({exc})") from None
+        return value
+
     def table_(self, key: str) -> dict | None:
         if key not in self.table:
             return None
@@ -185,7 +196,7 @@ def _target(table, index: int, name_for_msgs: str) -> TargetSpec:
     name = table.get("name")
     if name is not None and isinstance(name, str) and name.strip():
         label = f'{name_for_msgs}: target "{name}"'
-    rd = _Reader(table, label, {"name", "output", "document_multipage", "auto"})
+    rd = _Reader(table, label, {"name", "output", "filename", "document_multipage", "auto"})
     if "name" not in table:
         raise ConfigError(f'{label}: missing required key "name"')
     name = rd.str_("name").strip()
@@ -194,7 +205,8 @@ def _target(table, index: int, name_for_msgs: str) -> TargetSpec:
     except ValueError as exc:
         raise ConfigError(f"{label}: {exc}") from exc
     spec = TargetSpec(name, output=rd.str_("output"),
-                      document_multipage=rd.bool_("document_multipage"))
+                      document_multipage=rd.bool_("document_multipage"),
+                      filename=rd.filename("filename"))
     auto = rd.table_("auto")
     if auto is not None:
         arw = _Reader(auto, f"{label}.auto",
@@ -238,7 +250,7 @@ def parse_config(data: dict, fname: str = "config.toml") -> Config:
     defaults = top.table_("defaults")
     if defaults is not None:
         d = _Reader(defaults, f"{fname}: [defaults]",
-                    {"resolution", "color", "format", "source", "size", "open_after_scan",
+                    {"resolution", "color", "format", "source", "size", "open_after_scan", "filename",
                      "trim_left", "trim_top", "trim_right", "trim_bottom"})
         cfg.resolution = d.int_("resolution", RESOLUTIONS)
         cfg.color = d.str_("color", COLORS)
@@ -246,6 +258,7 @@ def parse_config(data: dict, fname: str = "config.toml") -> Config:
         cfg.source = d.str_("source", SOURCES)
         cfg.size = d.str_("size", tuple(panel.REGIONS))
         cfg.open_after_scan = d.str_("open_after_scan", OPEN_MODES)
+        cfg.filename = d.filename("filename")
         cfg.trim_left = d.mm("trim_left")
         cfg.trim_top = d.mm("trim_top")
         cfg.trim_right = d.mm("trim_right")
@@ -328,7 +341,7 @@ def dump_config(cfg: Config) -> str:
         blocks.append(top)
     defaults = _lines([("resolution", cfg.resolution), ("color", cfg.color),
                        ("format", cfg.format), ("source", cfg.source), ("size", cfg.size),
-                       ("open_after_scan", cfg.open_after_scan),
+                       ("open_after_scan", cfg.open_after_scan), ("filename", cfg.filename),
                        ("trim_left", cfg.trim_left), ("trim_top", cfg.trim_top),
                        ("trim_right", cfg.trim_right), ("trim_bottom", cfg.trim_bottom)])
     if defaults:
@@ -339,6 +352,7 @@ def dump_config(cfg: Config) -> str:
         blocks.append(["[web]"] + web)
     for spec in cfg.targets:
         block = ["[[target]]"] + _lines([("name", spec.name), ("output", spec.output),
+                                         ("filename", spec.filename),
                                          ("document_multipage", spec.document_multipage)])
         blocks.append(block)
         auto = _lines([("resolution", spec.preset.get("resolution")),

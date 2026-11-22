@@ -187,6 +187,24 @@ class TextLoaderTests(ConfigTestBase):
         self.assertEqual(load_config_text(""), Config())
 
 
+class FilenameConfigTests(ConfigTestBase):
+    def test_defaults_and_target(self):
+        cfg = load_config(self.write('[defaults]\nfilename = "{date}_{time}"\n\n'
+                                     '[[target]]\nname = "Bills"\nfilename = "bill_{date}"\n'
+                                     '\n[[target]]\nname = "Other"\n'))
+        self.assertEqual(cfg.filename, "{date}_{time}")
+        targets = cfg.build_targets(self.dir, "off")
+        self.assertEqual([t.filename for t in targets], ["bill_{date}", None])
+        again = load_config(self.write(dump_config(cfg), "again.toml"))
+        self.assertEqual((again.filename, again.targets[0].filename),
+                         ("{date}_{time}", "bill_{date}"))
+
+    def test_invalid_template(self):
+        self.assertError('[defaults]\nfilename = "{now.__class__}"', "filename", "[defaults]")
+        self.assertError('[[target]]\nname = "a"\nfilename = "{x}"', "filename", "target")
+        self.assertError('[defaults]\nfilename = ""', "filename")
+
+
 class TrimConfigTests(ConfigTestBase):
     def test_parse_and_defaults(self):
         cfg = load_config(self.write("[defaults]\ntrim_right = 3\ntrim_bottom = 2.5\n"))

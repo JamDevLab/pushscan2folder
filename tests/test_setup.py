@@ -375,6 +375,22 @@ class SetupTests(unittest.TestCase):
             self.assertEqual(cli.main(["setup"]), 1)
 
 
+class FilenameOptionTests(unittest.TestCase):
+    def test_invalid_template_exits_2(self):
+        err = io.StringIO()
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        env = {k: v for k, v in os.environ.items() if not k.startswith("PUSHSCAN_")}
+        env.update(XDG_CONFIG_HOME=tmp.name, APPDATA=tmp.name)
+        with mock.patch.dict(os.environ, env, clear=True), \
+                mock.patch("pushscan2folder.__main__.greeting", return_value=None), \
+                mock.patch("pushscan2folder.__main__.pause_before_exit"), \
+                mock.patch.object(sys, "stderr", err):
+            code = cli.main(["--printer", "192.0.2.1", "--filename", "{x}"])
+        self.assertEqual(code, 2)
+        self.assertIn("--filename", err.getvalue())
+
+
 class GreetingTests(unittest.TestCase):
     def setUp(self):
         tmp = tempfile.TemporaryDirectory()

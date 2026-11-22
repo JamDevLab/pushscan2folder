@@ -482,6 +482,18 @@ class TargetEditorTests(WebTestBase):
         self.assertEqual(status, 400)
         self.assertIn("At most", data)
 
+    def test_saving_keeps_a_target_file_name(self):
+        self.logged_in()
+        self.config_path.parent.mkdir()
+        self.config_path.write_text('[[target]]\nname = "a"\nfilename = "bill_{date}"\n')
+        csrf = self.client.csrf()
+        status, _, _ = self.client.request("POST", "/targets",
+                                           self.form(csrf, {"name": "a"}, {"name": "b"}))
+        self.assertEqual(status, 303)
+        cfg = load_config(self.config_path)
+        self.assertEqual([(t.name, t.filename) for t in cfg.targets],
+                         [("a", "bill_{date}"), ("b", None)])
+
     def test_explicit_save_op_saves(self):
         self.logged_in()
         csrf = self.client.csrf()
@@ -882,6 +894,15 @@ class SettingsTests(WebTestBase):
         self.assertIn('id="f-ignore_panel" value="1" checked', page)
         self.assertNotIn("take effect after a restart",
                          self.client.request("GET", "/settings")[2].split("Source:")[0])
+
+    def test_filename_setting(self):
+        self.logged_in()
+        self.assertIn('name="filename"', self.client.request("GET", "/settings")[2])
+        self.assertEqual(self.post(filename="{name}_{date}")[0], 303)
+        self.assertEqual(load_config(self.config_path).filename, "{name}_{date}")
+        status, _, page = self.post(filename="{now.__class__}")
+        self.assertEqual(status, 400)
+        self.assertEqual(load_config(self.config_path).filename, "{name}_{date}")
 
     def test_empty_values_remove_the_keys(self):
         self.logged_in()

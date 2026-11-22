@@ -20,7 +20,8 @@ from .escl import EsclClient, ScanSettings
 from .native import NativeScanner
 from .platform_support import (default_config_path, default_log_path, default_output,
                                default_state_dir, is_windows)
-from .service import (MULTIPAGE_MODES, PushScanService, Target, Trim, check_targets,
+from .service import (DEFAULT_FILENAME, MULTIPAGE_MODES, PushScanService, Target, Trim,
+                      check_filename, check_targets,
                       parse_targets, parse_trim)
 from .status import LogBuffer
 
@@ -212,6 +213,11 @@ def build_parser(cfg: Config | None = None) -> argparse.ArgumentParser:
                          default=multipage_env(cfg.multipage),
                          help="document types for which platen scans offer further pages "
                               "on the panel (default: document)")
+        opts.add_argument("--filename", default=env("FILENAME", cfg.filename or DEFAULT_FILENAME),
+                          metavar="TEMPLATE",
+                          help="file name of a scan without extension, with the fields "
+                               "{name}, {date}, {time} and {now:STRFTIME} (default: "
+                               "scan_{now:%%Y%%m%%d_%%H%%M%%S}); a target can set its own")
         opts.add_argument("--open-after-scan", choices=list(desktop.OPEN_MODES),
                           default=env("OPEN_AFTER_SCAN", cfg.open_after_scan or "off"),
                           help="desktop PC only: open the folder (Windows: with the new file "
@@ -291,6 +297,7 @@ OVERRIDABLE = {
     "resolution": ("RESOLUTION", "--resolution"), "color": ("COLOR", "--color"),
     "format": ("FORMAT", "--format"), "source": ("SOURCE", "--source"),
     "open_after_scan": ("OPEN_AFTER_SCAN", "--open-after-scan"),
+    "filename": ("FILENAME", "--filename"),
     "trim_left": ("TRIM", "--trim"), "trim_top": ("TRIM", "--trim"),
     "trim_right": ("TRIM", "--trim"), "trim_bottom": ("TRIM", "--trim"),
 }
@@ -326,7 +333,7 @@ def web_overrides(args: argparse.Namespace, cfg: Config,
         "ignore_panel": "yes" if args.ignore_panel else "no", "multipage": args.multipage,
         "resolution": str(args.resolution), "color": args.color, "format": args.format,
         "source": args.source, "size": cfg.size or "a4",
-        "open_after_scan": args.open_after_scan,
+        "open_after_scan": args.open_after_scan, "filename": args.filename,
         "trim_left": f"{trim.left:g}", "trim_top": f"{trim.top:g}",
         "trim_right": f"{trim.right:g}", "trim_bottom": f"{trim.bottom:g}",
     }
@@ -744,6 +751,12 @@ def _main(argv=None) -> int:
               f"{', '.join(desktop.OPEN_MODES)}", file=sys.stderr)
         return 2
     args.open_after_scan = open_mode
+    filename = getattr(args, "filename", DEFAULT_FILENAME)
+    try:
+        check_filename(filename)
+    except ValueError as exc:
+        print(f"error: --filename/PUSHSCAN_FILENAME: {exc}", file=sys.stderr)
+        return 2
     try:
         setup_logging(args.verbose, args.log_file)
     except OSError as exc:
@@ -800,7 +813,7 @@ def _main(argv=None) -> int:
                               multipage=MULTIPAGE_MODES.get(getattr(args, "multipage", "off"),
                                                             frozenset()),
                               trim=getattr(args, "trim", None),
-                              open_after_scan=open_mode)
+                              open_after_scan=open_mode, filename=filename)
     if args.cmd == "scan":
         for path in service.scan_to(targets[0]):
             print(path)
