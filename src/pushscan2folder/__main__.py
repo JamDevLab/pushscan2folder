@@ -12,9 +12,10 @@ import subprocess
 import sys
 import time
 import traceback
+import webbrowser
 from pathlib import Path
 
-from . import (__version__, autostart, background, desktop, discovery, panel, protocol,
+from . import (SOURCE_URL, __version__, autostart, background, desktop, discovery, panel, protocol,
                terminal, uninstall, web, wizard)
 from .client import ChmpClient
 from .config import Config, ConfigError, load_config
@@ -617,9 +618,16 @@ def console_process_count() -> int | None:
         return None
 
 
+# Set by the menu when the Windows uninstaller was started: it cannot remove
+# a running exe, so the program must exit at once without waiting for Enter.
+skip_pause = False
+
+
 def pause_before_exit(raw: list[str]) -> None:
     """Keep a console window opened just for this program readable."""
     try:
+        if skip_pause:
+            return
         no_pause = autostart.NO_PAUSE in raw or env_bool("NO_PAUSE", False)
         if not is_windows() or no_pause:
             return
@@ -824,9 +832,79 @@ def double_click() -> bool:
     return is_windows() and count is not None and count <= 1
 
 
+def web_url(argv=None) -> str | None:
+    """Address of the web page when it is enabled in the config, else None."""
+    try:
+        cfg = find_config(argv if argv is not None else [])
+    except ConfigError:
+        return None
+    if not cfg.web_enabled:
+        return None
+    try:
+        port = int(env("WEB_PORT") or cfg.web_port or 8080)
+    except ValueError:
+        port = cfg.web_port or 8080
+    host = cfg.web_bind
+    if not host or host in ("0.0.0.0", "::"):
+        host = "127.0.0.1"
+    if ":" in host:
+        host = f"[{host}]"
+    return f"http://{host}:{port}/"
+
+
+def open_url(url: str, browser=None) -> None:
+    if not (browser or webbrowser.open)(url):
+        print(f"Could not open a browser. Open this address yourself: {url}")
+
+
+def open_config_file(opener=None) -> None:
+    path = default_config_path()
+    try:
+        (opener or desktop.open_path)(path)
+    except OSError as exc:
+        print(f"error: cannot open {path}: {exc.strerror or exc}")
+        return
+    print(f"Opened {path}. Changes are used within a few seconds.")
+
+
+def installed_uninstaller() -> Path | None:
+    """The Windows installer's uninstaller, when this is the installed exe."""
+    if not getattr(sys, "frozen", False):
+        return None
+    path = Path(sys.executable).parent / uninstall.UNINSTALLER
+    return path if path.is_file() else None
+
+
+def ask_yes(input_fn, prompt: str, default: bool) -> bool:
+    answer = input_fn(prompt).strip().lower()
+    return default if not answer else answer in ("y", "yes", "j", "ja")
+
+
+def menu_uninstall(instance: background.Instance, input_fn=input, popen=None) -> int:
+    """Uninstall from the menu; offers the Windows uninstaller afterwards.
+    -1: declined."""
+    global skip_pause
+    if not ask_yes(input_fn, "Uninstall pushscan2folder? Your scans are not touched. [y/N]: ",
+                   False):
+        print()
+        return -1
+    code = uninstall_main(argparse.Namespace(yes=False, purge=False), ["uninstall"],
+                          instance=instance, input_fn=input_fn)
+    uninstaller = installed_uninstaller()
+    if uninstaller is not None and ask_yes(
+            input_fn, "Start the Windows uninstaller now? [Y/n]: ", True):
+        try:
+            (popen or subprocess.Popen)([str(uninstaller)])
+            skip_pause = True
+        except OSError as exc:
+            print(f"error: cannot start {uninstaller}: {exc.strerror or exc}")
+    return code
+
+
 def menu(instance: background.Instance, input_fn=input) -> int:
-    """Small numbered menu for a double click: start, stop, status, settings, quit.
-    Status shows the menu again; every other choice returns its result."""
+    """Small numbered menu for a double click. Status, web page, config file,
+    help and a declined uninstall show the menu again; every other choice
+    returns its result."""
     while True:
         running = instance.is_running()
         if running:
@@ -835,9 +913,13 @@ def menu(instance: background.Instance, input_fn=input) -> int:
         else:
             state = "Not running."
         print(f"pushscan2folder {__version__}\n{state}\n")
-        actions = [] if running else [("Start in the background", "start")]
-        actions += [("Stop", "stop")] if running else []
-        actions += [("Status", "status"), ("Change the settings", "setup"), ("Quit", "quit")]
+        url = web_url() if running else None
+        actions = [("Stop", "stop")] if running else [("Start in the background", "start")]
+        actions.append(("Status", "status"))
+        if url:
+            actions.append((f"Open the web page ({url})", "web"))
+        actions += [("Open the config file", "config"), ("Change the settings", "setup"),
+                    ("Help (GitHub)", "help"), ("Uninstall", "uninstall"), ("Quit", "quit")]
         default = "status" if running else "start"
         default_number = [name for _, name in actions].index(default) + 1
         for number, (label, _) in enumerate(actions, 1):
@@ -860,6 +942,29 @@ def menu(instance: background.Instance, input_fn=input) -> int:
             status_main(instance)
             print()
             continue
+        if action == "web":
+            open_url(url)
+            print()
+            continue
+        if action == "config":
+            print()
+            open_config_file()
+            print()
+            continue
+        if action == "help":
+            open_url(SOURCE_URL)
+            print()
+            continue
+        if action == "uninstall":
+            print()
+            try:
+                code = menu_uninstall(instance, input_fn)
+            except (EOFError, KeyboardInterrupt):
+                print()
+                return 0
+            if code == -1:   # declined
+                continue
+            return code
         if action == "quit":
             return 0
         if running:

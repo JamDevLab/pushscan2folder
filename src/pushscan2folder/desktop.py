@@ -61,6 +61,22 @@ def explorer_select(path: Path, popen=subprocess.Popen) -> None:
         popen(f'explorer.exe /select,"{path}"')
 
 
+def open_path(path: Path, popen=subprocess.Popen, startfile=None) -> None:
+    """Open a file with the program the system has for it. Windows: the file
+    association, else Notepad; macOS "open"; elsewhere "xdg-open". Raises OSError."""
+    if is_windows():
+        startfile = startfile or getattr(os, "startfile", None)
+        try:
+            if startfile is None:
+                raise OSError("no os.startfile")
+            startfile(str(path))
+        except OSError:   # no program for this file type
+            popen(["notepad.exe", str(path)])
+        return
+    popen(["open" if is_macos() else "xdg-open", str(path)],
+          stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+
 def has_desktop(environ=None) -> bool:
     """Windows and macOS: assumed. Elsewhere a display server must be set."""
     if is_windows() or is_macos():

@@ -521,10 +521,16 @@ class GreetingTests(unittest.TestCase):
                 mock.patch.object(cli, "start_main", return_value=11) as start, \
                 mock.patch.object(cli, "stop_main", return_value=stop_code) as stop, \
                 mock.patch.object(cli, "status_main", return_value=0) as status, \
+                mock.patch.object(cli, "uninstall_main", return_value=5) as uninst, \
+                mock.patch.object(cli.webbrowser, "open", return_value=True) as browser, \
+                mock.patch.object(cli.subprocess, "Popen") as popen, \
+                mock.patch.object(cli.desktop, "open_path") as open_path, \
                 mock.patch.object(cli, "double_click", return_value=True), \
                 redirect_stdout(io.StringIO()) as out:
             result = cli.greeting([], self.instance, input_fn=fake_input)
-        return result, dict(setup=setup, start=start, stop=stop, status=status), out.getvalue()
+        return result, dict(setup=setup, start=start, stop=stop, status=status,
+                            uninstall=uninst, browser=browser, popen=popen,
+                            open_path=open_path), out.getvalue()
 
     def test_menu_not_running_starts_by_default(self):
         self.cfg.parent.mkdir()
@@ -538,7 +544,7 @@ class GreetingTests(unittest.TestCase):
     def test_menu_running_default_is_status_and_loops(self):
         self.cfg.parent.mkdir()
         self.cfg.write_text('printer = "x"\n')
-        result, calls, out = self.menu(["", "x", "4"], running=True)
+        result, calls, out = self.menu(["", "x", "7"], running=True)
         self.assertEqual(result, 0)
         self.assertEqual(calls["status"].call_count, 1)
         self.assertIn("Running in the background (PID 42).", out)
@@ -555,19 +561,117 @@ class GreetingTests(unittest.TestCase):
     def test_menu_settings(self):
         self.cfg.parent.mkdir()
         self.cfg.write_text('printer = "x"\n')
-        result, calls, _ = self.menu(["3"])  # start, status, settings
+        result, calls, _ = self.menu(["4"])  # start, status, config, settings
         self.assertEqual(result, 7)
         # running: stop first (declined: back to the menu, then quit)
-        result, calls, out = self.menu(["3", "n", "4"], running=True)
+        result, calls, out = self.menu(["4", "n", "7"], running=True)
         self.assertEqual((result, calls["setup"].called), (0, False))
         self.assertIn("must be stopped", out)
-        result, calls, _ = self.menu(["3", ""], running=True, stop_code=0)
+        result, calls, _ = self.menu(["4", ""], running=True, stop_code=0)
         self.assertEqual((result, calls["stop"].called, calls["setup"].called), (7, True, True))
+
+    def write_config(self, text='printer = "x"\n'):
+        self.cfg.parent.mkdir(exist_ok=True)
+        self.cfg.write_text(text)
+
+    def test_menu_web_entry(self):
+        # not running, or web off: hidden
+        self.write_config('printer = "x"\n[web]\nenabled = true\n')
+        self.assertNotIn("web page", self.menu(["7"])[2])
+        self.write_config('printer = "x"\n')
+        self.assertNotIn("web page", self.menu(["7"], running=True)[2])
+        # running and enabled: shown, 0.0.0.0 -> 127.0.0.1
+        self.write_config('printer = "x"\n[web]\nenabled = true\nbind = "0.0.0.0"\nport = 9000\n')
+        result, calls, out = self.menu(["3", "8"], running=True)
+        self.assertIn("http://127.0.0.1:9000/", out)
+        calls["browser"].assert_called_once_with("http://127.0.0.1:9000/")
+        self.assertEqual(result, 0)
+        # own bind address, IPv6 in brackets, env port wins
+        self.write_config('printer = "x"\n[web]\nenabled = true\nbind = "::1"\n')
+        with mock.patch.dict(os.environ, {"PUSHSCAN_WEB_PORT": "9100"}):
+            self.assertEqual(cli.web_url(), "http://[::1]:9100/")
+        self.write_config('printer = "x"\n[web]\nenabled = true\n')
+        self.assertEqual(cli.web_url(), "http://127.0.0.1:8080/")
+
+    def test_menu_open_config_file(self):
+        self.write_config()
+        result, calls, out = self.menu(["3", "7"])
+        calls["open_path"].assert_called_once_with(self.cfg)
+        self.assertIn("Changes are used within a few seconds.", out)
+
+    def test_open_path_windows_and_fallback(self):
+        from pushscan2folder import desktop
+        path = Path("C:/x/config.toml")
+        with mock.patch.object(desktop, "is_windows", return_value=True):
+            startfile, popen = mock.Mock(), mock.Mock()
+            desktop.open_path(path, popen=popen, startfile=startfile)
+            startfile.assert_called_once_with(str(path))
+            self.assertFalse(popen.called)
+            startfile = mock.Mock(side_effect=OSError("no program"))
+            desktop.open_path(path, popen=popen, startfile=startfile)
+            self.assertEqual(popen.call_args[0][0], ["notepad.exe", str(path)])
+        with mock.patch.object(desktop, "is_windows", return_value=False), \
+                mock.patch.object(desktop, "is_macos", return_value=False):
+            popen = mock.Mock()
+            desktop.open_path(path, popen=popen)
+            self.assertEqual(popen.call_args[0][0], ["xdg-open", str(path)])
+        with mock.patch.object(desktop, "is_windows", return_value=False), \
+                mock.patch.object(desktop, "is_macos", return_value=True):
+            popen = mock.Mock()
+            desktop.open_path(path, popen=popen)
+            self.assertEqual(popen.call_args[0][0], ["open", str(path)])
+
+    def test_menu_open_config_error(self):
+        self.write_config()
+        with mock.patch.object(cli.desktop, "open_path", side_effect=OSError("boom")), \
+                redirect_stdout(io.StringIO()) as out:
+            cli.open_config_file()
+        self.assertIn("error: cannot open", out.getvalue())
+        self.assertNotIn("Opened", out.getvalue())
+
+    def test_menu_help_opens_source_url(self):
+        from pushscan2folder import SOURCE_URL
+        self.write_config()
+        result, calls, _ = self.menu(["5", "7"])
+        calls["browser"].assert_called_once_with(SOURCE_URL)
+        self.assertEqual(result, 0)
+
+    def test_menu_uninstall_declined(self):
+        self.write_config()
+        result, calls, _ = self.menu(["6", "", "7"])
+        self.assertFalse(calls["uninstall"].called)
+        self.assertEqual(result, 0)
+
+    def test_menu_uninstall_accepted(self):
+        self.write_config()
+        result, calls, out = self.menu(["6", "y"])   # not frozen: no uninstaller question
+        self.assertEqual(result, 5)
+        args = calls["uninstall"].call_args[0]
+        self.assertEqual((args[0].yes, args[0].purge, args[1]), (False, False, ["uninstall"]))
+        self.assertFalse(calls["popen"].called)
+
+    def test_menu_uninstall_starts_windows_uninstaller(self):
+        self.write_config()
+        exe_dir = self.dir / "app"
+        exe_dir.mkdir()
+        (exe_dir / "unins000.exe").write_text("")
+        self.addCleanup(setattr, cli, "skip_pause", False)
+        with mock.patch.object(sys, "frozen", True, create=True), \
+                mock.patch.object(sys, "executable", str(exe_dir / "pushscan2folder.exe")):
+            result, calls, _ = self.menu(["6", "y", ""])
+        self.assertEqual(result, 5)
+        calls["popen"].assert_called_once_with([str(exe_dir / "unins000.exe")])
+        self.assertTrue(cli.skip_pause)
+        with mock.patch.object(cli, "is_windows", return_value=True), \
+                mock.patch.object(cli, "should_pause", return_value=True), \
+                mock.patch("builtins.input") as pause:
+            cli.pause_before_exit([])
+        self.assertFalse(pause.called)
 
     def test_menu_quit_and_eof(self):
         self.cfg.parent.mkdir()
         self.cfg.write_text('printer = "x"\n')
-        self.assertEqual(self.menu(["4"])[0], 0)
+        self.assertEqual(self.menu(["7"])[0], 0)
         self.assertEqual(self.menu([EOFError()])[0], 0)
         self.assertEqual(self.menu([KeyboardInterrupt()], running=True)[0], 0)
 
