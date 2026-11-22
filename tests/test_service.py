@@ -123,11 +123,11 @@ class ServiceTests(unittest.TestCase):
 
     def test_target_open_after_scan_wins(self):
         FakePrinter.state["pending"] = True
-        self.service.open_after_scan = "folder"
-        self.service.targets[0].open_after_scan = "off"
+        self.service.open_after_scan = True
+        self.service.targets[0].open_after_scan = False
         with mock.patch("pushscan2folder.desktop.open_saved") as open_saved:
             self.service.step()
-        self.assertEqual(open_saved.call_args[0][0], "off")
+        self.assertIs(open_saved.call_args[0][0], False)
 
     def test_busy_hook_brackets_the_scan(self):
         FakePrinter.state["pending"] = True

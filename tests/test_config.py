@@ -83,11 +83,14 @@ class ConfigTestBase(unittest.TestCase):
 class ParseTests(ConfigTestBase):
     def test_dump_has_header_and_examples_that_parse(self):
         cfg = Config(printer="x", targets=[TargetSpec("PC", output="."),
-                                           TargetSpec("Old", open_after_scan="off")])
+                                           TargetSpec("Old", open_after_scan=False)])
         text = dump_config(cfg)
         self.assertTrue(text.startswith("# pushscan2folder configuration."))
         self.assertIn("need a restart", text)
-        self.assertIn('# open_after_scan = "folder"', text)
+        self.assertIn("# open_after_scan = true", text)
+        self.assertNotIn("{name}", text)
+        self.assertIn("# filename = \"scan_{now:%Y-%m-%d_%H-%M-%S}\"", text)
+        self.assertIn('# output = "Archive"   # a subfolder of the scan folder', text)
         self.assertEqual(load_config_text(text), cfg)
         # every example line works once the "#" is removed, in its place
         body, example = text.rsplit("\n\n", 1)
@@ -135,13 +138,28 @@ class ParseTests(ConfigTestBase):
             load_config_text('interval = 5\n[advanced]\ninterval = 4\n')
 
     def test_open_after_scan_per_target(self):
-        cfg = load_config_text('[[target]]\nname = "Archive"\nopen_after_scan = "off"\n'
+        cfg = load_config_text('[[target]]\nname = "Archive"\nopen_after_scan = false\n'
                                '[[target]]\nname = "PC"\n')
-        self.assertEqual([t.open_after_scan for t in cfg.targets], ["off", None])
+        self.assertEqual([t.open_after_scan for t in cfg.targets], [False, None])
         targets = cfg.build_targets(Path("/s"), "off")
-        self.assertEqual([t.open_after_scan for t in targets], ["off", None])
+        self.assertEqual([t.open_after_scan for t in targets], [False, None])
         with self.assertRaises(ConfigError):
             load_config_text('[[target]]\nname = "A"\nopen_after_scan = "always"\n')
+
+    def test_old_open_after_scan_strings_are_read_and_written_as_bool(self):
+        cfg = load_config_text('[defaults]\nopen_after_scan = "file"\n'
+                               '[[target]]\nname = "A"\nopen_after_scan = "off"\n'
+                               '[[target]]\nname = "B"\nopen_after_scan = "folder"\n')
+        self.assertTrue(cfg.open_after_scan)
+        self.assertEqual([t.open_after_scan for t in cfg.targets], [False, True])
+        self.assertEqual(len(cfg.old_keys), 3)
+        self.assertIn('open_after_scan = "file" -> open_after_scan = true', cfg.old_keys[0])
+        text = dump_config(cfg)
+        self.assertIn("open_after_scan = true", text)
+        self.assertNotIn('open_after_scan = "', text)
+        self.assertEqual(load_config_text(text).old_keys, [])
+        with self.assertRaises(ConfigError):
+            load_config_text('[defaults]\nopen_after_scan = "yes"\n')
 
     def test_color_in_target_auto_explains_the_start_button(self):
         with self.assertRaises(ConfigError) as cm:

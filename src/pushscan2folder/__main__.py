@@ -224,10 +224,17 @@ def build_parser(cfg: Config | None = None) -> argparse.ArgumentParser:
                           help="file name of a scan without extension, with the fields "
                                "{name}, {date}, {time} and {now:STRFTIME} (default: "
                                "scan_{now:%%Y%%m%%d_%%H%%M%%S}); a target can set its own")
-        opts.add_argument("--open-after-scan", choices=list(desktop.OPEN_MODES),
-                          default=env("OPEN_AFTER_SCAN", cfg.open_after_scan or "off"),
+        # A valid environment value is turned into a bool here; a bad one stays
+        # text and check_run_options reports it. The option itself is checked
+        # by argparse and turned into a bool by check_run_options.
+        open_env = env("OPEN_AFTER_SCAN")
+        open_default = bool(cfg.open_after_scan) if open_env is None else (
+            open_env if desktop.parse_open(open_env) is None else desktop.parse_open(open_env))
+        opts.add_argument("--open-after-scan",
+                          choices=desktop.OPEN_TRUE + desktop.OPEN_FALSE,
+                          default=open_default, metavar="true|false",
                           help="desktop PC only: open the folder (Windows: with the new file "
-                               "selected) or the file after each scan (default: off)")
+                               "selected) after each scan (default: false)")
 
         opts.add_argument("--web", action="store_true", default=env_bool("WEB", cfg.web_enabled),
                          help="serve the optional web page (status, log, target editor); "
@@ -345,7 +352,8 @@ def web_overrides(args: argparse.Namespace, cfg: Config,
         "ignore_panel": "yes" if args.ignore_panel else "no", "multipage": args.multipage,
         "resolution": str(args.resolution), "color": args.color, "format": args.format,
         "source": args.source, "size": cfg.size or "a4",
-        "open_after_scan": args.open_after_scan, "filename": args.filename,
+        "open_after_scan": "yes" if args.open_after_scan else "no",
+        "filename": args.filename,
         "trim_left": f"{trim.left:g}", "trim_top": f"{trim.top:g}",
         "trim_right": f"{trim.right:g}", "trim_bottom": f"{trim.bottom:g}",
     }
@@ -357,11 +365,11 @@ def check_run_options(args: argparse.Namespace) -> None:
     open_after_scan. Raises ValueError with the message for the user."""
     if getattr(args, "multipage", "off") not in MULTIPAGE_MODES:
         raise ValueError(f"invalid PUSHSCAN_MULTIPAGE {args.multipage!r}")
-    open_mode = str(getattr(args, "open_after_scan", "off")).strip().lower()
-    if open_mode not in desktop.OPEN_MODES:
+    open_flag = desktop.parse_open(getattr(args, "open_after_scan", False))
+    if open_flag is None:
         raise ValueError(f"invalid PUSHSCAN_OPEN_AFTER_SCAN {args.open_after_scan!r}: use "
-                         f"{', '.join(desktop.OPEN_MODES)}")
-    args.open_after_scan = open_mode
+                         "true or false (also yes/no, 1/0, on/off)")
+    args.open_after_scan = open_flag
     try:
         check_filename(getattr(args, "filename", DEFAULT_FILENAME))
     except ValueError as exc:
@@ -377,7 +385,7 @@ def service_options(args: argparse.Namespace, cfg: Config) -> dict:
                 use_panel=not getattr(args, "ignore_panel", True),
                 multipage=MULTIPAGE_MODES.get(getattr(args, "multipage", "off"), frozenset()),
                 trim=getattr(args, "trim", None) or Trim(),
-                open_after_scan=getattr(args, "open_after_scan", "off"),
+                open_after_scan=bool(getattr(args, "open_after_scan", False)),
                 filename=getattr(args, "filename", DEFAULT_FILENAME))
 
 

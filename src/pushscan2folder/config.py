@@ -12,7 +12,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from . import panel
-from .desktop import OPEN_MODES
+from .desktop import parse_open
 from .platform_support import replace_file
 from .protocol import check_name
 from .service import (MULTIPAGE_MODES, RESOLUTIONS, TRIM_MAX_MM, Target, Trim,
@@ -42,7 +42,7 @@ class TargetSpec:
     document_multipage: bool | None = None
     auto_multipage: bool | None = None
     filename: str | None = None
-    open_after_scan: str | None = None   # None = the global setting
+    open_after_scan: bool | None = None   # None = the global setting
 
 
 @dataclass
@@ -57,7 +57,7 @@ class Config:
     color: str | None = None
     format: str | None = None
     source: str | None = None
-    open_after_scan: str | None = None
+    open_after_scan: bool | None = None
     filename: str | None = None
     size: str | None = None
     trim_left: float | None = None
@@ -215,7 +215,8 @@ def _target(table, index: int, name_for_msgs: str,
         raise ConfigError(f"{label}: {exc}") from exc
     spec = TargetSpec(name, output=rd.str_("output"),
                       filename=rd.filename("filename"),
-                      open_after_scan=rd.str_("open_after_scan", OPEN_MODES))
+                      open_after_scan=_open_flag(rd, "open_after_scan", old_keys,
+                                                 label.split(": ", 1)[1] + ": "))
     document = rd.table_("document")
     new_doc = None
     if document is not None:
@@ -246,6 +247,19 @@ def _moved(old, new, old_name: str, new_name: str, old_keys: list[str]):
                           f"keep only {new_name}")
     old_keys.append(f"{old_name} -> {new_name}")
     return old
+
+
+def _open_flag(rd: _Reader, key: str, old_keys: list[str], where: str) -> bool | None:
+    """open_after_scan: true or false. The strings of 0.2.x still work
+    ("off" is false, "folder" and "file" are true) and are noted in `old_keys`."""
+    value = rd.table.get(key)
+    if value is None or isinstance(value, bool):
+        return value
+    if isinstance(value, str) and value in ("off", "folder", "file"):
+        new = value != "off"
+        old_keys.append(f'{where}{key} = "{value}" -> {key} = {_value(new)}')
+        return new
+    raise rd._bad(key, "true or false")
 
 
 def mode_from_flags(document: bool | None, auto: bool | None) -> str | None:
@@ -311,7 +325,7 @@ def parse_config(data: dict, fname: str = "config.toml") -> Config:
     cfg.format = d.str_("format", FORMATS)
     cfg.source = d.str_("source", SOURCES)
     cfg.size = d.str_("size", tuple(panel.REGIONS))
-    cfg.open_after_scan = d.str_("open_after_scan", OPEN_MODES)
+    cfg.open_after_scan = _open_flag(d, "open_after_scan", old, "[defaults] ")
     cfg.filename = d.filename("filename")
     for key in _TRIM:
         setattr(cfg, key, _moved(d.mm(key), adv.mm(key), f"[defaults] {key}",
@@ -399,21 +413,22 @@ HEADER = """\
 
 # Commented examples for keys that are not set (dump_config).
 _DEFAULTS_EXAMPLES = (
-    ("open_after_scan", '# open_after_scan = "folder"         # off | folder | file (desktop PC only)'),
-    ("filename", '# filename = "{name}_{date}_{time}"   # file name, see the docs'),
+    ("open_after_scan", "# open_after_scan = true            # desktop PC only: open the folder"),
+    ("filename", '# filename = "scan_{now:%Y-%m-%d_%H-%M-%S}"   # scan_2026-11-22_18-30-05\n'
+                 "# (date and time codes: %Y year, %m month, %d day, %H hour, %M minute, %S second)"),
     ("resolution", "# resolution = 300                   # 75 | 150 | 300 | 600"),
     ("format", '# format = "pdf"                     # pdf | jpeg'),
 )
 _TARGET_EXAMPLES = (
-    ("open_after_scan", '# open_after_scan = "off"            # this target only, e.g. an archive'),
-    ("filename", '# filename = "{name}_{date}"          # this target only'),
+    ("open_after_scan", "# open_after_scan = false           # this target only, e.g. an archive"),
+    ("filename", '# filename = "archive_{now:%Y%m%d}"   # this target only'),
 )
 _EXAMPLE_TARGET = "\n".join((
     "# Another panel entry with its own folder:",
     "# [[target]]",
     '# name = "Archive"',
-    '# output = "Archive"',
-    '# open_after_scan = "off"',
+    '# output = "Archive"   # a subfolder of the scan folder (output)',
+    "# open_after_scan = false",
     "# [target.document]",
     "# multipage = false"))
 

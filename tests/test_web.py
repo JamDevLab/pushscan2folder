@@ -394,12 +394,12 @@ class TargetEditorTests(WebTestBase):
         self.logged_in()
         csrf = self.client.csrf()
         status, _, _ = self.client.request("POST", "/targets", self.ops_form(
-            csrf, "save", {"name": "PC"}, {"name": "Archive", "open": "off"}))
+            csrf, "save", {"name": "PC"}, {"name": "Archive", "open": "no"}))
         self.assertEqual(status, 303)
         cfg = load_config(self.config_path)
-        self.assertEqual([t.open_after_scan for t in cfg.targets], [None, "off"])
+        self.assertEqual([t.open_after_scan for t in cfg.targets], [None, False])
         page = self.client.request("GET", "/targets")[2]
-        self.assertIn('<option value="off" selected>', page)
+        self.assertIn('<option value="no" selected>', page)
         status, _, page = self.client.request("POST", "/targets", self.ops_form(
             csrf, "save", {"name": "PC", "open": "always"}))
         self.assertEqual(status, 400)

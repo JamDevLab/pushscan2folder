@@ -219,10 +219,8 @@ class Setup:
         """Windows only: open the folder after each scan."""
         if not platform_support.is_windows():
             return
-        if self.yes_no("Open the folder after each scan?", cfg.open_after_scan != "off"):
-            cfg.open_after_scan = "file" if cfg.open_after_scan == "file" else "folder"
-        else:
-            cfg.open_after_scan = "off"
+        cfg.open_after_scan = self.yes_no("Open the folder after each scan?",
+                                          cfg.open_after_scan is not False)
 
     def offer_start(self, log_path: Path) -> bool:
         """Ask how to start now. True: run in the foreground now. On Windows the

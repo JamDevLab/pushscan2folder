@@ -14,9 +14,24 @@ from .platform_support import is_macos, is_windows
 
 log = logging.getLogger(__name__)
 
-OPEN_MODES = ("off", "folder", "file")
+# Words accepted for open_after_scan in the environment and on the command
+# line. "folder" and "file" are the old values (both mean "yes" now).
+OPEN_TRUE = ("true", "yes", "1", "on", "folder", "file")
+OPEN_FALSE = ("false", "no", "0", "off")
 
-# Windows, mode "folder": if an Explorer window already shows the folder,
+
+def parse_open(value) -> bool | None:
+    """open_after_scan from a bool or a word (any case); None if not valid."""
+    if isinstance(value, bool):
+        return value
+    word = str(value).strip().lower()
+    if word in OPEN_TRUE:
+        return True
+    if word in OPEN_FALSE:
+        return False
+    return None
+
+# Windows: if an Explorer window already shows the folder,
 # select the new file there instead of opening one more window. Explorer's
 # own "/select" always opens a new window, so this goes through the Shell
 # COM object (PowerShell, no extra dependency). The path comes in through
@@ -85,11 +100,10 @@ def has_desktop(environ=None) -> bool:
     return bool(env.get("DISPLAY") or env.get("WAYLAND_DISPLAY"))
 
 
-def open_saved(mode: str, paths, popen=subprocess.Popen) -> bool:
-    """Open the folder ("folder", on Windows with the first file selected) or
-    the first file ("file") of a finished job, once per job. True if a
-    program was started."""
-    if mode == "off" or not paths:
+def open_saved(open: bool, paths, popen=subprocess.Popen) -> bool:
+    """Open the folder of a finished job (on Windows with the first file
+    selected), once per job. True if a program was started."""
+    if not open or not paths:
         return False
     first = Path(paths[0])
     try:
@@ -98,14 +112,10 @@ def open_saved(mode: str, paths, popen=subprocess.Popen) -> bool:
                         "WAYLAND_DISPLAY not set), not opening %s", first)
             return False
         if is_windows():
-            if mode == "file":
-                os.startfile(first)  # type: ignore[attr-defined]
-            else:
-                explorer_select(first, popen)
+            explorer_select(first, popen)
         else:
             opener = "open" if is_macos() else "xdg-open"
-            target = first if mode == "file" else first.parent
-            popen([opener, str(target)], stdin=subprocess.DEVNULL,
+            popen([opener, str(first.parent)], stdin=subprocess.DEVNULL,
                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         return True
     except Exception as exc:  # never fail the scan

@@ -37,7 +37,6 @@ from . import SOURCE_URL, __version__, panel
 from .config import (COLORS, FORMATS, SAME_FOLDER, SOURCES, Config, ConfigError, TargetSpec,
                      dump_config, mode_from_flags,
                      load_config, load_config_text, parse_config, size_name, write_config)
-from .desktop import OPEN_MODES
 from .platform_support import component_problem
 from .protocol import PANEL_CHARS, VISIBLE_NAME_CHARS, check_name
 from .service import (DEFAULT_FILENAME, MULTIPAGE_MODES, RESOLUTIONS, TRIM_MAX_MM,
@@ -301,10 +300,14 @@ class Row:
     fmt: str = ""
     size: str = ""
     automp: bool = False
-    opened: str = ""        # open_after_scan of the target; "" = the default
+    opened: str = ""        # open_after_scan of the target: "yes", "no" or "" = the default
     delete: bool = False
     existing: bool = False
     orig: str = ""          # name in the config file when the form was rendered
+
+
+def _yes_no(flag: bool | None) -> str:
+    return "" if flag is None else "yes" if flag else "no"
 
 
 def row_from_spec(spec: TargetSpec, global_mode: str) -> Row:
@@ -316,7 +319,7 @@ def row_from_spec(spec: TargetSpec, global_mode: str) -> Row:
         res=str(p["resolution"]) if "resolution" in p else "",
         fmt=p.get("fmt", ""), size=size_name(p) or "",
         automp=("auto" in modes) if spec.auto_multipage is None else spec.auto_multipage,
-        opened=spec.open_after_scan or "", existing=True, orig=spec.name)
+        opened=_yes_no(spec.open_after_scan), existing=True, orig=spec.name)
 
 
 def blank_row(global_mode: str) -> Row:
@@ -408,11 +411,11 @@ def specs_from_rows(rows: list[Row], base: Path,
                 errors.append(f"{label}: invalid size {row.size!r}")
             else:
                 preset["width"], preset["height"] = panel.REGIONS[row.size]
-        if row.opened and row.opened not in OPEN_MODES:
+        if row.opened not in ("", "yes", "no"):
             errors.append(f"{label}: invalid open after scan {row.opened!r}")
         specs.append(TargetSpec(row.name, output=output, preset=preset,
                                 document_multipage=row.docmp, auto_multipage=row.automp,
-                                open_after_scan=row.opened or None))
+                                open_after_scan={"yes": True, "no": False}.get(row.opened)))
     if not errors and not specs:
         errors.append("At least one target is required.")
     return specs, errors
@@ -455,7 +458,7 @@ def apply_targets(ctx: WebContext, rows: list[Row]) -> tuple[list[TargetSpec], l
 
 # Built-in values used when a key is not set anywhere.
 BUILTIN = {"resolution": "300", "color": "color", "format": "pdf", "source": "auto",
-           "size": "a4", "multipage": "document", "interval": "4", "open_after_scan": "off",
+           "size": "a4", "multipage": "document", "interval": "4", "open_after_scan": "no",
            "filename": DEFAULT_FILENAME,
            "trim_left": "0", "trim_top": "0", "trim_right": "0", "trim_bottom": "0"}
 TRIM_KEYS = ("trim_left", "trim_top", "trim_right", "trim_bottom")
@@ -472,6 +475,8 @@ def settings_values(cfg: Config) -> dict[str, str]:
         value = getattr(cfg, key)
         if key == "ignore_panel":
             values[key] = "1" if value else ""
+        elif key == "open_after_scan":
+            values[key] = "" if value is None else "true" if value else "false"
         else:
             values[key] = "" if value is None else f"{value:g}" if isinstance(value, float) else str(value)
     return values
@@ -480,6 +485,8 @@ def settings_values(cfg: Config) -> dict[str, str]:
 def settings_from_form(form: dict[str, str]) -> dict[str, str]:
     values = {key: form.get(key, "").strip() for key in SETTING_KEYS}
     values["ignore_panel"] = "1" if form.get("ignore_panel") else ""
+    # A check box cannot say "not set": unticked is saved as false.
+    values["open_after_scan"] = "true" if form.get("open_after_scan") else "false"
     # Two check boxes; the browser sends only the ticked ones.
     values["multipage"] = mode_from_flags(bool(form.get("multipage_document")),
                                           bool(form.get("multipage_auto")))
@@ -506,6 +513,8 @@ def check_settings(values: dict[str, str]) -> tuple[Config | None, list[str]]:
             value = int(text)
         elif key == "ignore_panel":
             value = True
+        elif key == "open_after_scan":
+            value = text == "true"
         if key == "multipage":
             modes = MULTIPAGE_MODES.get(text)
             if modes is None:
@@ -1025,7 +1034,7 @@ def _locked_row_html(i: int, count: int, row: Row, spec: TargetSpec, global_mode
         f'<p>This folder is outside the output directory. It is set in the '
         f"config file and can only be changed there; the web page keeps this target "
         f"unchanged.</p>"
-        f"<p>Open after a scan: {esc(spec.open_after_scan or 'default')}. "
+        f"<p>Open after a scan: {esc(_yes_no(spec.open_after_scan) or 'default')}. "
         f"Auto scan preset: {esc(_preset_summary(spec.preset))}. Multi-page dialog: "
         f'Document {"yes" if shown.docmp else "no"}, Auto scan {"yes" if shown.automp else "no"}.</p>'
         "</div>" + _card_foot(i, row, False) + "</section>")
@@ -1061,7 +1070,7 @@ def _row_html(i: int, count: int, row: Row, disabled: bool,
         f'maxlength="{MAX_FOLDER_CHARS}"{off}>'
         + label("Open after a scan (desktop PC only)", "open")
         + sel("open", row.opened, keep("open_after_scan")
-              + [("off", "off"), ("folder", "folder"), ("file", "file")])
+              + [("yes", "Yes"), ("no", "No")])
         + '</div><div class="group"><h3>Auto scan preset</h3><p class="hint">Empty = the default of the '
         '<a href="/settings">Settings</a> page.</p>'
         + label("Resolution", "res")
@@ -1297,11 +1306,11 @@ def render_settings(ctx: WebContext, csrf: str, values: dict[str, str] | None = 
                "name), {date} (2026-11-22), {time} (183000) and {now:...} with strftime "
                "codes. An existing file is never overwritten, a -1, -2 ... is added. "
                "Targets can set their own in the config file.", ctx),
-        _field("Open after scan", sel("open_after_scan", v("open_after_scan"),
-                                      [(m, m) for m in OPEN_MODES]), "open_after_scan",
-               "off, folder (opens the folder, on Windows with the new file selected) or "
-               "file (opens the scan). Only works when the program runs on a desktop PC "
-               "with a logged-in user, not in Docker or on a server.", ctx),
+        _field("Open after scan", _check("open_after_scan", v("open_after_scan") == "true",
+                                         "Open the folder after each scan", False),
+               "open_after_scan", "On Windows the new file is selected in Explorer. Only "
+               "works when the program runs on a desktop PC with a logged-in user, not in "
+               "Docker or on a server. Targets can override it.", ctx),
         _field("Ignore panel", _check("ignore_panel", bool(v("ignore_panel")),
                                       "Always use the values above", False),
                "ignore_panel", "Off: the choices made on the printer panel (colour, size, "
