@@ -1,0 +1,57 @@
+# Example configuration for pushscan2folder.
+#
+# Default location: ~/.config/pushscan2folder/config.toml
+# (or $XDG_CONFIG_HOME/pushscan2folder/config.toml), or pass --config PATH /
+# set PUSHSCAN_CONFIG. Precedence: command line > PUSHSCAN_* env vars > this file >
+# built-in defaults. Every key is optional.
+# Docker (docker-compose.yml): this file is ./config/config.toml, and
+# PUSHSCAN_PRINTER from the compose file wins over "printer" below.
+
+printer = "192.168.1.50"   # printer IP or host name (--printer)
+output = "/scans"          # base output folder (--output)
+interval = 4               # poll interval in seconds
+verbose = false
+ignore_panel = false       # true: always use [defaults], ignore the panel
+multipage = "document"     # next-page dialog for: document | auto | both | off
+
+# Fallback scan settings (used where the panel sends nothing).
+[defaults]
+resolution = 300           # 75 | 150 | 300 | 600
+color = "color"            # color | gray
+format = "pdf"             # pdf | jpeg
+source = "auto"            # auto | platen | adf
+size = "a4"                # a4 | letter | legal | 10x15 | 13x18
+# Trim: cut off a border at the glass edge by scanning a smaller area
+# (platen only, not the ADF). In mm, 0 to 50; 0 means no trim.
+trim_left = 0              # mm
+trim_top = 0               # mm
+trim_right = 0             # mm; TR8550: about 3 (to be verified)
+trim_bottom = 0            # mm; TR8550: about 2 (to be verified)
+
+# One [[target]] per entry on the printer panel (name: max 31 chars, unique).
+
+# All defaults: scans go to /scans/Scans
+[[target]]
+name = "Scans"
+
+# Folder /scans/Paperless (for paperless-ngx, mount its consume folder
+# there), multi-page dialog for document type "Document", and a preset for
+# "Auto scan" (the preset wins over the panel there).
+[[target]]
+name = "Paperless"
+document_multipage = true
+
+[target.auto]
+resolution = 300
+format = "pdf"
+multipage = true           # dialog for auto scan too
+
+# Relative output is resolved against the base output (/scans/archive).
+[[target]]
+name = "Archive"
+output = "archive"
+document_multipage = false
+
+[target.auto]
+resolution = 600
+format = "jpeg"

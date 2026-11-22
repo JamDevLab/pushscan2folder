@@ -1,0 +1,17 @@
+# Private working area: proprietary Canon software, reverse engineering
+# helpers, captures and logs. Never commit.
+private/
+
+# Local Claude Code setup (third-party skill, MCP config)
+.claude/
+.mcp.json
+
+# Local tooling
+.venv/
+.tools/
+node_modules/
+__pycache__/
+*.pyc
+
+# Scan output
+scans/

@@ -1,0 +1,21 @@
+# pushscan2folder: scan from the printer panel into a folder.
+# Setup:  mkdir -p scans config && cp config.example.toml config/config.toml
+# Start:  docker compose up -d --build     Logs: docker compose logs -f
+# Targets and scan settings live in config/config.toml. To edit them in the
+# browser at http://<host>:8080, uncomment the web lines below.
+services:
+  pushscan2folder:
+    build: .
+    restart: unless-stopped
+    user: "1000:1000"                    # owner of ./scans and ./config (id -u, id -g)
+    environment:
+      PUSHSCAN_PRINTER: 192.168.1.50     # printer IP or host name
+      PUSHSCAN_CONFIG: /config/config.toml
+      # PUSHSCAN_WEB: "1"                # web page
+      # PUSHSCAN_WEB_PASSWORD: change-me-please   # your own, at least 8 characters
+    volumes:
+      - ./scans:/scans
+      - ./config:/config
+      # - /path/to/paperless/consume:/scans/Paperless  # paperless-ngx
+    # ports:
+    #   - "8080:8080"                    # web page
