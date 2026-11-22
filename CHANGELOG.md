@@ -63,6 +63,14 @@ All notable changes are documented here. The format follows
 
 ### Changed
 
+- The web page runs without a login when it only listens on this PC (bind
+  address `127.0.0.1` or another loopback address, `::1`, `localhost`) and no
+  password is configured. Any other bind address without a password is still
+  an error. A configured password is always used. Setup asks "Should other
+  devices (phone, tablet) reach the web page?"; with the default no it
+  writes bind `127.0.0.1` and asks for no password. CSRF, Origin and Host
+  name checks stay active; the navigation bar shows a calm note instead of
+  the "No password set" warning.
 - The default web port is 8737 (8080 is used by many other programs). The
   Docker image stays on 8080 (`PUSHSCAN_WEB_PORT=8080`). An existing config
   with `port = 8080` keeps 8080.

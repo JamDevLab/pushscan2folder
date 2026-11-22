@@ -54,7 +54,9 @@ asks for the IP address as before. A firewall that blocks multicast or a VPN
 can be the reason. The IP address is shown in the network settings on the
 printer panel. The search needs only the Python standard library.
 
-The password of the web page is never written to `config.toml`: setup stores it
+The web page needs no password when it listens on this PC only (`bind` is
+`127.0.0.1`, `::1` or `localhost`); setup then asks for none. The password of
+the web page is never written to `config.toml`: setup stores it
 in `web_password.txt` next to the config file (mode 0600 where supported) and
 names that file in `[web] password_file`. If the file already has `[[target]]`
 entries, setup asks only for printer, web page and autostart and leaves the
@@ -151,7 +153,7 @@ environment wins over the [configuration file](#configuration-file). More in
 | `--web`        | `PUSHSCAN_WEB`        | off                 | run           | Serve the [web page](web.md). Env var: `1`, `true` or `yes` |
 | `--web-port`   | `PUSHSCAN_WEB_PORT`   | `8737`              | run           | Port of the web page |
 | `--web-bind`   | `PUSHSCAN_WEB_BIND`   | `0.0.0.0`           | run           | Address of the web page |
-| -              | `PUSHSCAN_WEB_PASSWORD` / `PUSHSCAN_WEB_PASSWORD_FILE` | (required with `--web`) | run | Web password (min. 8 characters), or a file containing it. Env, or `[web] password_file` of the config file. Never the password itself in the config file |
+| -              | `PUSHSCAN_WEB_PASSWORD` / `PUSHSCAN_WEB_PASSWORD_FILE` | (required with `--web` unless the bind address is loopback) | run | Web password (min. 8 characters), or a file containing it. Env, or `[web] password_file` of the config file. Never the password itself in the config file |
 | `--keep`       | -                  | off                 | probe         | Do not release the session |
 
 Notes:
@@ -192,7 +194,7 @@ the file and the key, so typos are caught.
 | `[advanced]` `verbose`, `ignore_panel` | `true` / `false` | `--verbose`, `--ignore-panel` |
 | `[advanced]` `trim_left`, `trim_top`, `trim_right`, `trim_bottom` | number, mm, 0 to 50 | `--trim` |
 | `[web]` `enabled` | `true` / `false` | `--web` |
-| `[web]` `bind` | address, default `0.0.0.0` | `--web-bind` |
+| `[web]` `bind` | address, default `0.0.0.0`; on a loopback address (`127.0.0.1`, `::1`, `localhost`) no password is needed | `--web-bind` |
 | `[web]` `port` | 1 to 65535, default 8737 | `--web-port` |
 | `[web]` `password_file` | file holding the password; relative to the config file. The password itself is never a key | `PUSHSCAN_WEB_PASSWORD_FILE` |
 | `[[target]]` `name` | required, max 31 chars, unique | `NAME` |

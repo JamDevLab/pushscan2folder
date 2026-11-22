@@ -31,7 +31,7 @@ Start "pushscan2folder" from the Start menu (or the desktop icon, or `pushscan2f
 - the printer: setup first searches the network for eSCL scanners and lists the ones that answer with a number (see [Finding the printer](#finding-the-printer)); you pick a number or type the IP address or host name. The address is checked right away, and you can type it again or continue anyway,
 - the name that appears on the printer panel (default `USER  PCNAME`),
 - the folder for scans (default `Documents\Scans`; the scans go straight into this folder, not into a subfolder),
-- whether to turn on the web page (default no; if yes: port, bind address and a password typed twice),
+- whether to turn on the web page (default no; if yes: the port, and whether other devices such as a phone or tablet should reach it. With no (the default) the page is only on this PC and needs no password. With yes: bind address and a password typed twice),
 - whether to open the folder after each scan (default yes, see [Open the folder after a scan](#open-the-folder-after-a-scan)),
 - whether to start the program automatically when you log in (default yes).
 
@@ -118,26 +118,26 @@ With `open_after_scan = true` in `[defaults]` (or `--open-after-scan true`, `PUS
 
 The program only makes outgoing connections to the printer, so Windows Firewall needs no rule for the scanning itself.
 
-The optional web page is different. With `--web` (or `enabled = true` in the `[web]` table of the config file) it listens on a port (8737 by default) and binds to all addresses unless you say otherwise. The setup questions suggest `127.0.0.1`. Windows then asks once whether to allow the program on private or public networks. To keep the page on this PC only, use:
+The optional web page is different. With `--web` (or `enabled = true` in the `[web]` table of the config file) it listens on a port (8737 by default) and binds to all addresses unless you say otherwise. Setup uses `127.0.0.1` unless you want other devices to reach the page. Windows then asks once whether to allow the program on private or public networks. To keep the page on this PC only, use:
 
 ```
 .\pushscan2folder.exe --printer 192.168.1.50 --web --web-bind 127.0.0.1
 ```
 
-Nothing is exposed to other devices then, and no firewall rule is needed. Open http://127.0.0.1:8737 in a browser. The web page needs a password; set it before the start, for example:
+Nothing is exposed to other devices then, and no firewall rule is needed. Open http://127.0.0.1:8737 in a browser. On this address the page needs no password. If you want a login anyway, or bind to another address, set a password before the start, for example:
 
 ```
 $env:PUSHSCAN_WEB_PASSWORD = "a long password of your own"
 ```
 
-Setup stores the password in `web_password.txt` next to the config file and names it in `[web] password_file`, which is what autostart needs. By hand, use a file and set `PUSHSCAN_WEB_PASSWORD_FILE` or `password_file` (see the web page documentation).
+When you let other devices reach the page, setup stores the password in `web_password.txt` next to the config file and names it in `[web] password_file`, which is what autostart needs. By hand, use a file and set `PUSHSCAN_WEB_PASSWORD_FILE` or `password_file` (see the web page documentation).
 
 ## Where files go
 
 | What | Location |
 | --- | --- |
 | Config file (written by setup) | `%APPDATA%\pushscan2folder\config.toml` |
-| Web password (if the web page is on) | `%APPDATA%\pushscan2folder\web_password.txt` |
+| Web password (only if you set one) | `%APPDATA%\pushscan2folder\web_password.txt` |
 | Program | `%LOCALAPPDATA%\Programs\pushscan2folder` |
 | Scans | `Documents\Scans` in your user folder (`C:\Users\NAME\Documents\Scans`). Setup creates one target that saves straight into it. |
 | Log file | `%LOCALAPPDATA%\pushscan2folder\pushscan2folder.log` for the background instance and autostart; with `--log-file PATH` anywhere else |

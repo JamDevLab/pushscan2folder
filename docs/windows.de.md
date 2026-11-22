@@ -31,7 +31,7 @@ Weil der Installer nicht signiert ist, zeigt Windows SmartScreen beim Start even
 - der Drucker: Das Setup sucht zuerst im Netz nach eSCL-Scannern und listet die, die antworten, mit einer Nummer auf (siehe [Den Drucker finden](#den-drucker-finden)); du wählst eine Nummer oder gibst die IP-Adresse oder den Hostnamen ein. Die Adresse wird sofort geprüft; du kannst neu eingeben oder trotzdem weitermachen,
 - der Name, der am Druckerdisplay erscheint (Standard `BENUTZER  PCNAME`),
 - der Ordner für Scans (Standard `Dokumente\Scans`; die Scans landen direkt in diesem Ordner, nicht in einem Unterordner),
-- ob die Weboberfläche an sein soll (Standard nein; wenn ja: Port, Bind-Adresse und ein Passwort, zweimal eingegeben),
+- ob die Weboberfläche an sein soll (Standard nein; wenn ja: der Port und die Frage, ob andere Geräte wie Handy oder Tablet die Seite erreichen sollen. Bei nein (Standard) ist die Seite nur auf diesem PC und braucht kein Passwort. Bei ja: Bind-Adresse und ein Passwort, zweimal eingegeben),
 - ob nach jedem Scan der Ordner geöffnet werden soll (Standard ja, siehe [Ordner nach dem Scan öffnen](#ordner-nach-dem-scan-öffnen)),
 - ob das Programm beim Anmelden automatisch starten soll (Standard ja).
 
@@ -119,26 +119,26 @@ Mit `open_after_scan = true` in `[defaults]` (oder `--open-after-scan true`, `PU
 
 Das Programm baut nur ausgehende Verbindungen zum Drucker auf. Für das Scannen braucht die Windows-Firewall deshalb keine Regel.
 
-Anders ist es bei der optionalen Webseite. Mit `--web` (oder `enabled = true` in der Tabelle `[web]` der Konfigurationsdatei) lauscht das Programm auf einem Port (Standard 8737) und bindet an alle Adressen, wenn du nichts anderes angibst. Die Setup-Fragen schlagen `127.0.0.1` vor. Windows fragt dann einmal, ob das Programm in privaten oder öffentlichen Netzwerken erlaubt sein soll. Damit die Seite nur auf diesem PC erreichbar ist:
+Anders ist es bei der optionalen Webseite. Mit `--web` (oder `enabled = true` in der Tabelle `[web]` der Konfigurationsdatei) lauscht das Programm auf einem Port (Standard 8737) und bindet an alle Adressen, wenn du nichts anderes angibst. Das Setup nimmt `127.0.0.1`, solange andere Geräte die Seite nicht erreichen sollen. Windows fragt dann einmal, ob das Programm in privaten oder öffentlichen Netzwerken erlaubt sein soll. Damit die Seite nur auf diesem PC erreichbar ist:
 
 ```
 .\pushscan2folder.exe --printer 192.168.1.50 --web --web-bind 127.0.0.1
 ```
 
-Dann ist nichts für andere Geräte erreichbar und es ist keine Firewall-Regel nötig. Im Browser http://127.0.0.1:8737 öffnen. Die Webseite braucht ein Passwort, das vor dem Start gesetzt wird, zum Beispiel:
+Dann ist nichts für andere Geräte erreichbar und es ist keine Firewall-Regel nötig. Im Browser http://127.0.0.1:8737 öffnen. Auf dieser Adresse braucht die Seite kein Passwort. Willst du trotzdem eine Anmeldung oder bindest du an eine andere Adresse, setze vor dem Start ein Passwort, zum Beispiel:
 
 ```
 $env:PUSHSCAN_WEB_PASSWORD = "ein langes eigenes Passwort"
 ```
 
-Das Setup legt das Passwort in `web_password.txt` neben der Konfigurationsdatei ab und trägt die Datei in `[web] password_file` ein, was der Autostart braucht. Von Hand nutzt du eine Datei und setzt `PUSHSCAN_WEB_PASSWORD_FILE` oder `password_file` (siehe Dokumentation der Webseite).
+Lässt du andere Geräte auf die Seite zu, legt das Setup das Passwort in `web_password.txt` neben der Konfigurationsdatei ab und trägt die Datei in `[web] password_file` ein, was der Autostart braucht. Von Hand nutzt du eine Datei und setzt `PUSHSCAN_WEB_PASSWORD_FILE` oder `password_file` (siehe Dokumentation der Webseite).
 
 ## Wo liegt was
 
 | Was | Ort |
 | --- | --- |
 | Konfigurationsdatei (vom Setup geschrieben) | `%APPDATA%\pushscan2folder\config.toml` |
-| Webpasswort (wenn die Weboberfläche an ist) | `%APPDATA%\pushscan2folder\web_password.txt` |
+| Webpasswort (nur wenn du eines setzt) | `%APPDATA%\pushscan2folder\web_password.txt` |
 | Programm | `%LOCALAPPDATA%\Programs\pushscan2folder` |
 | Scans | `Dokumente\Scans` im Benutzerordner (`C:\Users\NAME\Documents\Scans`). Das Setup legt ein Ziel an, das direkt dort speichert. |
 | Logdatei | `%LOCALAPPDATA%\pushscan2folder\pushscan2folder.log` für die Hintergrundinstanz und den Autostart; mit `--log-file PFAD` woanders |

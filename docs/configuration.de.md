@@ -56,7 +56,9 @@ Multicast oder ein VPN kann der Grund sein. Die IP-Adresse steht in den
 Netzwerkeinstellungen am Bedienfeld des Druckers. Die Suche braucht nur die
 Python-Standardbibliothek.
 
-Das Passwort der Weboberfläche kommt nie in `config.toml`: Das Setup legt es in
+Die Weboberfläche braucht kein Passwort, wenn sie nur auf diesem PC lauscht (`bind` ist
+`127.0.0.1`, `::1` oder `localhost`); das Setup fragt dann keines ab. Das Passwort der
+Weboberfläche kommt nie in `config.toml`: Das Setup legt es in
 `web_password.txt` neben der Konfigurationsdatei ab (Modus 0600, wo möglich) und
 trägt die Datei in `[web] password_file` ein. Hat die Datei schon
 `[[target]]`-Einträge, fragt das Setup nur nach Drucker, Weboberfläche und
@@ -155,7 +157,7 @@ Mehr unter [Vorrang](#vorrang).
 | `--web`        | `PUSHSCAN_WEB`        | aus                 | run           | Stellt die [Weboberfläche](web.de.md) bereit. Umgebungsvariable: `1`, `true` oder `yes` |
 | `--web-port`   | `PUSHSCAN_WEB_PORT`   | `8737`              | run           | Port der Weboberfläche |
 | `--web-bind`   | `PUSHSCAN_WEB_BIND`   | `0.0.0.0`           | run           | Adresse der Weboberfläche |
-| -              | `PUSHSCAN_WEB_PASSWORD` / `PUSHSCAN_WEB_PASSWORD_FILE` | (erforderlich mit `--web`) | run | Passwort der Weboberfläche (mind. 8 Zeichen) oder eine Datei, die es enthält. Per Umgebung oder `[web] password_file` der Konfigurationsdatei. Das Passwort selbst nie in der Konfigurationsdatei |
+| -              | `PUSHSCAN_WEB_PASSWORD` / `PUSHSCAN_WEB_PASSWORD_FILE` | (erforderlich mit `--web`, außer die Bind-Adresse ist Loopback) | run | Passwort der Weboberfläche (mind. 8 Zeichen) oder eine Datei, die es enthält. Per Umgebung oder `[web] password_file` der Konfigurationsdatei. Das Passwort selbst nie in der Konfigurationsdatei |
 | `--keep`       | -                  | aus                 | probe         | Gibt die Sitzung nicht frei |
 
 Hinweise:
@@ -198,7 +200,7 @@ Meldung abgelehnt, die Datei und Schlüssel nennt, damit Tippfehler auffallen.
 | `[advanced]` `verbose`, `ignore_panel` | `true` / `false` | `--verbose`, `--ignore-panel` |
 | `[advanced]` `trim_left`, `trim_top`, `trim_right`, `trim_bottom` | Zahl, mm, 0 bis 50 | `--trim` |
 | `[web]` `enabled` | `true` / `false` | `--web` |
-| `[web]` `bind` | Adresse, Standard `0.0.0.0` | `--web-bind` |
+| `[web]` `bind` | Adresse, Standard `0.0.0.0`; auf einer Loopback-Adresse (`127.0.0.1`, `::1`, `localhost`) ist kein Passwort nötig | `--web-bind` |
 | `[web]` `port` | 1 bis 65535, Standard 8737 | `--web-port` |
 | `[web]` `password_file` | Datei mit dem Passwort; relativ zur Konfigurationsdatei. Das Passwort selbst ist nie ein Schlüssel | `PUSHSCAN_WEB_PASSWORD_FILE` |
 | `[[target]]` `name` | erforderlich, max. 31 Zeichen, eindeutig | `NAME` |
