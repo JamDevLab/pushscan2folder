@@ -43,31 +43,32 @@ Other Canon IJ models may or may not work. To report another model, see
 
 ## Quick start
 
-With Docker Compose. There is no published image yet, so the compose file
-builds the image from the repository (`build: .`) and you need a clone:
+With Docker Compose. The image is published on the GitHub Container Registry
+(`ghcr.io/jamdevlab/pushscan2folder`, for amd64 and arm64), so you need no
+clone:
 
 ```sh
-git clone https://github.com/JamDevLab/pushscan2folder.git
-cd pushscan2folder
-mkdir -p scans config && cp config.example.toml config/config.toml
-```
-
-Set the printer IP in `docker-compose.yml` (and `user:` to your uid and gid)
-and the targets in `config/config.toml`, then:
-
-```sh
-docker compose up -d --build
+mkdir pushscan2folder && cd pushscan2folder
+mkdir -p scans config
+curl -fsSLO https://raw.githubusercontent.com/JamDevLab/pushscan2folder/main/docker-compose.yml
+curl -fsSL -o config/config.toml https://raw.githubusercontent.com/JamDevLab/pushscan2folder/main/config.example.toml
+# set PUSHSCAN_PRINTER (and user:) in docker-compose.yml
+docker compose up -d
 docker compose logs -f
 ```
 
-The `docker-compose.yml` in the repository looks like this. It is shown here
-so you can see what to change; it only works inside the clone, next to the
-`Dockerfile`:
+Set the targets in `config/config.toml`. To update, run
+`docker compose pull && docker compose up -d`. To build the image yourself,
+see [Docker](docs/docker.md#build-it-yourself).
+
+The `docker-compose.yml` looks like this. It is shown here so you can see what
+to change:
 
 ```yaml
 services:
   pushscan2folder:
-    build: .
+    image: ghcr.io/jamdevlab/pushscan2folder:latest   # or a fixed version, e.g. :0.2.0
+    # build: .                           # instead of image: build it from a clone
     restart: unless-stopped
     user: "1000:1000"                    # owner of ./scans and ./config (id -u, id -g)
     environment:

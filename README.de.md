@@ -45,32 +45,32 @@ Englisch). Bekannte Grenzen stehen in
 
 ## Schnellstart
 
-Mit Docker Compose. Es gibt noch kein veröffentlichtes Image, die Compose-Datei
-baut das Image daher aus dem Repository (`build: .`), und du brauchst einen
-Klon:
+Mit Docker Compose. Das Image liegt in der GitHub Container Registry
+(`ghcr.io/jamdevlab/pushscan2folder`, für amd64 und arm64), du brauchst also
+keinen Klon:
 
 ```sh
-git clone https://github.com/JamDevLab/pushscan2folder.git
-cd pushscan2folder
-mkdir -p scans config && cp config.example.toml config/config.toml
-```
-
-Trage die IP des Druckers in `docker-compose.yml` ein (und bei `user:` deine
-UID und GID) und die Ziele in `config/config.toml`, dann:
-
-```sh
-docker compose up -d --build
+mkdir pushscan2folder && cd pushscan2folder
+mkdir -p scans config
+curl -fsSLO https://raw.githubusercontent.com/JamDevLab/pushscan2folder/main/docker-compose.yml
+curl -fsSL -o config/config.toml https://raw.githubusercontent.com/JamDevLab/pushscan2folder/main/config.example.toml
+# PUSHSCAN_PRINTER (und user:) in docker-compose.yml setzen
+docker compose up -d
 docker compose logs -f
 ```
 
-Die `docker-compose.yml` im Repository sieht so aus. Sie steht hier, damit du
-siehst, was du ändern musst; sie funktioniert nur im Klon, neben dem
-`Dockerfile`:
+Trage die Ziele in `config/config.toml` ein. Zum Aktualisieren:
+`docker compose pull && docker compose up -d`. Um das Image selbst zu bauen,
+siehe [Docker](docs/docker.de.md#selbst-bauen).
+
+Die `docker-compose.yml` sieht so aus. Sie steht hier, damit du siehst, was du
+ändern musst:
 
 ```yaml
 services:
   pushscan2folder:
-    build: .
+    image: ghcr.io/jamdevlab/pushscan2folder:latest   # or a fixed version, e.g. :0.2.0
+    # build: .                           # instead of image: build it from a clone
     restart: unless-stopped
     user: "1000:1000"                    # owner of ./scans and ./config (id -u, id -g)
     environment:

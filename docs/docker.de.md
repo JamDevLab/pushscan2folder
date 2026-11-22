@@ -4,8 +4,10 @@
 
 Zurück zur [README](../README.de.md).
 
-Es gibt noch kein veröffentlichtes Image. Beide Varianten unten bauen das
-Image aus einem Klon des Repositorys.
+Ab Version 0.2.0 gibt es ein veröffentlichtes Image, das bei jedem Release
+gebaut wird: `ghcr.io/jamdevlab/pushscan2folder`, für linux/amd64 und
+linux/arm64 (zum Beispiel ein Raspberry Pi). Die Tags sind die genaue Version
+(`0.2.0`), Major.Minor (`0.2`) und `latest`. Du brauchst keinen Klon.
 
 ## Docker Compose
 
@@ -14,11 +16,17 @@ Die mitgelieferte `docker-compose.yml` hält Ziele und Scan-Einstellungen in
 (auskommentierten) Einstellungen der Weboberfläche:
 
 ```sh
-mkdir -p scans config && cp config.example.toml config/config.toml
-# PUSHSCAN_PRINTER in docker-compose.yml setzen (bei Bedarf die Web-Zeilen)
-docker compose up -d --build
+mkdir pushscan2folder && cd pushscan2folder
+mkdir -p scans config
+curl -fsSLO https://raw.githubusercontent.com/JamDevLab/pushscan2folder/main/docker-compose.yml
+curl -fsSL -o config/config.toml https://raw.githubusercontent.com/JamDevLab/pushscan2folder/main/config.example.toml
+# PUSHSCAN_PRINTER (und user:) in docker-compose.yml setzen (bei Bedarf die Web-Zeilen)
+docker compose up -d
 docker compose logs -f
 ```
+
+Zum Aktualisieren: `docker compose pull && docker compose up -d`. Nimm
+`:latest` oder lege eine Version fest, zum Beispiel `:0.2.0`.
 
 Die Datei sieht so aus (die Web-Zeilen sind auskommentiert, die Weboberfläche
 ist also standardmäßig aus):
@@ -26,7 +34,8 @@ ist also standardmäßig aus):
 ```yaml
 services:
   pushscan2folder:
-    build: .
+    image: ghcr.io/jamdevlab/pushscan2folder:latest   # or a fixed version, e.g. :0.2.0
+    # build: .                           # instead of image: build it from a clone
     restart: unless-stopped
     user: "1000:1000"                    # owner of ./scans and ./config (id -u, id -g)
     environment:
@@ -49,15 +58,28 @@ Konfigurationsdatei.
 
 ## Reines Docker
 
-Bauen und starten:
-
 ```sh
-docker build -t pushscan2folder .
 mkdir -p scans
 docker run -d --name pushscan2folder --restart unless-stopped \
   --user "$(id -u):$(id -g)" \
   -e PUSHSCAN_PRINTER=192.168.1.50 -e PUSHSCAN_NAME=docker-scan \
-  -v "$PWD/scans:/scans" pushscan2folder
+  -v "$PWD/scans:/scans" ghcr.io/jamdevlab/pushscan2folder:latest
+```
+
+## Selbst bauen
+
+Klone das Repository. Bei Compose ersetze `image:` in `docker-compose.yml` durch
+`build: .` (oder lass beide Zeilen stehen), dann:
+
+```sh
+docker compose up -d --build
+```
+
+Bei reinem Docker baue ein lokales Image und nimm im `docker run`-Befehl oben
+`pushscan2folder` statt des veröffentlichten Image-Namens:
+
+```sh
+docker build -t pushscan2folder .
 ```
 
 ## Benutzer, UID und GID
@@ -67,7 +89,7 @@ Ausgabeverzeichnis beschreiben können. Übergib entweder
 `--user "$(id -u):$(id -g)"` (wie oben, oder `user:` in Compose), damit die
 Dateien dir gehören, oder setze mit `chown` die UID des Container-Benutzers auf
 das Host-Verzeichnis (prüfe sie mit
-`docker run --rm --entrypoint id pushscan2folder`).
+`docker run --rm --entrypoint id ghcr.io/jamdevlab/pushscan2folder:latest`).
 
 ## Volumes
 

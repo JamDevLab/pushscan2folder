@@ -12,6 +12,10 @@ uninstall command, as an alternative to the Canon software on a Windows PC.
 
 ### Added
 
+- Docker image on the GitHub Container Registry
+  (`ghcr.io/jamdevlab/pushscan2folder`, amd64 and arm64, tags VERSION,
+  MAJOR.MINOR and latest), built on each release. The compose file uses it, so
+  no clone is needed.
 - `pushscan2folder start` runs the program detached in the background (no
   console window on Windows, its own session elsewhere) with the same options
   as `run`; `stop` ends it cleanly so the panel names are released (stop request
