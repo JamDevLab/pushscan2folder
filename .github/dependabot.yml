@@ -1,0 +1,16 @@
+# Dependabot opens pull requests when a GitHub Action or the Python base image
+# of the Dockerfile has a newer version. The project has no Python dependencies.
+# PyInstaller is pinned in release.yml and is updated by hand.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
+    groups:
+      actions:
+        patterns: ["*"]
+  - package-ecosystem: docker
+    directory: /
+    schedule:
+      interval: monthly
