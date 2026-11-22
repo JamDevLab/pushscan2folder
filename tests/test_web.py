@@ -1098,7 +1098,7 @@ class RawConfigTests(WebTestBase):
         self.assertEqual(self.save(text)[0], 303)
         self.assertIn('output = "/consume"', self.config_path.read_text())
         self.assertEqual([t.outdir for t in self.service.requested[0]],
-                         [self.dir / "scans" / "inbox2", Path("/consume")])
+                         [self.dir / "scans" / "inbox2", Path(os.path.abspath("/consume"))])
 
     def test_locked_target_changes_rejected(self):
         self.assertRejected(self.START.replace("/consume", "/etc"), 'Target "paperless"')
@@ -1333,7 +1333,10 @@ class RawHttpTests(WebTestBase):
             sock.sendall(data)
             out = b""
             while True:
-                chunk = sock.recv(65536)
+                try:
+                    chunk = sock.recv(65536)
+                except ConnectionResetError:   # macOS: refused connection is reset
+                    return out
                 if not chunk:
                     return out
                 out += chunk
