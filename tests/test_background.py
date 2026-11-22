@@ -516,8 +516,8 @@ class UninstallTests(TempDirCase):
         removed.assert_called_once()
         text = "\n".join(self.lines)
         self.assertIn("Autostart entry removed.", text)
-        self.assertIn("delete the program file itself", text)
-        self.assertIn("ps.exe", text)
+        self.assertIn("delete the program folder itself", text)
+        self.assertIn(str(Path("C:/x")), text)
 
     def test_stops_the_instance_first(self):
         order = []

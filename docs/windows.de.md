@@ -6,11 +6,15 @@ Linux und Docker stehen in der README. macOS steht am Ende dieser Seite.
 
 ## Download
 
-1. Auf der Releases-Seite des Projekts bei GitHub `pushscan2folder.exe` herunterladen (und bei Bedarf `SHA256SUMS.txt`).
-2. In einen eigenen Ordner legen, zum Beispiel `C:\Tools\pushscan2folder\`.
-3. Zur Kontrolle in PowerShell `Get-FileHash pushscan2folder.exe` ausführen und mit `SHA256SUMS.txt` vergleichen.
+1. Auf der Releases-Seite des Projekts bei GitHub `pushscan2folder-VERSION-windows.zip` herunterladen (und bei Bedarf `SHA256SUMS.txt`).
+2. Zur Kontrolle in PowerShell `Get-FileHash pushscan2folder-VERSION-windows.zip` ausführen und mit `SHA256SUMS.txt` vergleichen.
+3. Die Zip in einen eigenen Ordner entpacken, zum Beispiel `C:\Tools\`. Es entsteht `C:\Tools\pushscan2folder\` mit `pushscan2folder.exe` und einem Ordner `_internal`; beide gehören zusammen.
 
-Die exe wird von GitHub Actions aus dem getaggten Quellcode gebaut. Sie ist nicht code-signiert.
+Das Programm wird von GitHub Actions aus dem getaggten Quellcode gebaut. Es ist nicht code-signiert.
+
+### Warnungen von Virenscannern
+
+Mit PyInstaller gepackte Programme werden manchmal von Virenscannern gemeldet, etwa von Microsoft Defender als `Trojan:Win32/Bearfoos.A!ml`. Das `!ml` steht für eine Vermutung des Machine-Learning-Modells, nicht für eine bekannte Signatur. Damit das selten passiert, ist das Release ein Ordner-Build (beim Start wird nichts entpackt) mit einem Starter, den der Build selbst kompiliert. Passiert es trotzdem: Prüfsumme kontrollieren, die Datei im Schutzverlauf wiederherstellen und den Fehlalarm bei Bedarf unter https://www.microsoft.com/wdsi/filesubmission melden. Bitte auch ein Issue öffnen, damit er für das Release gemeldet werden kann.
 
 ## Erster Start und SmartScreen
 
@@ -157,7 +161,7 @@ Du siehst den Eintrag auch im Task-Manager auf dem Tab "Autostart-Apps" oder unt
 .\pushscan2folder.exe uninstall
 ```
 
-Das beendet die Hintergrundinstanz (die Namen verschwinden vom Display), entfernt den Autostart-Eintrag und listet dann den Konfigurationsordner (`%APPDATA%\pushscan2folder\`, mit `config.toml` und `web_password.txt`) sowie den Log- und Statusordner (`%LOCALAPPDATA%\pushscan2folder\`) auf. Es fragt, ob sie gelöscht werden sollen, Standard nein. Deine Scans werden nie gelöscht, und ein Ordner, der deinen Scan-Ordner enthält, bleibt erhalten. Am Ende erinnert es dich, `pushscan2folder.exe` selbst zu löschen, denn Windows kann ein laufendes Programm nicht löschen.
+Das beendet die Hintergrundinstanz (die Namen verschwinden vom Display), entfernt den Autostart-Eintrag und listet dann den Konfigurationsordner (`%APPDATA%\pushscan2folder\`, mit `config.toml` und `web_password.txt`) sowie den Log- und Statusordner (`%LOCALAPPDATA%\pushscan2folder\`) auf. Es fragt, ob sie gelöscht werden sollen, Standard nein. Deine Scans werden nie gelöscht, und ein Ordner, der deinen Scan-Ordner enthält, bleibt erhalten. Am Ende erinnert es dich, den Programmordner `pushscan2folder` selbst zu löschen, denn Windows kann ein laufendes Programm nicht löschen.
 
 Für Skripte: `uninstall --yes` fragt nicht und behält Konfiguration und Log; `uninstall --yes --purge` löscht sie. Ordner, die über `--config PFAD` angegeben sind, werden nicht angefasst.
 

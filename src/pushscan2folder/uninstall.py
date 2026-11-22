@@ -74,8 +74,8 @@ def uninstall(inst: background.Instance, config_dir: Path, state_dir: Path,
         out("No settings or log folders to delete.")
     out("Your scans were not touched.")
     if exe is not None:
-        out(f"Last step: delete the program file itself, {exe}. A running program "
-            "cannot delete its own file.")
+        out(f"Last step: delete the program folder itself, {exe.parent}. A running "
+            "program cannot delete its own files.")
     else:
         out("The program itself is not removed by this command (remove it the way "
             "you installed it, e.g. pip uninstall pushscan2folder).")

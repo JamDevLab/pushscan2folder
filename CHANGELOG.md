@@ -36,7 +36,7 @@ All notable changes are documented here. The format follows
   password stays out of `config.toml`; setup stores it in `web_password.txt`.
 - Windows: a console opened only for the program waits for Enter before it
   closes. `--no-pause` / `PUSHSCAN_NO_PAUSE` turns it off; autostart sets it.
-- Windows support: default config in `%APPDATA%\pushscan2folder`, scans in
+- Windows support (zip with `pushscan2folder.exe`, folder build with a self-compiled bootloader to avoid virus scanner false alarms): default config in `%APPDATA%\pushscan2folder`, scans in
   `Documents\Scans`, a single-file `pushscan2folder.exe` built by GitHub
   Actions and attached to each release, `--install-autostart` /
   `--remove-autostart` (per-user Run key), see `docs/windows.md`.

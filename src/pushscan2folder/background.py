@@ -205,8 +205,8 @@ def launch(command: list[str], popen=subprocess.Popen):
     else:
         kwargs["start_new_session"] = True
     if getattr(sys, "frozen", False):
-        # A one-file exe starting itself: the child must not share (and lose)
-        # the extraction folder of this short-lived parent.
+        # Only matters for a one-file build (the release is a folder build):
+        # the child must not share the extraction folder of the parent.
         kwargs["env"] = dict(os.environ, PYINSTALLER_RESET_ENVIRONMENT="1")
     return popen(command, **kwargs)
 

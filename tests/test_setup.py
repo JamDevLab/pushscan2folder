@@ -353,8 +353,6 @@ class PauseTests(unittest.TestCase):
         self.assertFalse(should("win32", None, True))       # count unknown
         self.assertFalse(should("linux", 1, True))
         self.assertFalse(should("darwin", 1, True))
-        self.assertTrue(should("win32", 2, True, frozen=True))   # one-file exe: bootloader + program
-        self.assertFalse(should("win32", 3, True, frozen=True))
 
     def test_no_console_off_windows(self):
         with mock.patch.object(sys, "platform", "linux"):

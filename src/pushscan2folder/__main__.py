@@ -461,15 +461,14 @@ def autostart_main(argv: list[str]) -> int:
 
 
 def should_pause(platform: str, process_count: int | None, stdin_isatty: bool,
-                 no_pause: bool = False, frozen: bool = False) -> bool:
+                 no_pause: bool = False) -> bool:
     """True if the console window may close before the user can read the output:
     Windows, a console that belongs to this program alone (opened by a double
-    click), an interactive stdin to wait on, and no opt-out. The one-file exe
-    runs as a bootloader process plus the program itself, so two processes
-    count as alone there."""
+    click), an interactive stdin to wait on, and no opt-out. The exe is built
+    as a folder (one process, no separate bootloader process)."""
     if no_pause or platform != "win32" or not stdin_isatty or process_count is None:
         return False
-    return process_count <= (2 if frozen else 1)
+    return process_count <= 1
 
 
 def console_process_count() -> int | None:
@@ -491,8 +490,7 @@ def pause_before_exit(raw: list[str]) -> None:
         no_pause = autostart.NO_PAUSE in raw or env_bool("NO_PAUSE", False)
         if not is_windows() or no_pause:
             return
-        if not should_pause(sys.platform, console_process_count(), sys.stdin.isatty(),
-                            frozen=bool(getattr(sys, "frozen", False))):
+        if not should_pause(sys.platform, console_process_count(), sys.stdin.isatty()):
             return
         print("\nPress Enter to close this window.", flush=True)
         input()
