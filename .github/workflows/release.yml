@@ -88,6 +88,8 @@ jobs:
           # the uninstaller finishes in a copy of itself, so wait for the files to go
           for ($i = 0; $i -lt 30 -and (Test-Path "$app\pushscan2folder.exe"); $i++) { Start-Sleep 1 }
           if (Test-Path "$app\pushscan2folder.exe") { Write-Error "uninstall left the exe"; exit 1 }
+          # status left exit code 1 behind, which would fail the step
+          exit 0
       - name: Checksum
         working-directory: dist
         run: |
