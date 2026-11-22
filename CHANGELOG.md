@@ -5,6 +5,11 @@ All notable changes are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-11-22
+
+Windows support: an installer, background mode, a setup dialog and an
+uninstall command, as an alternative to the Canon software on a Windows PC.
+
 ### Added
 
 - `pushscan2folder start` runs the program detached in the background (no
