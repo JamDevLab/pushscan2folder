@@ -1340,7 +1340,7 @@ class RawHttpTests(WebTestBase):
             while True:
                 try:
                     chunk = sock.recv(65536)
-                except ConnectionResetError:   # macOS: refused connection is reset
+                except (ConnectionResetError, ConnectionAbortedError):   # macOS, Windows
                     return out
                 if not chunk:
                     return out

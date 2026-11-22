@@ -298,7 +298,9 @@ class SetupTests(unittest.TestCase):
 
     def test_main_setup_command_starts_run(self):
         answers = iter(["192.0.2.7", "", str(self.dir / "s"), "", "n"])
+        # linux: no autostart question (Windows asks one more)
         with mock.patch("builtins.input", lambda prompt="": next(answers)), \
+                mock.patch.object(sys, "platform", "linux"), \
                 mock.patch("pushscan2folder.wizard.probe_printer",
                            return_value=(True, "ok")), \
                 mock.patch.dict(os.environ, {k: v for k, v in os.environ.items()
