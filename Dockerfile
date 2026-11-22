@@ -10,8 +10,10 @@ WORKDIR /app
 COPY src/ /app/src/
 
 ENV PYTHONPATH=/app/src \
+    PUSHSCAN_WEB_PORT=8080 \
     PYTHONUNBUFFERED=1 \
     PUSHSCAN_OUTPUT=/scans \
+    PUSHSCAN_WEB_PORT=8080 \
     PUSHSCAN_HEARTBEAT_FILE=/tmp/pushscan2folder.alive
 
 VOLUME /scans

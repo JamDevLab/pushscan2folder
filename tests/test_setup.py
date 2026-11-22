@@ -128,7 +128,7 @@ class WebTableTests(unittest.TestCase):
 
     def test_builtin_when_not_in_file(self):
         args, _ = cli.parse_args(["--config", self.config_file('printer = "192.0.2.1"\n'), "run"])
-        self.assertEqual((args.web, args.web_port, args.web_bind), (False, 8080, "0.0.0.0"))
+        self.assertEqual((args.web, args.web_port, args.web_bind), (False, 8737, "0.0.0.0"))
 
     def test_dump_keeps_web_table(self):
         cfg = load_config_text(WEB_TOML)
@@ -277,7 +277,7 @@ class SetupTests(unittest.TestCase):
         self.assertNotIn("short", text)
         cfg = load_config_text(text)
         self.assertTrue(cfg.web_enabled)
-        self.assertEqual((cfg.web_port, cfg.web_bind), (8080, "127.0.0.1"))
+        self.assertEqual((cfg.web_port, cfg.web_bind), (8737, "127.0.0.1"))
         pw_file = self.path.with_name("web_password.txt")
         self.assertEqual(cfg.web_password_file, str(pw_file))
         self.assertEqual(pw_file.read_text(encoding="utf-8").strip(), secret)
@@ -512,7 +512,7 @@ class GreetingTests(unittest.TestCase):
         typed = iter(answers)
 
         def fake_input(prompt):
-            value = next(typed)
+            value = next(typed, EOFError())
             if isinstance(value, BaseException):
                 raise value
             return value
@@ -535,11 +535,12 @@ class GreetingTests(unittest.TestCase):
     def test_menu_not_running_starts_by_default(self):
         self.cfg.parent.mkdir()
         self.cfg.write_text('printer = "x"\n')
-        result, calls, out = self.menu([""])
-        self.assertEqual(result, 11)
+        result, calls, out = self.menu(["", "7"])
+        self.assertEqual(result, 0)
         calls["start"].assert_called_once_with(["start"], instance=self.instance)
         self.assertIn("Not running.", out)
         self.assertNotIn("Stop", out)
+        self.assertEqual(out.count("pushscan2folder 0"), 2)  # menu shown again
 
     def test_menu_running_default_is_status_and_loops(self):
         self.cfg.parent.mkdir()
@@ -554,21 +555,24 @@ class GreetingTests(unittest.TestCase):
     def test_menu_running_stop(self):
         self.cfg.parent.mkdir()
         self.cfg.write_text('printer = "x"\n')
-        result, calls, _ = self.menu(["1"], running=True)
-        self.assertEqual(result, 12)
+        result, calls, _ = self.menu(["1", "7"], running=True)
+        self.assertEqual(result, 0)
         calls["stop"].assert_called_once_with(self.instance)
 
     def test_menu_settings(self):
         self.cfg.parent.mkdir()
         self.cfg.write_text('printer = "x"\n')
-        result, calls, _ = self.menu(["4"])  # start, status, config, settings
-        self.assertEqual(result, 7)
+        result, calls, _ = self.menu(["4", "7"])  # start, status, config, settings
+        self.assertEqual((result, calls["setup"].called), (0, True))
         # running: stop first (declined: back to the menu, then quit)
         result, calls, out = self.menu(["4", "n", "7"], running=True)
         self.assertEqual((result, calls["setup"].called), (0, False))
         self.assertIn("must be stopped", out)
-        result, calls, _ = self.menu(["4", ""], running=True, stop_code=0)
-        self.assertEqual((result, calls["stop"].called, calls["setup"].called), (7, True, True))
+        result, calls, _ = self.menu(["4", "", "7"], running=True, stop_code=0)
+        self.assertEqual((result, calls["stop"].called, calls["setup"].called), (0, True, True))
+        # a failed stop: no settings, back to the menu
+        result, calls, _ = self.menu(["4", "", "7"], running=True, stop_code=1)
+        self.assertEqual((result, calls["setup"].called), (0, False))
 
     def write_config(self, text='printer = "x"\n'):
         self.cfg.parent.mkdir(exist_ok=True)
@@ -591,7 +595,7 @@ class GreetingTests(unittest.TestCase):
         with mock.patch.dict(os.environ, {"PUSHSCAN_WEB_PORT": "9100"}):
             self.assertEqual(cli.web_url(), "http://[::1]:9100/")
         self.write_config('printer = "x"\n[web]\nenabled = true\n')
-        self.assertEqual(cli.web_url(), "http://127.0.0.1:8080/")
+        self.assertEqual(cli.web_url(), "http://127.0.0.1:8737/")
 
     def test_menu_open_config_file(self):
         self.write_config()

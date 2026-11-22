@@ -20,7 +20,7 @@ from .terminal import link
 from .web import MIN_PASSWORD_LENGTH
 
 EXAMPLE_PASSWORD = "change-me-please"  # placeholder in docker-compose.yml
-DEFAULT_PORT = 8080
+DEFAULT_PORT = 8737
 DEFAULT_BIND = "127.0.0.1"
 PASSWORD_FILE_NAME = "web_password.txt"
 EXISTING_CHOICES = {"1": "use", "2": "change", "3": "new"}

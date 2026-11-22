@@ -240,8 +240,8 @@ def build_parser(cfg: Config | None = None) -> argparse.ArgumentParser:
                          help="serve the optional web page (status, log, target editor); "
                               "the password comes from PUSHSCAN_WEB_PASSWORD, "
                               "PUSHSCAN_WEB_PASSWORD_FILE or [web] password_file")
-        opts.add_argument("--web-port", type=int, default=int(env("WEB_PORT", cfg.web_port or 8080)),
-                         help="port of the web page (default: 8080)")
+        opts.add_argument("--web-port", type=int, default=int(env("WEB_PORT", cfg.web_port or 8737)),
+                         help="port of the web page (default: 8737)")
         opts.add_argument("--web-bind", default=env("WEB_BIND", cfg.web_bind or "0.0.0.0"),
                          help="address of the web page (default: 0.0.0.0)")
 
@@ -850,9 +850,9 @@ def web_url(argv=None) -> str | None:
     if not cfg.web_enabled:
         return None
     try:
-        port = int(env("WEB_PORT") or cfg.web_port or 8080)
+        port = int(env("WEB_PORT") or cfg.web_port or 8737)
     except ValueError:
-        port = cfg.web_port or 8080
+        port = cfg.web_port or 8737
     host = cfg.web_bind
     if not host or host in ("0.0.0.0", "::"):
         host = "127.0.0.1"
@@ -912,8 +912,8 @@ def menu_uninstall(instance: background.Instance, input_fn=input, popen=None) ->
 
 def menu(instance: background.Instance, input_fn=input) -> int:
     """Small numbered menu for a double click. Status, web page, config file,
-    help and a declined uninstall show the menu again; every other choice
-    returns its result."""
+    help, start, stop, the settings and a declined uninstall show the menu
+    again. Only quit, Ctrl+C/EOF and a finished uninstall end it."""
     while True:
         running = instance.is_running()
         if running:
@@ -942,10 +942,13 @@ def menu(instance: background.Instance, input_fn=input) -> int:
             print("Please enter one of the numbers.\n")
             continue
         action = actions[int(answer) - 1][1] if answer else default
-        if action == "start":
-            return start_main(["start"], instance=instance)
-        if action == "stop":
-            return stop_main(instance)
+        if action in ("start", "stop"):
+            if action == "start":
+                start_main(["start"], instance=instance)
+            else:
+                stop_main(instance)
+            print()
+            continue
         if action == "status":
             print()
             status_main(instance)
@@ -986,11 +989,12 @@ def menu(instance: background.Instance, input_fn=input) -> int:
             if stop_first not in ("", "y", "yes", "j", "ja"):
                 print()
                 continue
-            code = stop_main(instance)
-            if code != 0:
-                return code
+            if stop_main(instance) != 0:
+                print()
+                continue
             print()
-        return setup_main(None)
+        setup_main(None)
+        print()
 
 
 def greeting(raw: list[str], instance: background.Instance | None = None,
