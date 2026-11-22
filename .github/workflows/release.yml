@@ -1,11 +1,12 @@
 name: release
 
 # Builds the single-file Windows program and attaches it to the GitHub
-# release of the tag. A manual run only builds and keeps the exe as a
-# workflow artifact.
+# release of the tag. Pushes to other branches than main and manual runs
+# only build and keep the exe as a workflow artifact (for testing).
 on:
   push:
     tags: ["v*"]
+    branches-ignore: [main]
   workflow_dispatch:
 
 permissions:
