@@ -11,6 +11,7 @@ from typing import Callable
 from . import background
 
 FOLDER_NAME = "pushscan2folder"  # only folders with this name are ever deleted
+UNINSTALLER = "unins000.exe"      # next to the exe when the Windows installer was used
 
 
 def contains(folder: Path, path: Path) -> bool:
@@ -73,7 +74,10 @@ def uninstall(inst: background.Instance, config_dir: Path, state_dir: Path,
     else:
         out("No settings or log folders to delete.")
     out("Your scans were not touched.")
-    if exe is not None:
+    if exe is not None and (exe.parent / UNINSTALLER).is_file():
+        out("Last step: remove the program under Windows Settings > Apps > "
+            "pushscan2folder (the installer's uninstaller does the rest).")
+    elif exe is not None:
         out(f"Last step: delete the program folder itself, {exe.parent}. A running "
             "program cannot delete its own files.")
     else:

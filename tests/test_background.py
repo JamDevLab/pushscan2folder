@@ -519,6 +519,15 @@ class UninstallTests(TempDirCase):
         self.assertIn("delete the program folder itself", text)
         self.assertIn(str(Path("C:/x")), text)
 
+    def test_installed_copy_points_to_windows_apps(self):
+        program = self.dir / "program"
+        program.mkdir()
+        (program / uninstall.UNINSTALLER).write_bytes(b"MZ")
+        self.run_uninstall(answer="", exe=program / "pushscan2folder.exe")
+        text = "\n".join(self.lines)
+        self.assertIn("Settings > Apps", text)
+        self.assertNotIn("delete the program folder itself", text)
+
     def test_stops_the_instance_first(self):
         order = []
         self.run_uninstall(answer="", stop=lambda i: order.append("stop") or background.STOPPED,
