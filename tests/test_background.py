@@ -297,6 +297,18 @@ class LaunchTests(TempDirCase):
         self.assertFalse(ok)
         self.assertIn("exit code 3", message)
 
+    def test_error_output_of_a_dying_child_is_shown(self):
+        inst = self.instance()
+
+        def popen(*args, **kwargs):
+            kwargs["stderr"].write(b"error: invalid PUSHSCAN_MULTIPAGE 'x'\n")
+            return FakeProc(2)
+        ok, message = background.start_instance(["run"], inst, popen=popen,
+                                                sleep=lambda s: None)
+        self.assertFalse(ok)
+        self.assertIn("exit code 2", message)
+        self.assertIn("invalid PUSHSCAN_MULTIPAGE", message)
+
     def test_child_that_never_reports(self):
         inst = self.instance()
         now = [0.0]

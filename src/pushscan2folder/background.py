@@ -27,6 +27,9 @@ LOCK_NAME = "pushscan2folder.lock"
 INFO_NAME = "pushscan2folder.pid"
 STOP_NAME = "pushscan2folder.stop"
 BUSY_NAME = "pushscan2folder.busy"   # exists while a scan runs
+# Error output of the last background start: errors before the log file is
+# open (a bad option, the web password file) end up here, not in the log.
+ERRORS_NAME = "pushscan2folder.start-errors.txt"
 
 # Windows process creation flags (spelled out: the subprocess constants exist on Windows only).
 CREATE_NO_WINDOW = 0x08000000
@@ -85,6 +88,7 @@ class Instance:
         self.info_path = self.dir / INFO_NAME
         self.stop_path = self.dir / STOP_NAME
         self.busy_path = self.dir / BUSY_NAME
+        self.errors_path = self.dir / ERRORS_NAME
         self._fd: int | None = None
 
     def is_running(self) -> bool:
@@ -227,11 +231,12 @@ def stop_instance(inst: Instance, timeout: float = STOP_TIMEOUT, poll: float = 0
     return TERMINATED
 
 
-def launch(command: list[str], popen=subprocess.Popen):
-    """Start `command` detached from this console and session, no output
-    streams, no window. Returns the Popen object."""
+def launch(command: list[str], popen=subprocess.Popen, stderr=subprocess.DEVNULL):
+    """Start `command` detached from this console and session, no window, no
+    input or output; error output goes to `stderr` (a file or DEVNULL).
+    Returns the Popen object."""
     kwargs: dict = dict(stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
-                        stderr=subprocess.DEVNULL, close_fds=True)
+                        stderr=stderr, close_fds=True)
     if is_windows():
         kwargs["creationflags"] = WINDOWS_FLAGS
     else:
@@ -253,9 +258,18 @@ def start_instance(argv: list[str], inst: Instance, popen=subprocess.Popen,
         pid = inst.read_info().pid
         return False, ALREADY_RUNNING + (f" (PID {pid})" if pid else "")
     try:
-        proc = launch(autostart.program_command() + argv, popen)
+        inst.dir.mkdir(parents=True, exist_ok=True)
+        errors = open(inst.errors_path, "wb")
+    except OSError:
+        errors = None
+    try:
+        proc = launch(autostart.program_command() + argv, popen,
+                      stderr=errors if errors is not None else subprocess.DEVNULL)
     except OSError as exc:
         return False, f"cannot start: {exc.strerror or exc}"
+    finally:
+        if errors is not None:
+            errors.close()   # the child has its own handle
     deadline = clock() + timeout
     while clock() < deadline:
         if inst.is_running():
@@ -268,9 +282,20 @@ def start_instance(argv: list[str], inst: Instance, popen=subprocess.Popen,
             return True, "started" + (f" (PID {pid})" if pid else "")
         code = proc.poll()
         if code is not None:
-            return False, f"the background process ended right away (exit code {code})"
+            message = f"the background process ended right away (exit code {code})"
+            reason = start_errors(inst)
+            return False, message + (f":\n{reason}" if reason else "")
         sleep(0.25)
     return False, "the background process did not report in time"
+
+
+def start_errors(inst: Instance, limit: int = 2000) -> str:
+    """What the last background start wrote to its error output ("" if nothing)."""
+    try:
+        data = inst.errors_path.read_bytes()[-limit:]
+    except OSError:
+        return ""
+    return data.decode("utf-8", "replace").strip()
 
 
 def log_tail(path: Path | str | None, lines: int = 10) -> list[str]:

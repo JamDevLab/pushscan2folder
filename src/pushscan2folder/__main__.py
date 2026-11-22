@@ -717,7 +717,8 @@ def start_main(raw: list[str], hints: bool = True, popen=subprocess.Popen,
     """`start`: launch the background instance with the given options, return."""
     try:
         args, _ = parse_args(replace_command(raw, "run"))
-    except ConfigError as exc:
+        check_run_options(args)   # the same checks as the background process
+    except (ConfigError, ValueError) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2
     if not args.printer:
@@ -729,7 +730,7 @@ def start_main(raw: list[str], hints: bool = True, popen=subprocess.Popen,
     ok, message = background.start_instance(background_argv(raw, args), inst, popen=popen)
     if not ok:
         print(f"error: {message}", file=sys.stderr)
-        if not message.startswith(background.ALREADY_RUNNING):
+        if not message.startswith(background.ALREADY_RUNNING) and ":\n" not in message:
             for line in background.log_tail(log_path, 5):
                 print(f"  {line}", file=sys.stderr)
         return 1
