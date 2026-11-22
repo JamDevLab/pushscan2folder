@@ -139,7 +139,7 @@ environment wins over the [configuration file](#configuration-file). More in
 | `--color`      | `PUSHSCAN_COLOR`      | `color`             | run           | `color` or `gray`. Only used with `--ignore-panel` or if the panel sends no colour |
 | `--resolution` | `PUSHSCAN_RESOLUTION` | `300`               | run           | DPI. Fallback. The panel offers 75, 150, 300, 600 |
 | `--source`     | `PUSHSCAN_SOURCE`     | `auto`              | run (env: run only) | `auto`, `platen` or `adf`. Fallback |
-| `--trim`       | `PUSHSCAN_TRIM`       | none                | run           | Cut off a border by scanning a smaller area, e.g. `right=3,bottom=2` (keys `left`, `top`, `right`, `bottom`, in mm, 0 to 50). Platen only. Replaces the `trim_*` config values as a whole, see [Trimming a border](#trimming-a-border) |
+| `--trim`       | `PUSHSCAN_TRIM`       | none                | run           | Cut off a border by scanning a smaller area, e.g. `right=1,bottom=2` (keys `left`, `top`, `right`, `bottom`, in mm, 0 to 50). Platen only. Replaces the `trim_*` config values as a whole, see [Trimming a border](#trimming-a-border) |
 | `--targets`    | `PUSHSCAN_TARGETS`    | -                   | run           | Several panel entries, each with its own folder and optional preset, see [Multiple targets](#multiple-targets). Replaces `--name` for `run` |
 | `--ignore-panel` | `PUSHSCAN_IGNORE_PANEL` | off             | run           | Ignore the panel settings and always use the four options above (`--format`, `--color`, `--resolution`, `--source`). Env var: `1`, `true` or `yes`. Also disables multi-page scans |
 | `--multipage`  | `PUSHSCAN_MULTIPAGE`  | `document`          | run           | `document`, `auto`, `both` or `off`, see [Multi-page scans](#multi-page-scans-from-the-platen) |
@@ -179,9 +179,6 @@ the file and the key, so typos are caught.
 |-----|--------|---------|
 | `printer` | IP or host name | `--printer` |
 | `output` | folder; relative target outputs resolve against it | `--output` |
-| `interval` | seconds | `--interval` |
-| `verbose`, `ignore_panel` | `true` / `false` | `--verbose`, `--ignore-panel` |
-| `multipage` | `document`, `auto`, `both`, `off` | `--multipage` |
 | `[defaults]` `resolution` | `75`, `150`, `300`, `600` | `--resolution` |
 | `[defaults]` `color` | `color`, `gray` | `--color` |
 | `[defaults]` `format` | `pdf`, `jpeg` | `--format` |
@@ -189,7 +186,11 @@ the file and the key, so typos are caught.
 | `[defaults]` `size` | `a4`, `letter`, `legal`, `10x15`, `13x18` | scan area without panel data |
 | `[defaults]` `open_after_scan` | `off`, `folder`, `file` | `--open-after-scan` |
 | `[defaults]` `filename` | template, see [File names](#file-names) | `--filename` |
-| `[defaults]` `trim_left`, `trim_top`, `trim_right`, `trim_bottom` | number, mm, 0 to 50 | `--trim` |
+| `[defaults.document]` `multipage` | `true` / `false`, built-in `true` | `--multipage` (panel document type *Document*) |
+| `[defaults.auto]` `multipage` | `true` / `false`, built-in `false` | `--multipage` (panel document type *Auto*) |
+| `[advanced]` `interval` | seconds | `--interval` |
+| `[advanced]` `verbose`, `ignore_panel` | `true` / `false` | `--verbose`, `--ignore-panel` |
+| `[advanced]` `trim_left`, `trim_top`, `trim_right`, `trim_bottom` | number, mm, 0 to 50 | `--trim` |
 | `[web]` `enabled` | `true` / `false` | `--web` |
 | `[web]` `bind` | address, default `0.0.0.0` | `--web-bind` |
 | `[web]` `port` | 1 to 65535, default 8080 | `--web-port` |
@@ -198,13 +199,37 @@ the file and the key, so typos are caught.
 | `[[target]]` `output` | folder; `"."` is the output directory itself; default `<output>/<name>` | `NAME=DIR` |
 | `[[target]]` `filename` | template, see [File names](#file-names); wins over `[defaults]` for this target | - |
 | `[[target]]` `open_after_scan` | `off`, `folder`, `file`; wins over `[defaults]` for this target, for example `off` for an archive folder | - |
-| `[[target]]` `document_multipage` | `true` / `false` | `mp:` for document type *Document* |
+| `[target.document]` `multipage` | `true` / `false` | `mp:` for document type *Document* |
 | `[target.auto]` `resolution`, `format`, `size` | as above | the `@preset` options |
 | `[target.auto]` `multipage` | `true` / `false` | `mp:` for document type *Auto scan* |
 
-The multi-page booleans start from the global `multipage` mode and add or
-remove *Document* / *Auto scan* for that target. If a target sets neither, it
-follows the global mode.
+The multi-page booleans of a target start from `[defaults.document]` and
+`[defaults.auto]` (or `--multipage`) and replace the value for that target. If
+a target sets neither, it follows the defaults.
+
+The printer panel has three document types. *Photo* needs no table, because the
+panel sends all of its settings itself (JPEG, size, resolution). With *Document*
+the panel sends them too and `[defaults.document]` only decides about the
+multi-page dialog. With *Auto* the panel sends no size, format or resolution, so
+`[defaults]` and `[target.auto]` decide.
+
+If `[defaults.document]` or `[defaults.auto]` is left out, the built-in value applies (`true` for *Document*, `false` for *Auto*). Setting only one of them keeps
+the built-in value of the other.
+
+### Older config files
+
+Files from earlier versions still work. The old keys are read and the log shows
+a warning that lists them. Setup and the web page write the new layout.
+
+| Old place | New place |
+|-----------|-----------|
+| `interval`, `verbose`, `ignore_panel` at the top level | `[advanced]` |
+| `trim_*` in `[defaults]` | `[advanced]` |
+| `multipage = "document"` (or `auto`, `both`, `off`) at the top level | `multipage` in `[defaults.document]` and `[defaults.auto]` |
+| `document_multipage` in a `[[target]]` | `multipage` in `[target.document]` |
+
+If the old and the new place of the same key are both present, the file is
+rejected with a message such as "keep only ...".
 
 ## Precedence
 
@@ -227,13 +252,13 @@ startup. Command line options and `PUSHSCAN_*` environment variables still win
 over the file. This also applies to changes made on the [web page](web.md).
 
 These are applied right away: the scan defaults (`[defaults]` keys, `size`,
-`trim_*`, `filename`), `interval`, `ignore_panel`, `multipage`,
-`open_after_scan`, the targets, `output` and `printer`. Targets whose names stay
+`filename`, the `multipage` keys), `interval`, `ignore_panel` and the `trim_*`
+values from `[advanced]`, `open_after_scan`, the targets, `output` and `printer`. Targets whose names stay
 keep their registration on the panel. If the printer changes, the names are
 released on the old printer and registered on the new one.
 
 These need a restart: the web page on or off, its bind address, port and
-password file, the log file, the debug log (`verbose`) and the heartbeat file.
+password file, the log file, the debug log (`verbose` in `[advanced]`) and the heartbeat file.
 If the file changes one of them, the log shows a warning that names it.
 
 An invalid file, or an invalid file name template, is logged once as an error
@@ -265,10 +290,10 @@ are always used.
 
 ## Trimming a border
 
-Some scanners capture a thin border at the glass edge. The TR8550 seems to
-show about 3 mm on the right and 2 mm at the bottom (still to be verified).
-With `--trim right=3,bottom=2` (or `PUSHSCAN_TRIM`, or the `trim_*` keys in the
-config file) the tool asks the printer for a smaller scan area, so the border
+Some scanners capture a thin border at the glass edge. On a TR8550, tests
+showed `trim_right = 1` and `trim_bottom = 2` (mm) remove it. With
+`--trim right=1,bottom=2` (or `PUSHSCAN_TRIM`, or the `trim_*` keys in the
+`[advanced]` table of the config file) the tool asks the printer for a smaller scan area, so the border
 is never scanned. No image processing is involved. Trimming applies to the
 platen only, ADF scans are not trimmed. If less than 1 inch would remain in
 either direction, trimming is skipped and a warning is logged. The setting is
@@ -287,7 +312,9 @@ eSCL, because only that protocol has the "next page" question.
 The printer delivers each page as a JPEG; the PDF embeds the JPEGs unchanged.
 
 `--multipage` (`PUSHSCAN_MULTIPAGE`) sets which document types get the
-dialog:
+dialog. In the config file the same is set with `multipage` in
+`[defaults.document]` (built-in `true`) and `[defaults.auto]` (built-in
+`false`):
 
 | Value                | Dialog for                                        |
 |----------------------|---------------------------------------------------|

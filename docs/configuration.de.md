@@ -143,7 +143,7 @@ Mehr unter [Vorrang](#vorrang).
 | `--color`      | `PUSHSCAN_COLOR`      | `color`             | run           | `color` oder `gray`. Nur mit `--ignore-panel` oder wenn das Bedienfeld keine Farbe sendet |
 | `--resolution` | `PUSHSCAN_RESOLUTION` | `300`               | run           | DPI. Ersatzwert. Das Bedienfeld bietet 75, 150, 300, 600 |
 | `--source`     | `PUSHSCAN_SOURCE`     | `auto`              | run (Umgebung: nur run) | `auto`, `platen` oder `adf`. Ersatzwert |
-| `--trim`       | `PUSHSCAN_TRIM`       | keiner              | run           | Rand abschneiden, indem ein kleinerer Bereich gescannt wird, z. B. `right=3,bottom=2` (Schlüssel `left`, `top`, `right`, `bottom`, in mm, 0 bis 50). Nur Vorlagenglas. Ersetzt die `trim_*`-Werte der Konfigurationsdatei als Ganzes, siehe [Rand abschneiden](#rand-abschneiden) |
+| `--trim`       | `PUSHSCAN_TRIM`       | keiner              | run           | Rand abschneiden, indem ein kleinerer Bereich gescannt wird, z. B. `right=1,bottom=2` (Schlüssel `left`, `top`, `right`, `bottom`, in mm, 0 bis 50). Nur Vorlagenglas. Ersetzt die `trim_*`-Werte der Konfigurationsdatei als Ganzes, siehe [Rand abschneiden](#rand-abschneiden) |
 | `--targets`    | `PUSHSCAN_TARGETS`    | -                   | run           | Mehrere Einträge auf dem Bedienfeld, jeder mit eigenem Ordner und optionaler Voreinstellung, siehe [Mehrere Ziele](#mehrere-ziele). Ersetzt `--name` für `run` |
 | `--ignore-panel` | `PUSHSCAN_IGNORE_PANEL` | aus             | run           | Ignoriert die Einstellungen vom Bedienfeld und nutzt immer die vier Optionen oben (`--format`, `--color`, `--resolution`, `--source`). Umgebungsvariable: `1`, `true` oder `yes`. Deaktiviert auch mehrseitige Scans |
 | `--multipage`  | `PUSHSCAN_MULTIPAGE`  | `document`          | run           | `document`, `auto`, `both` oder `off`, siehe [Mehrseitige Scans](#mehrseitige-scans-vom-vorlagenglas) |
@@ -185,9 +185,6 @@ Meldung abgelehnt, die Datei und Schlüssel nennt, damit Tippfehler auffallen.
 |-----------|-------|------------|
 | `printer` | IP oder Hostname | `--printer` |
 | `output` | Ordner; relative Ausgabepfade der Ziele werden darauf bezogen | `--output` |
-| `interval` | Sekunden | `--interval` |
-| `verbose`, `ignore_panel` | `true` / `false` | `--verbose`, `--ignore-panel` |
-| `multipage` | `document`, `auto`, `both`, `off` | `--multipage` |
 | `[defaults]` `resolution` | `75`, `150`, `300`, `600` | `--resolution` |
 | `[defaults]` `color` | `color`, `gray` | `--color` |
 | `[defaults]` `format` | `pdf`, `jpeg` | `--format` |
@@ -195,7 +192,11 @@ Meldung abgelehnt, die Datei und Schlüssel nennt, damit Tippfehler auffallen.
 | `[defaults]` `size` | `a4`, `letter`, `legal`, `10x15`, `13x18` | Scanbereich ohne Daten vom Bedienfeld |
 | `[defaults]` `open_after_scan` | `off`, `folder`, `file` | `--open-after-scan` |
 | `[defaults]` `filename` | Vorlage, siehe [Dateinamen](#dateinamen) | `--filename` |
-| `[defaults]` `trim_left`, `trim_top`, `trim_right`, `trim_bottom` | Zahl, mm, 0 bis 50 | `--trim` |
+| `[defaults.document]` `multipage` | `true` / `false`, eingebaut `true` | `--multipage` (Dokumenttyp *Dokument* am Bedienfeld) |
+| `[defaults.auto]` `multipage` | `true` / `false`, eingebaut `false` | `--multipage` (Dokumenttyp *Automatisch* am Bedienfeld) |
+| `[advanced]` `interval` | Sekunden | `--interval` |
+| `[advanced]` `verbose`, `ignore_panel` | `true` / `false` | `--verbose`, `--ignore-panel` |
+| `[advanced]` `trim_left`, `trim_top`, `trim_right`, `trim_bottom` | Zahl, mm, 0 bis 50 | `--trim` |
 | `[web]` `enabled` | `true` / `false` | `--web` |
 | `[web]` `bind` | Adresse, Standard `0.0.0.0` | `--web-bind` |
 | `[web]` `port` | 1 bis 65535, Standard 8080 | `--web-port` |
@@ -204,13 +205,41 @@ Meldung abgelehnt, die Datei und Schlüssel nennt, damit Tippfehler auffallen.
 | `[[target]]` `output` | Ordner; `"."` ist der Ausgabeordner selbst; Standard `<output>/<name>` | `NAME=DIR` |
 | `[[target]]` `filename` | Vorlage, siehe [Dateinamen](#dateinamen); gilt vor `[defaults]` für dieses Ziel | - |
 | `[[target]]` `open_after_scan` | `off`, `folder`, `file`; gilt vor `[defaults]` für dieses Ziel, etwa `off` für einen Archivordner | - |
-| `[[target]]` `document_multipage` | `true` / `false` | `mp:` für den Dokumenttyp *Dokument* |
+| `[target.document]` `multipage` | `true` / `false` | `mp:` für den Dokumenttyp *Dokument* |
 | `[target.auto]` `resolution`, `format`, `size` | wie oben | die `@preset`-Optionen |
 | `[target.auto]` `multipage` | `true` / `false` | `mp:` für den Dokumenttyp *Automatisch* |
 
-Die Booleschen Werte für mehrseitige Scans gehen vom globalen Modus
-`multipage` aus und fügen *Dokument* / *Automatisch* für dieses Ziel hinzu oder
-entfernen es. Setzt ein Ziel keinen von beiden, folgt es dem globalen Modus.
+Die Booleschen Werte eines Ziels für mehrseitige Scans gehen von
+`[defaults.document]` und `[defaults.auto]` (oder `--multipage`) aus und ersetzen
+den Wert für dieses Ziel. Setzt ein Ziel keinen von beiden, folgt es den
+Vorgaben.
+
+Das Bedienfeld kennt drei Dokumenttypen. *Foto* braucht keine Tabelle, denn das
+Bedienfeld sendet alle Einstellungen selbst (JPEG, Größe, Auflösung). Bei
+*Dokument* sendet es sie ebenfalls, und `[defaults.document]` entscheidet nur
+über den Dialog für mehrseitige Scans. Bei *Automatisch* sendet das Bedienfeld
+weder Größe noch Format noch Auflösung, daher entscheiden `[defaults]` und
+`[target.auto]`.
+
+Fehlt `[defaults.document]` oder `[defaults.auto]`, gilt der eingebaute Wert
+(`true` für *Dokument*, `false` für *Automatisch*). Setzt du nur eine der beiden
+Tabellen, behält die andere ihren eingebauten Wert.
+
+### Ältere Konfigurationsdateien
+
+Dateien aus früheren Versionen funktionieren weiter. Die alten Schlüssel werden
+gelesen, und das Log zeigt eine Warnung, die sie auflistet. Setup und die
+Weboberfläche schreiben das neue Layout.
+
+| Alter Ort | Neuer Ort |
+|-----------|-----------|
+| `interval`, `verbose`, `ignore_panel` auf oberster Ebene | `[advanced]` |
+| `trim_*` in `[defaults]` | `[advanced]` |
+| `multipage = "document"` (oder `auto`, `both`, `off`) auf oberster Ebene | `multipage` in `[defaults.document]` und `[defaults.auto]` |
+| `document_multipage` in einem `[[target]]` | `multipage` in `[target.document]` |
+
+Stehen der alte und der neue Ort desselben Schlüssels gleichzeitig in der Datei,
+wird sie mit einer Meldung wie "keep only ..." abgelehnt.
 
 ## Vorrang
 
@@ -237,13 +266,13 @@ gelten weiterhin vor der Datei. Das betrifft auch Änderungen von der
 [Weboberfläche](web.de.md).
 
 Sofort übernommen werden: die Scan-Vorgaben (Schlüssel in `[defaults]`, `size`,
-`trim_*`, `filename`), `interval`, `ignore_panel`, `multipage`,
-`open_after_scan`, die Ziele, `output` und `printer`. Ziele, deren Namen
+`filename`, die `multipage`-Schlüssel), `interval`, `ignore_panel` und die
+`trim_*`-Werte aus `[advanced]`, `open_after_scan`, die Ziele, `output` und `printer`. Ziele, deren Namen
 bleiben, behalten ihre Anmeldung am Bedienfeld. Ändert sich der Drucker, werden
 die Namen am alten Drucker freigegeben und am neuen angemeldet.
 
 Einen Neustart brauchen: die Weboberfläche an oder aus, ihre Bind-Adresse, der
-Port und die Passwortdatei, die Logdatei, das Debug-Log (`verbose`) und die
+Port und die Passwortdatei, die Logdatei, das Debug-Log (`verbose` in `[advanced]`) und die
 Heartbeat-Datei. Ändert die Datei eine davon, nennt eine Warnung im Log sie.
 
 Eine ungültige Datei oder eine ungültige Dateinamen-Vorlage wird einmal als
@@ -279,9 +308,9 @@ jedes Feld, das das Bedienfeld offen lässt. Mit `--ignore-panel` (oder
 ## Rand abschneiden
 
 Manche Scanner erfassen am Rand des Vorlagenglases einen dünnen Streifen. Der
-TR8550 zeigt anscheinend etwa 3 mm rechts und 2 mm unten (noch zu prüfen). Mit
-`--trim right=3,bottom=2` (oder `PUSHSCAN_TRIM`, oder den `trim_*`-Schlüsseln in
-der Konfigurationsdatei) fordert das Tool beim Drucker einen kleineren
+TR8550 entfernten laut Tests `trim_right = 1` und `trim_bottom = 2` (mm) den
+Rand. Mit `--trim right=1,bottom=2` (oder `PUSHSCAN_TRIM`, oder den
+`trim_*`-Schlüsseln in der Tabelle `[advanced]` der Konfigurationsdatei) fordert das Tool beim Drucker einen kleineren
 Scanbereich an, sodass der Rand gar nicht erst gescannt wird. Es gibt keine
 Bildverarbeitung. Der Zuschnitt gilt nur für das Vorlagenglas, ADF-Scans werden
 nicht zugeschnitten. Bliebe in einer Richtung weniger als 1 Zoll übrig, wird der
@@ -303,7 +332,9 @@ nach der nächsten Seite kennt. Der Drucker liefert jede Seite als JPEG, und das
 PDF bettet die JPEGs unverändert ein.
 
 `--multipage` (`PUSHSCAN_MULTIPAGE`) legt fest, welche Dokumenttypen den Dialog
-bekommen:
+bekommen. In der Konfigurationsdatei dienen dafür `multipage` in
+`[defaults.document]` (eingebaut `true`) und `[defaults.auto]` (eingebaut
+`false`):
 
 | Wert                 | Dialog für                                        |
 |----------------------|---------------------------------------------------|

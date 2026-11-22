@@ -41,8 +41,8 @@ melden, siehe [CONTRIBUTING.md](../CONTRIBUTING.md) (auf Englisch).
   *Automatisch* zurück. Prüfe ihn daher vor dem nächsten mehrseitigen Scan.
 - Mehrseitige Scans sind mit A4 bei 300 dpi geprüft. Andere Auflösungen und
   Größen nutzen dieselben Parameter, sind aber noch nicht getestet.
-- Die Zuschnittwerte für den TR8550 (3 mm rechts, 2 mm unten) sind noch zu
-  prüfen.
+- Getestete Zuschnittwerte für den TR8550: `trim_right = 1` und
+  `trim_bottom = 2` (mm), siehe [Rand abschneiden](configuration.de.md#rand-abschneiden).
 - Wählst du am Bedienfeld einen Namen aus, ohne einen Scan zu starten, passiert
   nichts.
 - Der Drucker verwirft eine Registrierung nach etwa 60 s ohne Abfrage. Das Tool

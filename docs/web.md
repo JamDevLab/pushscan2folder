@@ -101,9 +101,10 @@ error, so a typo cannot turn a protection off.
   that a target has in the config file is kept when you save.
 - Settings (`/settings`) edits `resolution`, `color`, `format`, `source`,
   `size`, `open_after_scan`, `filename` (shown as "File name", see
-  [File names](configuration.md#file-names)) and the four `trim_*` values of
-  `[defaults]`, and `multipage`, `ignore_panel` and `interval`, each with a short
-  explanation. Values are
+  [File names](configuration.md#file-names)) and the four `trim_*` values,
+  `ignore_panel` and `interval` (these three groups live in `[advanced]`), and
+  `multipage` (written to `[defaults.document]` and `[defaults.auto]`), each
+  with a short explanation. Values are
   validated with the same rules as the config file; an empty field removes the
   key. The base `output` folder is shown read-only. The section "Fixed" shows
   the `printer` with a "Search the network" button, see below. If an

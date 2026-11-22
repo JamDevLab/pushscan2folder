@@ -36,8 +36,8 @@ GitHub ask for the details. To report a new printer model, see
   check it before the next multi-page scan.
 - Multi-page scans are verified with A4 at 300 dpi. Other resolutions and
   sizes use the same parameters but have not been tested yet.
-- The border trim values for the TR8550 (3 mm right, 2 mm bottom) are still
-  to be verified.
+- Tested border trim values for the TR8550: `trim_right = 1` and
+  `trim_bottom = 2` (mm), see [Trimming a border](configuration.md#trimming-a-border).
 - Selecting a name on the panel without starting a scan triggers nothing.
 - The printer drops a registration after roughly 60 s without polls. The tool
   polls every 5 s during long scans and registers again automatically, see

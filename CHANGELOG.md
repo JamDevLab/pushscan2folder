@@ -59,6 +59,20 @@ All notable changes are documented here. The format follows
   address.
 - Dependabot for GitHub Actions and the Docker base image (monthly).
 
+### Changed
+
+- New config layout. The top level keeps only `printer` and `output`.
+  `[defaults.document]` and `[defaults.auto]` each have `multipage` (panel
+  document type Document, built-in `true`; Auto, built-in `false`) and replace
+  the top-level `multipage = "document|auto|both|off"`. `[advanced]` holds
+  `interval`, `verbose`, `ignore_panel` and the `trim_*` values. A target uses
+  `[target.document]` `multipage` instead of `document_multipage`. Old files
+  still work: the old keys are read and a warning lists them. Setup and the web
+  page write the new layout. `PUSHSCAN_MULTIPAGE` and `--multipage` are
+  unchanged. See [Configuration](docs/configuration.md#older-config-files).
+- The example config and the docs use the trim values tested on a TR8550:
+  `trim_right = 1` and `trim_bottom = 2` (mm).
+
 ### Fixed
 
 - `color` in `[target.auto]` now explains that the colour comes from the start
