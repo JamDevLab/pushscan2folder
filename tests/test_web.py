@@ -388,6 +388,21 @@ class TargetEditorTests(WebTestBase):
         form["op"] = op
         return form
 
+    def test_open_after_scan_per_target(self):
+        self.logged_in()
+        csrf = self.client.csrf()
+        status, _, _ = self.client.request("POST", "/targets", self.ops_form(
+            csrf, "save", {"name": "PC"}, {"name": "Archive", "open": "off"}))
+        self.assertEqual(status, 303)
+        cfg = load_config(self.config_path)
+        self.assertEqual([t.open_after_scan for t in cfg.targets], [None, "off"])
+        page = self.client.request("GET", "/targets")[2]
+        self.assertIn('<option value="off" selected>', page)
+        status, _, page = self.client.request("POST", "/targets", self.ops_form(
+            csrf, "save", {"name": "PC", "open": "always"}))
+        self.assertEqual(status, 400)
+        self.assertIn("invalid open after scan", page)
+
     def test_fresh_page_has_one_blank_row(self):
         self.logged_in()
         data = self.client.request("GET", "/targets")[2]

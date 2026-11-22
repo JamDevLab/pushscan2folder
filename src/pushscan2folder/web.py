@@ -301,6 +301,7 @@ class Row:
     fmt: str = ""
     size: str = ""
     automp: bool = False
+    opened: str = ""        # open_after_scan of the target; "" = the default
     delete: bool = False
     existing: bool = False
     orig: str = ""          # name in the config file when the form was rendered
@@ -315,7 +316,7 @@ def row_from_spec(spec: TargetSpec, global_mode: str) -> Row:
         res=str(p["resolution"]) if "resolution" in p else "",
         fmt=p.get("fmt", ""), size=size_name(p) or "",
         automp=("auto" in modes) if spec.auto_multipage is None else spec.auto_multipage,
-        existing=True, orig=spec.name)
+        opened=spec.open_after_scan or "", existing=True, orig=spec.name)
 
 
 def blank_row(global_mode: str) -> Row:
@@ -335,6 +336,7 @@ def rows_from_form(form: dict[str, str]) -> list[Row]:
         rows.append(Row(name=get("name").strip(), output=get("output").strip(),
                         docmp=bool(get("docmp")), res=get("res"),
                         fmt=get("fmt"), size=get("size"), automp=bool(get("automp")),
+                        opened=get("open"),
                         delete=bool(get("del")), existing=get("existing") == "1",
                         orig=get("orig") if get("existing") == "1" else ""))
     return rows
@@ -406,8 +408,11 @@ def specs_from_rows(rows: list[Row], base: Path,
                 errors.append(f"{label}: invalid size {row.size!r}")
             else:
                 preset["width"], preset["height"] = panel.REGIONS[row.size]
+        if row.opened and row.opened not in OPEN_MODES:
+            errors.append(f"{label}: invalid open after scan {row.opened!r}")
         specs.append(TargetSpec(row.name, output=output, preset=preset,
-                                document_multipage=row.docmp, auto_multipage=row.automp))
+                                document_multipage=row.docmp, auto_multipage=row.automp,
+                                open_after_scan=row.opened or None))
     if not errors and not specs:
         errors.append("At least one target is required.")
     return specs, errors
@@ -1004,7 +1009,8 @@ def _locked_row_html(i: int, count: int, row: Row, spec: TargetSpec, global_mode
         f'<p>This folder is outside the output directory. It is set in the '
         f"config file and can only be changed there; the web page keeps this target "
         f"unchanged.</p>"
-        f"<p>Auto scan preset: {esc(_preset_summary(spec.preset))}. Multi-page dialog: "
+        f"<p>Open after a scan: {esc(spec.open_after_scan or 'default')}. "
+        f"Auto scan preset: {esc(_preset_summary(spec.preset))}. Multi-page dialog: "
         f'Document {"yes" if shown.docmp else "no"}, Auto scan {"yes" if shown.automp else "no"}.</p>'
         "</div>" + _card_foot(i, row, False) + "</section>")
 
@@ -1037,6 +1043,9 @@ def _row_html(i: int, count: int, row: Row, disabled: bool,
         + label("Output folder below the output directory (empty = default)", "output")
         + f'<input type="text" id="output_{i}" name="output_{i}" value="{esc(row.output)}" '
         f'maxlength="{MAX_FOLDER_CHARS}"{off}>'
+        + label("Open after a scan (desktop PC only)", "open")
+        + sel("open", row.opened, keep("open_after_scan")
+              + [("off", "off"), ("folder", "folder"), ("file", "file")])
         + '</div><div class="group"><h3>Auto scan preset</h3><p class="hint">Empty = the default of the '
         '<a href="/settings">Settings</a> page.</p>'
         + label("Resolution", "res")
@@ -1089,7 +1098,8 @@ def render_targets(ctx: WebContext, csrf: str, rows: list[Row] | None = None,
     locked = locked_specs(cfg, ctx.output)
     claims = claim_locked(rows, locked)
     n = len(rows)
-    defaults = {k: ctx.default_label(k, BUILTIN[k]) for k in ("resolution", "color", "format", "size")}
+    defaults = {k: ctx.default_label(k, BUILTIN[k])
+                for k in ("resolution", "color", "format", "size", "open_after_scan")}
     # Pressing Enter in a text field "clicks" the first submit button of the form, so
     # the first button must be Save (visually hidden, the visible one is in the bar below).
     dirty_attr = ' data-dirty="1"' if dirty else ""

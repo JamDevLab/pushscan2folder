@@ -191,6 +191,7 @@ class Target:
     preset: dict = field(default_factory=dict)
     multipage: frozenset[str] | None = None
     filename: str | None = None  # file name template; None = the global one
+    open_after_scan: str | None = None   # off | folder | file; None = the global one
 
 
 def parse_preset(text: str) -> tuple[dict, frozenset[str] | None]:
@@ -513,7 +514,8 @@ class PushScanService:
                                       tuple(str(p) for p in paths),
                                       "ok" if paths else "nothing saved"))
         if paths:
-            desktop.open_saved(self.open_after_scan, paths)  # once per job
+            desktop.open_saved(target.open_after_scan or self.open_after_scan,
+                               paths)  # once per job
         return paths
 
     def _scan_to(self, target: Target, event: int, interrupt: bytes) -> list[Path]:

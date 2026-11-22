@@ -7,7 +7,7 @@ from unittest import mock
 
 from pushscan2folder import __main__ as cli
 from pushscan2folder import panel
-from pushscan2folder.config import (Config, ConfigError, dump_config, load_config,
+from pushscan2folder.config import (Config, TargetSpec, ConfigError, dump_config, load_config,
                                     load_config_text)
 from pushscan2folder.platform_support import default_config_path, default_output
 from pushscan2folder.service import Trim
@@ -81,6 +81,37 @@ class ConfigTestBase(unittest.TestCase):
 
 
 class ParseTests(ConfigTestBase):
+    def test_dump_has_header_and_examples_that_parse(self):
+        cfg = Config(printer="x", targets=[TargetSpec("PC", output="."),
+                                           TargetSpec("Archive", open_after_scan="off")])
+        text = dump_config(cfg)
+        self.assertTrue(text.startswith("# pushscan2folder configuration."))
+        self.assertIn("need a restart", text)
+        self.assertIn('# open_after_scan = "folder"', text)
+        self.assertEqual(load_config_text(text), cfg)
+        # every example line works once the "#" is removed
+        for line in text.splitlines():
+            if line.startswith("# ") and " = " in line and "[[" not in line:
+                key_line = line[2:]
+                if key_line.split("=")[0].strip() in ("name", "output"):
+                    continue
+                table = "[defaults]" if "this target" not in line else '[[target]]\nname = "x"'
+                load_config_text(f"{table}\n{key_line}\n")
+
+    def test_open_after_scan_per_target(self):
+        cfg = load_config_text('[[target]]\nname = "Archive"\nopen_after_scan = "off"\n'
+                               '[[target]]\nname = "PC"\n')
+        self.assertEqual([t.open_after_scan for t in cfg.targets], ["off", None])
+        targets = cfg.build_targets(Path("/s"), "off")
+        self.assertEqual([t.open_after_scan for t in targets], ["off", None])
+        with self.assertRaises(ConfigError):
+            load_config_text('[[target]]\nname = "A"\nopen_after_scan = "always"\n')
+
+    def test_color_in_target_auto_explains_the_start_button(self):
+        with self.assertRaises(ConfigError) as cm:
+            load_config_text('[[target]]\nname = "test"\n[target.auto]\ncolor = "gray"\n')
+        self.assertIn("start button", str(cm.exception))
+
     def test_full_example(self):
         cfg = load_config(self.write(FULL))
         self.assertEqual((cfg.printer, cfg.output, cfg.interval), ("192.168.1.50", Path("/scans"), 3.0))

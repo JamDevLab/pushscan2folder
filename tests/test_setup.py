@@ -137,7 +137,7 @@ class WebTableTests(unittest.TestCase):
         again = load_config_text(text)
         self.assertEqual((again.web_enabled, again.web_bind, again.web_port,
                           again.web_password_file), (True, "127.0.0.1", 9090, "pw.txt"))
-        self.assertNotIn("[web]", dump_config(Config(printer="x")))
+        self.assertNotIn("\n[web]\n", dump_config(Config(printer="x")))
 
     def test_password_from_config_file(self):
         pw = self.dir / "pw.txt"

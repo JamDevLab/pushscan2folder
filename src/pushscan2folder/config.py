@@ -39,6 +39,7 @@ class TargetSpec:
     document_multipage: bool | None = None
     auto_multipage: bool | None = None
     filename: str | None = None
+    open_after_scan: str | None = None   # None = the global setting
 
 
 @dataclass
@@ -88,7 +89,8 @@ class Config:
                         modes.discard(key)
                 multipage = frozenset(modes)
             result.append(Target(spec.name, outdir, preset=dict(spec.preset),
-                                 multipage=multipage, filename=spec.filename))
+                                 multipage=multipage, filename=spec.filename,
+                                 open_after_scan=spec.open_after_scan))
         return result
 
 
@@ -196,7 +198,8 @@ def _target(table, index: int, name_for_msgs: str) -> TargetSpec:
     name = table.get("name")
     if name is not None and isinstance(name, str) and name.strip():
         label = f'{name_for_msgs}: target "{name}"'
-    rd = _Reader(table, label, {"name", "output", "filename", "document_multipage", "auto"})
+    rd = _Reader(table, label, {"name", "output", "filename", "open_after_scan",
+                                "document_multipage", "auto"})
     if "name" not in table:
         raise ConfigError(f'{label}: missing required key "name"')
     name = rd.str_("name").strip()
@@ -206,8 +209,13 @@ def _target(table, index: int, name_for_msgs: str) -> TargetSpec:
         raise ConfigError(f"{label}: {exc}") from exc
     spec = TargetSpec(name, output=rd.str_("output"),
                       document_multipage=rd.bool_("document_multipage"),
-                      filename=rd.filename("filename"))
+                      filename=rd.filename("filename"),
+                      open_after_scan=rd.str_("open_after_scan", OPEN_MODES))
     auto = rd.table_("auto")
+    if auto is not None and "color" in auto:
+        raise ConfigError(f'{label}.auto: unknown key "color": the colour comes from the '
+                          "start button on the printer panel (colour or black), or from "
+                          '[defaults] color when the panel sends none')
     if auto is not None:
         arw = _Reader(auto, f"{label}.auto",
                       {"resolution", "format", "size", "multipage"})
@@ -328,11 +336,38 @@ def _lines(pairs) -> list[str]:
     return [f"{key} = {_value(value)}" for key, value in pairs if value is not None]
 
 
+HEADER = """\
+# pushscan2folder configuration.
+# Changes are used while the program runs, within a few seconds. Only [web]
+# and "verbose" need a restart: pushscan2folder stop, then pushscan2folder start.
+# Lines starting with "#" are examples; remove the "#" to use one.
+# All keys: https://github.com/JamDevLab/pushscan2folder/blob/main/docs/configuration.md"""
+
+# Commented examples for keys that are not set (dump_config).
+_DEFAULTS_EXAMPLES = (
+    ("open_after_scan", '# open_after_scan = "folder"         # off | folder | file (desktop PC only)'),
+    ("filename", '# filename = "{name}_{date}_{time}"   # file name, see the docs'),
+    ("resolution", "# resolution = 300                   # 75 | 150 | 300 | 600"),
+    ("format", '# format = "pdf"                     # pdf | jpeg'),
+)
+_TARGET_EXAMPLES = (
+    ("open_after_scan", '# open_after_scan = "off"            # this target only, e.g. an archive'),
+    ("filename", '# filename = "{name}_{date}"          # this target only'),
+)
+_EXAMPLE_TARGET = "\n".join((
+    "# Another panel entry with its own folder:",
+    "# [[target]]",
+    '# name = "Archive"',
+    '# output = "Archive"',
+    '# open_after_scan = "off"'))
+
+
 def dump_config(cfg: Config) -> str:
-    """Render a Config as TOML (the exact schema load_config reads).
-    Comments are not preserved. A preset size that matches no known paper
-    size is dropped."""
-    blocks: list[list[str]] = []
+    """Render a Config as TOML (the exact schema load_config reads), with a
+    short header and commented examples for some keys that are not set.
+    Comments of an existing file are not preserved. A preset size that
+    matches no known paper size is dropped."""
+    blocks: list[list[str]] = [[HEADER]]
     top = _lines([("printer", cfg.printer),
                   ("output", str(cfg.output) if cfg.output is not None else None),
                   ("interval", cfg.interval), ("verbose", cfg.verbose),
@@ -344,8 +379,8 @@ def dump_config(cfg: Config) -> str:
                        ("open_after_scan", cfg.open_after_scan), ("filename", cfg.filename),
                        ("trim_left", cfg.trim_left), ("trim_top", cfg.trim_top),
                        ("trim_right", cfg.trim_right), ("trim_bottom", cfg.trim_bottom)])
-    if defaults:
-        blocks.append(["[defaults]"] + defaults)
+    defaults += [line for key, line in _DEFAULTS_EXAMPLES if getattr(cfg, key) is None]
+    blocks.append(["[defaults]"] + defaults)
     web = _lines([("enabled", cfg.web_enabled), ("bind", cfg.web_bind),
                   ("port", cfg.web_port), ("password_file", cfg.web_password_file)])
     if web:
@@ -353,7 +388,9 @@ def dump_config(cfg: Config) -> str:
     for spec in cfg.targets:
         block = ["[[target]]"] + _lines([("name", spec.name), ("output", spec.output),
                                          ("filename", spec.filename),
+                                         ("open_after_scan", spec.open_after_scan),
                                          ("document_multipage", spec.document_multipage)])
+        block += [line for key, line in _TARGET_EXAMPLES if getattr(spec, key) is None]
         blocks.append(block)
         auto = _lines([("resolution", spec.preset.get("resolution")),
                        ("format", spec.preset.get("fmt")),
@@ -361,6 +398,7 @@ def dump_config(cfg: Config) -> str:
                        ("multipage", spec.auto_multipage)])
         if auto:
             blocks.append(["[target.auto]"] + auto)
+    blocks.append([_EXAMPLE_TARGET])
     return "\n\n".join("\n".join(b) for b in blocks) + "\n"
 
 

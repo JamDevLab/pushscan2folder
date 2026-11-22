@@ -121,6 +121,14 @@ class ServiceTests(unittest.TestCase):
         self.assertEqual(files[0].read_bytes(), b"%PDF-1.3 fake\n%%EOF\n")
         self.assertIn("<pwg:InputSource>Platen</pwg:InputSource>", FakePrinter.state["settings"])
 
+    def test_target_open_after_scan_wins(self):
+        FakePrinter.state["pending"] = True
+        self.service.open_after_scan = "folder"
+        self.service.targets[0].open_after_scan = "off"
+        with mock.patch("pushscan2folder.desktop.open_saved") as open_saved:
+            self.service.step()
+        self.assertEqual(open_saved.call_args[0][0], "off")
+
     def test_busy_hook_brackets_the_scan(self):
         FakePrinter.state["pending"] = True
         calls = []
