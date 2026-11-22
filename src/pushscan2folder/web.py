@@ -35,7 +35,7 @@ from urllib.parse import parse_qs, urlsplit
 
 from . import SOURCE_URL, __version__, panel
 from .config import (COLORS, FORMATS, SAME_FOLDER, SOURCES, Config, ConfigError, TargetSpec,
-                     dump_config,
+                     dump_config, mode_from_flags,
                      load_config, load_config_text, parse_config, size_name, write_config)
 from .desktop import OPEN_MODES
 from .platform_support import component_problem
@@ -480,6 +480,9 @@ def settings_values(cfg: Config) -> dict[str, str]:
 def settings_from_form(form: dict[str, str]) -> dict[str, str]:
     values = {key: form.get(key, "").strip() for key in SETTING_KEYS}
     values["ignore_panel"] = "1" if form.get("ignore_panel") else ""
+    # Two check boxes; the browser sends only the ticked ones.
+    values["multipage"] = mode_from_flags(bool(form.get("multipage_document")),
+                                          bool(form.get("multipage_auto")))
     return values
 
 
@@ -1155,6 +1158,19 @@ def _setting_select(key: str, value: str, options: list[tuple[str, str]]) -> str
     return _select(key, value, unset + options, False)
 
 
+def _multipage_field(mode: str, ctx: WebContext) -> str:
+    """Two check boxes, one per panel document type ([defaults.document] and
+    [defaults.auto] multipage). An unset mode shows the built-in one."""
+    modes = MULTIPAGE_MODES.get(mode or BUILTIN["multipage"], frozenset())
+    boxes = (_check("multipage_document", "document" in modes, 'Document type "Document"', False)
+             + _check("multipage_auto", "auto" in modes, 'Document type "Auto"', False))
+    field = _field("Multi-page dialog", boxes, "multipage",
+                   "For these panel document types a glass scan asks for further pages "
+                   '(one multi-page PDF). "Photo" never asks. Targets can override it.', ctx)
+    # no single control to point the label at: name the group instead
+    return field.replace('<label for="f-multipage">', '<label id="f-multipage">', 1)
+
+
 def _printer_html(ctx: WebContext, csrf: str, scanners: list | None) -> str:
     """The printer line of the settings page, with the network search."""
     out = [f'<p class="ro">Printer: <code>{esc(ctx.printer)}</code></p>']
@@ -1272,10 +1288,7 @@ def render_settings(ctx: WebContext, csrf: str, values: dict[str, str] | None = 
                f"{TRIM_MAX_MM:g} mm. Glass only, the document feeder is not trimmed.", ctx)
         for side in ("left", "top", "right", "bottom")]
     behaviour = [
-        _field("Multi-page dialog", sel("multipage", v("multipage"),
-                                        [(m, m) for m in MULTIPAGE_MODES]), "multipage",
-               "For which panel document types a glass scan asks for further pages "
-               "(multi-page PDF): document, auto, both or off. Targets can override it.", ctx),
+        _multipage_field(v("multipage"), ctx),
         _field("Poll interval (seconds)", _text_input("interval", v("interval"), "4"),
                "interval", "How often the printer is asked for scan requests. Must be "
                "greater than 0.", ctx),

@@ -861,7 +861,7 @@ output = "inbox"
 class SettingsTests(WebTestBase):
     BASE = {"resolution": "", "color": "", "format": "", "source": "", "size": "",
             "trim_left": "", "trim_top": "", "trim_right": "", "trim_bottom": "",
-            "multipage": "", "interval": ""}
+            "interval": ""}
 
     def post(self, **values):
         csrf = self.client.csrf("/settings")
@@ -873,7 +873,8 @@ class SettingsTests(WebTestBase):
         status, _, page = self.client.request("GET", "/settings")
         self.assertEqual(status, 200)
         for name in ("resolution", "color", "format", "source", "size", "trim_left",
-                     "trim_top", "trim_right", "trim_bottom", "multipage", "interval",
+                     "trim_top", "trim_right", "trim_bottom", "multipage_document",
+                     "multipage_auto", "interval",
                      "ignore_panel"):
             self.assertIn(f'name="{name}"', page)
         self.assertNotIn('name="printer"', page)
@@ -893,7 +894,8 @@ class SettingsTests(WebTestBase):
                                     '[[target]]\nname = "a"\noutput = "/consume"\n')
         status, resp, _ = self.post(resolution="600", color="gray", format="jpeg",
                                     source="adf", size="letter", trim_right="3",
-                                    trim_bottom="2.5", multipage="both", interval="2.5",
+                                    trim_bottom="2.5", multipage_document="1",
+                                    multipage_auto="1", interval="2.5",
                                     ignore_panel="1")
         self.assertEqual((status, resp.getheader("Location")), (303, "/settings?saved=1"))
         cfg = load_config(self.config_path)
@@ -935,13 +937,23 @@ class SettingsTests(WebTestBase):
         self.assertEqual(load_config(self.config_path).color, "gray")
         assert_mode(self, self.config_path, 0o600)
 
+    def test_multipage_boxes(self):
+        self.logged_in()
+        for boxes, mode in (({}, "off"), ({"multipage_auto": "1"}, "auto"),
+                            ({"multipage_document": "1"}, "document")):
+            self.post(**boxes)
+            self.assertEqual(load_config(self.config_path).multipage, mode, boxes)
+        _, _, page = self.client.request("GET", "/settings")
+        self.assertIn('name="multipage_document" value="1" checked', page)
+        self.assertNotIn('name="multipage_auto" value="1" checked', page)
+
     def test_validation_errors_write_nothing(self):
         self.logged_in()
         self.post(resolution="300")
         before = self.config_path.read_text()
         for bad in ({"resolution": "123"}, {"resolution": "abc"}, {"color": "blue"},
                     {"format": "tiff"}, {"source": "tray"}, {"size": "a0"},
-                    {"multipage": "maybe"}, {"trim_left": "51"}, {"trim_top": "-1"},
+                    {"trim_left": "51"}, {"trim_top": "-1"},
                     {"trim_right": "abc"}, {"trim_bottom": "nan"}, {"interval": "0"},
                     {"interval": "-3"}, {"interval": "fast"}, {"interval": "inf"}):
             status, _, page = self.post(**bad)
