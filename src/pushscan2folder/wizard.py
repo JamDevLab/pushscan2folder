@@ -16,6 +16,7 @@ from . import platform_support, protocol
 from .config import (SAME_FOLDER, Config, ConfigError, TargetSpec, dump_config, load_config,
                      safe_dirname, write_config)
 from .escl import EsclClient
+from .terminal import link
 from .web import MIN_PASSWORD_LENGTH
 
 EXAMPLE_PASSWORD = "change-me-please"  # placeholder in docker-compose.yml
@@ -241,7 +242,7 @@ class Setup:
 
     def show(self, cfg: Config) -> None:
         base = Path(cfg.output or platform_support.default_output())
-        self.out(f"Found the config file {self.path}")
+        self.out(f"Found the config file {link(self.path)}")
         self.out(f"  printer: {cfg.printer or 'not set'}")
         for spec in cfg.targets:
             self.out(f"  panel name {spec.name!r} -> {target_folder(base, spec)}")
@@ -289,7 +290,7 @@ class Setup:
             try:
                 cfg = load_config(self.path)
             except ConfigError as exc:
-                self.out(f"The config file {self.path} has an error: {exc}")
+                self.out(f"The config file {link(self.path)} has an error: {exc}")
                 if not self.yes_no("Start over with a new configuration?", False):
                     raise  # a broken file is never overwritten without asking
                 self.backup()
@@ -305,7 +306,7 @@ class Setup:
                 else:
                     self.out("Comments in the file are not kept when it is saved again.")
         else:
-            self.out(f"The config file will be {self.path}")
+            self.out(f"The config file will be {link(self.path)}")
 
         cfg.printer = self.ask_printer(cfg.printer)
         if cfg.targets:
@@ -339,17 +340,17 @@ class Setup:
         out = self.out
         out("")
         out("Setup done.")
-        out(f"  Config file: {self.path}")
+        out(f"  Config file: {link(self.path)}")
         out(f"  Printer:     {cfg.printer}")
         base = Path(cfg.output or platform_support.default_output())
         for spec in cfg.targets:
-            out(f"  Scans of '{spec.name}' go to: {target_folder(base, spec)}")
+            out(f"  Scans of '{spec.name}' go to: {link(target_folder(base, spec))}")
         if cfg.web_enabled:
             host = "127.0.0.1" if cfg.web_bind in (None, "0.0.0.0") else cfg.web_bind
             out(f"  Web page:    http://{host}:{cfg.web_port or DEFAULT_PORT}")
         else:
             out("  Web page:    off")
         if autostart:
-            out(f"  Autostart:   on, log file {log_path}")
+            out(f"  Autostart:   on, log file {link(log_path)}")
         out("To change something later, edit the config file or run "
             "'pushscan2folder setup' again.")

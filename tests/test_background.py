@@ -1,5 +1,6 @@
 """Background instance (start, stop, status), uninstall, open after scan and the
 icon writer. Everything is mocked: no real process, registry or explorer."""
+import base64
 import io
 import os
 import struct
@@ -655,7 +656,20 @@ class DesktopTests(unittest.TestCase):
         with mock.patch.object(sys, "platform", "win32"):
             self.assertTrue(desktop.open_saved("folder", [Path("C:/s/a.pdf"), Path("C:/s/b.pdf")],
                                                popen=popen))
-        popen.assert_called_once_with(f'explorer.exe /select,"{Path("C:/s/a.pdf")}"')
+        args, kwargs = popen.call_args
+        self.assertEqual(args[0][0], "powershell.exe")
+        self.assertEqual(kwargs["env"]["PUSHSCAN_SELECT"], str(Path("C:/s/a.pdf")))
+        self.assertEqual(kwargs["creationflags"], desktop.CREATE_NO_WINDOW)
+        script = base64.b64decode(args[0][-1]).decode("utf-16-le")
+        self.assertEqual(script, desktop.SELECT_SCRIPT)
+        self.assertIn("Shell.Application", script)
+
+    def test_windows_folder_without_powershell(self):
+        popen = mock.Mock(side_effect=[FileNotFoundError("powershell.exe"), None])
+        with mock.patch.object(sys, "platform", "win32"):
+            self.assertTrue(desktop.open_saved("folder", [Path("C:/my scans/a.pdf")],
+                                               popen=popen))
+        self.assertEqual(popen.call_args[0][0], f'explorer.exe /select,"{Path("C:/my scans/a.pdf")}"')
 
     def test_windows_file_uses_startfile_once(self):
         paths = [Path("C:/s/a.pdf"), Path("C:/s/b.pdf")]

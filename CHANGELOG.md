@@ -7,6 +7,9 @@ All notable changes are documented here. The format follows
 
 ### Added
 
+- Clickable paths: setup and `start` print the config file, the scan folders and
+  the log file as links (OSC 8) in Windows Terminal and in Linux terminals. The
+  classic Windows console and the log file get the plain path.
 - Config file reload: `run` checks the config file before each poll cycle
   (never during a scan) and applies a change without a restart. Scan defaults,
   `interval`, `ignore_panel`, `multipage`, `open_after_scan`, the targets,
@@ -48,6 +51,9 @@ All notable changes are documented here. The format follows
 
 ### Fixed
 
+- Windows, `open_after_scan = "folder"`: every scan opened one more Explorer
+  window. If a window already shows the folder, the new file is now selected
+  there.
 - `pushscan2folder stop` during a scan used to terminate the program after 30
   seconds. It now waits up to 10 minutes while a scan runs, so the scan is
   finished and saved. A multi-page platen scan that waits for the next page ends

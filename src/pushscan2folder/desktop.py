@@ -4,6 +4,7 @@ Best effort: a missing desktop or a failing helper program only produces a
 warning, a scan never fails because of it."""
 from __future__ import annotations
 
+import base64
 import logging
 import os
 import subprocess
@@ -14,6 +15,50 @@ from .platform_support import is_macos, is_windows
 log = logging.getLogger(__name__)
 
 OPEN_MODES = ("off", "folder", "file")
+
+# Windows, mode "folder": if an Explorer window already shows the folder,
+# select the new file there instead of opening one more window. Explorer's
+# own "/select" always opens a new window, so this goes through the Shell
+# COM object (PowerShell, no extra dependency). The path comes in through
+# the environment, so it needs no quoting. Any failure falls back to
+# "explorer /select" (a new window), as before.
+SELECT_SCRIPT = r"""
+$file = $env:PUSHSCAN_SELECT
+try {
+  $dir = Split-Path -LiteralPath $file
+  $name = Split-Path -LiteralPath $file -Leaf
+  $win = $null
+  foreach ($w in (New-Object -ComObject Shell.Application).Windows()) {
+    try { if ($w.Document.Folder.Self.Path -eq $dir) { $win = $w; break } } catch {}
+  }
+  if ($win -ne $null) {
+    for ($i = 0; $i -lt 15; $i++) {
+      $item = $win.Document.Folder.ParseName($name)
+      if ($item -ne $null) { $win.Document.SelectItem($item, 29); exit 0 }
+      Start-Sleep -Milliseconds 200
+    }
+    exit 0
+  }
+} catch {}
+Start-Process explorer.exe -ArgumentList "/select,`"$file`""
+"""
+CREATE_NO_WINDOW = 0x08000000
+
+
+def explorer_select(path: Path, popen=subprocess.Popen) -> None:
+    """Show `path` selected in Explorer, reusing a window of its folder."""
+    encoded = base64.b64encode(SELECT_SCRIPT.encode("utf-16-le")).decode("ascii")
+    try:
+        popen(["powershell.exe", "-NoProfile", "-NonInteractive", "-WindowStyle", "Hidden",
+               "-EncodedCommand", encoded],
+              env=dict(os.environ, PUSHSCAN_SELECT=str(path)),
+              creationflags=CREATE_NO_WINDOW, stdin=subprocess.DEVNULL,
+              stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    except OSError:   # no PowerShell: a new window, as before
+        # Explorer wants /select,"path" as is; a list would quote the
+        # whole argument when the path has spaces. Windows file names
+        # cannot contain quotes, so this string is safe.
+        popen(f'explorer.exe /select,"{path}"')
 
 
 def has_desktop(environ=None) -> bool:
@@ -40,10 +85,7 @@ def open_saved(mode: str, paths, popen=subprocess.Popen) -> bool:
             if mode == "file":
                 os.startfile(first)  # type: ignore[attr-defined]
             else:
-                # Explorer wants /select,"path" as is; a list would quote the
-                # whole argument when the path has spaces. Windows file names
-                # cannot contain quotes, so this string is safe.
-                popen(f'explorer.exe /select,"{first}"')
+                explorer_select(first, popen)
         else:
             opener = "open" if is_macos() else "xdg-open"
             target = first if mode == "file" else first.parent

@@ -15,7 +15,7 @@ import traceback
 from pathlib import Path
 
 from . import (__version__, autostart, background, desktop, discovery, panel, protocol,
-               uninstall, web, wizard)
+               terminal, uninstall, web, wizard)
 from .client import ChmpClient
 from .config import Config, ConfigError, load_config
 from .escl import EsclClient, ScanSettings
@@ -719,7 +719,7 @@ def start_main(raw: list[str], hints: bool = True, popen=subprocess.Popen,
         return 1
     print(f"pushscan2folder {message} in the background.")
     if hints:
-        print(f"It keeps running after you close this window. Log file: {log_path}")
+        print(f"It keeps running after you close this window. Log file: {terminal.link(log_path)}")
         print("Stop it with: pushscan2folder stop")
     return 0
 

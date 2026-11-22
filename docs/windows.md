@@ -105,7 +105,7 @@ Type the number, or type an IP address if your printer is not listed, or `s` to 
 
 ## Open the folder after a scan
 
-With `open_after_scan = "folder"` in `[defaults]` (or `--open-after-scan folder`, `PUSHSCAN_OPEN_AFTER_SCAN=folder`), Explorer opens the folder with the new file selected after each scan. With `"file"` the scan itself opens in your PDF viewer. The default is `"off"`. Setup asks "Open the folder after each scan?" and writes `"folder"` for yes. A scan with several pages or files opens once. If opening fails, the log shows a warning and the scan is kept anyway. The option is also in the Settings page of the web interface. It needs a logged-in desktop user, so it is meant for a PC, not for a server.
+With `open_after_scan = "folder"` in `[defaults]` (or `--open-after-scan folder`, `PUSHSCAN_OPEN_AFTER_SCAN=folder`), Explorer opens the folder with the new file selected after each scan. With `"file"` the scan itself opens in your PDF viewer. The default is `"off"`. Setup asks "Open the folder after each scan?" and writes `"folder"` for yes. If an Explorer window already shows the folder, the new file is selected in that window and no new window opens. A scan with several pages or files opens once. If opening fails, the log shows a warning and the scan is kept anyway. The option is also in the Settings page of the web interface. It needs a logged-in desktop user, so it is meant for a PC, not for a server.
 
 ## Firewall
 
