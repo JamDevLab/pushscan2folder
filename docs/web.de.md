@@ -41,7 +41,7 @@ PYTHONPATH=src python3 -m pushscan2folder --printer 192.168.1.50 run
 |-------------|-----------|
 | `PUSHSCAN_WEB=1` / `--web` | aktivieren (nur `run`) |
 | `PUSHSCAN_WEB_PORT` / `--web-port` | Port, Standard 8737 |
-| `PUSHSCAN_WEB_BIND` / `--web-bind` | Adresse, Standard `0.0.0.0` (mit `127.0.0.1` bleibt sie lokal, dann ist kein Passwort nötig) |
+| `PUSHSCAN_WEB_BIND` / `--web-bind` | Adresse; nicht gesetzt: `0.0.0.0`, wenn ein Passwort gesetzt ist, sonst `127.0.0.1` (nur dieser PC, kein Passwort nötig) |
 | `PUSHSCAN_WEB_PASSWORD` | Passwort, mindestens 8 Zeichen (auf einer Loopback-Adresse optional) |
 | `PUSHSCAN_WEB_PASSWORD_FILE` | Datei mit dem Passwort (z. B. ein Docker-Secret); wird genutzt, wenn die Variable darüber nicht gesetzt ist |
 | `[web] password_file` | Schlüssel der Konfigurationsdatei, wie oben; wird genutzt, wenn beide Variablen fehlen. Relative Pfade gelten relativ zur Konfigurationsdatei |
@@ -60,7 +60,7 @@ Ohne Passwort startet die Seite nur, wenn sie ausschließlich auf diesem PC
 lauscht: Bei der Bind-Adresse `127.0.0.1` (oder einer anderen `127.x.x.x`),
 `::1` oder `localhost` läuft sie dann ohne Anmeldung, das Log sagt "web page
 only on this PC", und die Navigationsleiste zeigt "No login: this page is only
-reachable from this PC." Jede andere Bind-Adresse (auch der Standard `0.0.0.0`)
+reachable from this PC." Jede andere Bind-Adresse (auch `0.0.0.0`)
 braucht ein Passwort; ohne startet das Programm nicht (Exit-Code 2). Ein
 konfiguriertes Passwort wird immer benutzt, auch auf einer Loopback-Adresse.
 Wer diesen PC benutzen kann, öffnet eine Seite ohne Anmeldung, setze also auf

@@ -152,7 +152,7 @@ environment wins over the [configuration file](#configuration-file). More in
 | `--no-pause`   | `PUSHSCAN_NO_PAUSE`   | off                 | all           | Windows: never wait for Enter before a console window opened for this program closes. The autostart entry sets it |
 | `--web`        | `PUSHSCAN_WEB`        | off                 | run           | Serve the [web page](web.md). Env var: `1`, `true` or `yes` |
 | `--web-port`   | `PUSHSCAN_WEB_PORT`   | `8737`              | run           | Port of the web page |
-| `--web-bind`   | `PUSHSCAN_WEB_BIND`   | `0.0.0.0`           | run           | Address of the web page |
+| `--web-bind`   | `PUSHSCAN_WEB_BIND`   | see `[web]` `bind`  | run           | Address of the web page |
 | -              | `PUSHSCAN_WEB_PASSWORD` / `PUSHSCAN_WEB_PASSWORD_FILE` | (required with `--web` unless the bind address is loopback) | run | Web password (min. 8 characters), or a file containing it. Env, or `[web] password_file` of the config file. Never the password itself in the config file |
 | `--keep`       | -                  | off                 | probe         | Do not release the session |
 
@@ -194,7 +194,7 @@ the file and the key, so typos are caught.
 | `[advanced]` `verbose`, `ignore_panel` | `true` / `false` | `--verbose`, `--ignore-panel` |
 | `[advanced]` `trim_left`, `trim_top`, `trim_right`, `trim_bottom` | number, mm, 0 to 50 | `--trim` |
 | `[web]` `enabled` | `true` / `false` | `--web` |
-| `[web]` `bind` | address, default `0.0.0.0`; on a loopback address (`127.0.0.1`, `::1`, `localhost`) no password is needed | `--web-bind` |
+| `[web]` `bind` | address; not set: `0.0.0.0` when a password is set, else `127.0.0.1` (this PC only). On a loopback address (`127.0.0.1`, `::1`, `localhost`) no password is needed | `--web-bind` |
 | `[web]` `port` | 1 to 65535, default 8737 | `--web-port` |
 | `[web]` `password_file` | file holding the password; relative to the config file. The password itself is never a key | `PUSHSCAN_WEB_PASSWORD_FILE` |
 | `[[target]]` `name` | required, max 31 chars, unique | `NAME` |

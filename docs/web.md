@@ -40,7 +40,7 @@ PYTHONPATH=src python3 -m pushscan2folder --printer 192.168.1.50 run
 |---------|---------|
 | `PUSHSCAN_WEB=1` / `--web` | enable (`run` only) |
 | `PUSHSCAN_WEB_PORT` / `--web-port` | port, default 8737 |
-| `PUSHSCAN_WEB_BIND` / `--web-bind` | address, default `0.0.0.0` (use `127.0.0.1` to keep it local; then no password is needed) |
+| `PUSHSCAN_WEB_BIND` / `--web-bind` | address; not set: `0.0.0.0` when a password is set, else `127.0.0.1` (this PC only, no password needed) |
 | `PUSHSCAN_WEB_PASSWORD` | password, at least 8 characters (optional on a loopback bind) |
 | `PUSHSCAN_WEB_PASSWORD_FILE` | file with the password (e.g. a Docker secret); used if the variable above is unset |
 | `[web] password_file` | config file key, same as above; used if both variables are unset. Relative paths are relative to the config file |
@@ -58,7 +58,7 @@ Without a password the page only starts when it listens on this PC alone:
 with a bind address of `127.0.0.1` (or any `127.x.x.x`), `::1` or `localhost`
 it then runs without a login, the log says "web page only on this PC", and
 the navigation bar shows "No login: this page is only reachable from this PC."
-Any other bind address (including the default `0.0.0.0`) needs a password;
+Any other bind address (including `0.0.0.0`) needs a password;
 without one the program refuses to start (exit code 2). A configured password
 is always used, also on a loopback address. Anyone who can use this PC can open
 a page without login, so set a password on a shared PC. CSRF tokens, the Origin

@@ -63,6 +63,7 @@ All notable changes are documented here. The format follows
 
 ### Changed
 
+- Without a bind address and without a password the web page listens on `127.0.0.1` (this PC only, no login). With a password it stays `0.0.0.0`; the Docker image sets `PUSHSCAN_WEB_BIND=0.0.0.0`.
 - The web page runs without a login when it only listens on this PC (bind
   address `127.0.0.1` or another loopback address, `::1`, `localhost`) and no
   password is configured. Any other bind address without a password is still
