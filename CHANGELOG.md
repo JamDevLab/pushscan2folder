@@ -70,6 +70,8 @@ All notable changes are documented here. The format follows
   still work: the old keys are read and a warning lists them. Setup and the web
   page write the new layout. `PUSHSCAN_MULTIPAGE` and `--multipage` are
   unchanged. See [Configuration](docs/configuration.md#older-config-files).
+- Web page settings: the multi-page dialog is two check boxes (document type
+  Document and Auto) instead of a list with document, auto, both and off.
 - The example config and the docs use the trim values tested on a TR8550:
   `trim_right = 1` and `trim_bottom = 2` (mm).
 

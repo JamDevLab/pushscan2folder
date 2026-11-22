@@ -103,7 +103,9 @@ error, so a typo cannot turn a protection off.
   `size`, `open_after_scan`, `filename` (shown as "File name", see
   [File names](configuration.md#file-names)) and the four `trim_*` values,
   `ignore_panel` and `interval` (these three groups live in `[advanced]`), and
-  `multipage` (written to `[defaults.document]` and `[defaults.auto]`), each
+  the multi-page dialog as two check boxes, one for the panel document type
+  "Document" and one for "Auto" (written to `multipage` in
+  `[defaults.document]` and `[defaults.auto]`), each
   with a short explanation. Values are
   validated with the same rules as the config file; an empty field removes the
   key. The base `output` folder is shown read-only. The section "Fixed" shows

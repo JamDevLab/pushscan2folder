@@ -111,8 +111,9 @@ Fehler, damit ein Tippfehler keinen Schutz ausschaltet.
   `source`, `size`, `open_after_scan`, `filename` (angezeigt als "File name",
   siehe [Dateinamen](configuration.de.md#dateinamen)) und die vier
   `trim_*`-Werte, `ignore_panel` und `interval` (diese stehen in `[advanced]`)
-  sowie `multipage` (wird in `[defaults.document]` und `[defaults.auto]`
-  geschrieben), jeweils mit kurzer Erklärung. Die
+  sowie der Mehrseiten-Dialog als zwei Haken, einer für den Dokumenttyp
+  "Dokument" am Panel und einer für "Auto" (wird als `multipage` in
+  `[defaults.document]` und `[defaults.auto]` geschrieben), jeweils mit kurzer Erklärung. Die
   Werte werden mit denselben Regeln wie die Konfigurationsdatei geprüft; ein
   leeres Feld entfernt den Schlüssel. Der Basis-Ausgabeordner `output` wird nur
   angezeigt. Der Abschnitt "Fixed" zeigt den `printer` mit einem Knopf "Search
