@@ -22,6 +22,8 @@ from pushscan2folder.service import Target
 from pushscan2folder.status import LogBuffer, ScanRecord, ServiceStatus
 from support import CAN_SYMLINK, assert_mode, needs_symlinks
 
+web.POLL_INTERVAL = 0.02   # fast server shutdown between tests
+
 EXAMPLE = Path(__file__).resolve().parent.parent / "config.example.toml"
 PASSWORD = "correct horse"
 

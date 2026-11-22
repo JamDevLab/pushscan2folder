@@ -1809,6 +1809,11 @@ class Handler(BaseHTTPRequestHandler):
                                        notes=["Changes are not saved yet."]))
 
 
+# How often the server thread checks for shutdown (seconds); stopping waits
+# up to this long. Tests set it lower.
+POLL_INTERVAL = 0.5
+
+
 def start_server(ctx: WebContext, password: str | None, bind: str, port: int,
                  secure_cookie: bool = False):
     """Start the web server in a daemon thread. Returns (server, thread);
@@ -1817,7 +1822,8 @@ def start_server(ctx: WebContext, password: str | None, bind: str, port: int,
     reverse proxy. password None: no login at all (PUSHSCAN_WEB_AUTH=0).
     Raises OSError (e.g. port in use)."""
     server = WebServer((bind, port), ctx, password, secure_cookie=secure_cookie)
-    thread = threading.Thread(target=server.serve_forever, name="web", daemon=True)
+    thread = threading.Thread(target=server.serve_forever, name="web", daemon=True,
+                              kwargs={"poll_interval": POLL_INTERVAL})
     thread.start()
     return server, thread
 
