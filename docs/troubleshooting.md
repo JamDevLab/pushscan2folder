@@ -52,6 +52,17 @@ GitHub ask for the details. To report a new printer model, see
   the same network. Enter the IP address, it is shown in the network settings
   on the printer panel. On Windows, the firewall may ask once to allow the
   program, see [Finding the printer](windows.md#finding-the-printer).
+- The web page's "Search the network" finds no printer: the search needs
+  multicast, which Docker's default bridge network does not pass on, and a
+  firewall or VPN can block it too. Set the address in the config file or in
+  `PUSHSCAN_PRINTER`. There is no button while `PUSHSCAN_PRINTER` or `--printer`
+  is set.
+- A changed config file has no effect: the log shows why. An invalid file is
+  logged once as an error and the running settings stay. The `[web]` options,
+  the log file, the debug log and the heartbeat file need a restart, see
+  [Changing the file while running](configuration.md#changing-the-file-while-running).
+- `pushscan2folder stop` seems to hang: a scan is running. It waits up to 10
+  minutes for the scan to finish and save, and prints that it does.
 - The container shows `unhealthy` in `docker ps`: the printer was not
   reachable for 2 minutes, for example because it is switched off or the
   network is down. See [Healthcheck](docker.md#healthcheck).

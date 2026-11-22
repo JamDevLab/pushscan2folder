@@ -20,7 +20,7 @@ Ein Desktop-Symbol ist optional und standardmäßig nicht angehakt. Am Ende biet
 
 Installer und Programm werden von GitHub Actions aus dem getaggten Quellcode gebaut. Der Installer entsteht mit Inno Setup um einen PyInstaller-Ordner-Build. Er ist nicht code-signiert.
 
-Zum Aktualisieren startest du den neueren Installer. Läuft die Hintergrundinstanz, beendet der Installer sie, ersetzt die Dateien und startet sie wieder. Deine Einstellungen bleiben erhalten.
+Zum Aktualisieren startest du den neueren Installer. Läuft die Hintergrundinstanz, beendet der Installer sie (mit `stop`, er wartet also auf einen laufenden Scan), ersetzt die Dateien und startet sie wieder. Deine Einstellungen bleiben erhalten.
 
 ### Warnungen von Virenscannern
 
@@ -85,7 +85,7 @@ Ein per Doppelklick gestartetes Programm lebt in seinem Konsolenfenster, und mit
 ```
 
 - `status` sagt, ob die Hintergrundinstanz läuft, nennt PID und Logdatei und zeigt die letzten Logzeilen. Der Exit-Code ist 0, wenn sie läuft, sonst 1.
-- `stop` bittet die Instanz, sich zu beenden. Sie verlässt ihre Schleife nach wenigen Sekunden (ein laufender Scan wird noch fertig) und gibt ihre Namen am Drucker frei, sie verschwinden also vom Display. Ein abgekoppelter Prozess bekommt kein Strg+C, deshalb schreibt `stop` eine Stopp-Anforderungsdatei, die die Instanz etwa einmal pro Sekunde prüft. Ist die Instanz nach 30 Sekunden nicht beendet, wird sie abgebrochen; der Drucker verwirft die Namen dann nach etwa einer Minute.
+- `stop` bittet die Instanz, sich zu beenden. Sie verlässt ihre Schleife nach wenigen Sekunden (ein laufender Scan wird noch fertig) und gibt ihre Namen am Drucker frei, sie verschwinden also vom Display. Ein abgekoppelter Prozess bekommt kein Strg+C, deshalb schreibt `stop` eine Stopp-Anforderungsdatei, die die Instanz etwa einmal pro Sekunde prüft. Ist die Instanz nach 30 Sekunden nicht beendet, wird sie abgebrochen; der Drucker verwirft die Namen dann nach etwa einer Minute. Läuft gerade ein Scan, wartet `stop` stattdessen bis zu 10 Minuten und gibt "A scan is running; it is finished and saved first ..." aus. Ein mehrseitiger Scan vom Vorlagenglas, der auf die nächste Seite wartet, endet sofort mit den bisher gescannten Seiten, und diese werden gespeichert.
 
 Die Instanz hält eine Lock-Datei, eine PID-Datei und die Stopp-Anforderungsdatei in `%LOCALAPPDATA%\pushscan2folder\`. Das Lock hält der laufende Prozess, und Windows gibt es frei, wenn er endet. Eine übrig gebliebene Datei nach einem Absturz oder Neustart blockiert den nächsten `start` deshalb nie.
 
@@ -192,9 +192,9 @@ Du siehst den Eintrag auch im Task-Manager auf dem Tab "Autostart-Apps" oder unt
 
 ## Deinstallieren
 
-Über Windows-Einstellungen, Apps, pushscan2folder. Der Deinstaller beendet die Hintergrundinstanz (die Namen verschwinden vom Display), entfernt den Autostart-Eintrag und fragt, ob auch die Einstellungen und das Log gelöscht werden sollen (Standard nein). Deine Scans werden nie gelöscht.
+Über Windows-Einstellungen, Apps, pushscan2folder. Der Deinstaller beendet die Hintergrundinstanz mit `stop` (er wartet auf einen laufenden Scan, und die Namen verschwinden vom Display), entfernt den Autostart-Eintrag und fragt, ob auch die Einstellungen und das Log gelöscht werden sollen (Standard nein). Deine Scans werden nie gelöscht.
 
-`pushscan2folder uninstall` räumt von der Kommandozeile aus genauso auf. Es beendet die Hintergrundinstanz, entfernt den Autostart-Eintrag und listet dann den Konfigurationsordner (`%APPDATA%\pushscan2folder\`, mit `config.toml` und `web_password.txt`) sowie den Log- und Statusordner (`%LOCALAPPDATA%\pushscan2folder\`) auf. Es fragt, ob sie gelöscht werden sollen, Standard nein. Deine Scans werden nie gelöscht, und ein Ordner, der deinen Scan-Ordner enthält, bleibt erhalten. Bei einer installierten Kopie endet es mit dem Hinweis, das Programm unter Einstellungen, Apps zu entfernen. Bei einer Kopie ohne Installer (zum Beispiel von pip oder aus dem Quellcode) erinnert es dich, das Programm selbst zu entfernen, denn Windows kann ein laufendes Programm nicht löschen.
+`pushscan2folder uninstall` räumt von der Kommandozeile aus genauso auf. Es beendet die Hintergrundinstanz (und wartet dabei wie `stop` auf einen laufenden Scan), entfernt den Autostart-Eintrag und listet dann den Konfigurationsordner (`%APPDATA%\pushscan2folder\`, mit `config.toml` und `web_password.txt`) sowie den Log- und Statusordner (`%LOCALAPPDATA%\pushscan2folder\`) auf. Es fragt, ob sie gelöscht werden sollen, Standard nein. Deine Scans werden nie gelöscht, und ein Ordner, der deinen Scan-Ordner enthält, bleibt erhalten. Bei einer installierten Kopie endet es mit dem Hinweis, das Programm unter Einstellungen, Apps zu entfernen. Bei einer Kopie ohne Installer (zum Beispiel von pip oder aus dem Quellcode) erinnert es dich, das Programm selbst zu entfernen, denn Windows kann ein laufendes Programm nicht löschen.
 
 Für Skripte: `uninstall --yes` fragt nicht und behält Konfiguration und Log; `uninstall --yes --purge` löscht sie. Ordner, die über `--config PFAD` angegeben sind, werden nicht angefasst.
 

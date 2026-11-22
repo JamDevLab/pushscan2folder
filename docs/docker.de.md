@@ -113,6 +113,16 @@ Zum Scannen braucht der Container keine Port-Weiterleitung, er verbindet sich
 nur ausgehend mit dem Drucker auf TCP 80. Port 8080 ist nur für die
 [Weboberfläche](web.de.md). Dockers Standard-Bridge-Netzwerk funktioniert.
 
+## Konfigurationsänderungen und Druckersuche
+
+Der Dienst liest `./config/config.toml` neu, wenn sie sich ändert. Änderungen
+auf dem Host gelten also innerhalb eines Abfragezyklus ohne Neustart, siehe
+[Datei im laufenden Betrieb ändern](configuration.de.md#datei-im-laufenden-betrieb-ändern).
+Der Knopf "Search the network" auf der Einstellungsseite findet mit dem
+Standard-Bridge-Netz nichts, weil Multicast das LAN nicht erreicht. Die
+Compose-Datei setzt `PUSHSCAN_PRINTER`, was den Knopf ebenfalls ausblendet.
+Trage die Adresse dort ein.
+
 ## Healthcheck
 
 Das Image setzt `PUSHSCAN_HEARTBEAT_FILE=/tmp/pushscan2folder.alive` und hat

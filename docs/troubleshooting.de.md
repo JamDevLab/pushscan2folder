@@ -60,6 +60,18 @@ melden, siehe [CONTRIBUTING.md](../CONTRIBUTING.md) (auf Englisch).
   den Netzwerkeinstellungen am Bedienfeld des Druckers. Unter Windows fragt die
   Firewall eventuell einmal, ob das Programm erlaubt sein soll, siehe
   [Den Drucker finden](windows.de.md#den-drucker-finden).
+- Die "Search the network"-Suche der Weboberfläche findet keinen Drucker: Sie
+  braucht Multicast, das Dockers Standard-Bridge-Netz nicht weitergibt, und
+  auch eine Firewall oder ein VPN kann es blockieren. Trage die Adresse in der
+  Konfigurationsdatei oder in `PUSHSCAN_PRINTER` ein. Solange `PUSHSCAN_PRINTER`
+  oder `--printer` gesetzt ist, gibt es keinen Knopf.
+- Eine geänderte Konfigurationsdatei wirkt nicht: Das Log nennt den Grund. Eine
+  ungültige Datei wird einmal als Fehler geloggt, und die laufenden
+  Einstellungen bleiben. Die `[web]`-Optionen, die Logdatei, das Debug-Log und
+  die Heartbeat-Datei brauchen einen Neustart, siehe
+  [Datei im laufenden Betrieb ändern](configuration.de.md#datei-im-laufenden-betrieb-ändern).
+- `pushscan2folder stop` scheint zu hängen: Ein Scan läuft. Es wartet bis zu 10
+  Minuten, bis der Scan fertig und gespeichert ist, und sagt das auch.
 - Der Container zeigt in `docker ps` `unhealthy`: Der Drucker war 2 Minuten lang
   nicht erreichbar, zum Beispiel weil er ausgeschaltet ist oder das Netzwerk
   ausgefallen ist. Siehe [Healthcheck](docker.de.md#healthcheck).

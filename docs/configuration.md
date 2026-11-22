@@ -8,6 +8,7 @@ Back to the [README](../README.md).
 - [Options](#options)
 - [Configuration file](#configuration-file)
 - [Precedence](#precedence)
+- [Changing the file while running](#changing-the-file-while-running)
 - [Panel settings](#panel-settings)
 - [Trimming a border](#trimming-a-border)
 - [Multi-page scans from the platen](#multi-page-scans-from-the-platen)
@@ -77,7 +78,13 @@ is already running. The log goes to the state folder
 `$XDG_STATE_HOME/pushscan2folder/pushscan2folder.log`, default
 `~/.local/state/...`, elsewhere) unless `--log-file` is given. `stop` writes a
 stop request file that the poll loop checks once per second and terminates the
-process only if it has not ended after 30 seconds. `status` exits with 0 if the
+process only if it has not ended after 30 seconds. While a scan runs, `stop`
+waits up to 600 seconds (10 minutes) instead and prints "A scan is running; it
+is finished and saved first ...". The instance keeps a busy marker file in its
+state folder for the time of a scan. A multi-page platen scan that waits for
+the next-page decision on the panel ends right away with the pages scanned so
+far, and these are saved. A page that is being scanned finishes first.
+`uninstall` runs `stop` too and waits in the same way. `status` exits with 0 if the
 instance runs and 1 if not. A foreground `run` refuses to start while the
 background instance runs, because both would register the same names. It
 points to `pushscan2folder stop`.
@@ -210,6 +217,27 @@ Command line > environment variable > config file > built-in default.
 - The panel settings come first for the scan itself, the CLI options only fill
   in, see [Panel settings](#panel-settings) and
   [Presets per target](#presets-per-target).
+
+## Changing the file while running
+
+Before each poll cycle, never during a scan, `run` checks the modification
+time and size of the config file. If it changed, the file is read again like at
+startup. Command line options and `PUSHSCAN_*` environment variables still win
+over the file. This also applies to changes made on the [web page](web.md).
+
+These are applied right away: the scan defaults (`[defaults]` keys, `size`,
+`trim_*`, `filename`), `interval`, `ignore_panel`, `multipage`,
+`open_after_scan`, the targets, `output` and `printer`. Targets whose names stay
+keep their registration on the panel. If the printer changes, the names are
+released on the old printer and registered on the new one.
+
+These need a restart: the web page on or off, its bind address, port and
+password file, the log file, the debug log (`verbose`) and the heartbeat file.
+If the file changes one of them, the log shows a warning that names it.
+
+An invalid file, or an invalid file name template, is logged once as an error
+and the running settings stay. A deleted file changes nothing. In Docker this
+works when you edit `./config/config.toml` on the host.
 
 ## Panel settings
 

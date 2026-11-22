@@ -8,6 +8,7 @@ Zurück zur [README](../README.de.md).
 - [Optionen](#optionen)
 - [Konfigurationsdatei](#konfigurationsdatei)
 - [Vorrang](#vorrang)
+- [Datei im laufenden Betrieb ändern](#datei-im-laufenden-betrieb-ändern)
 - [Einstellungen vom Bedienfeld](#einstellungen-vom-bedienfeld)
 - [Rand abschneiden](#rand-abschneiden)
 - [Mehrseitige Scans vom Vorlagenglas](#mehrseitige-scans-vom-vorlagenglas)
@@ -79,7 +80,15 @@ Hintergrundinstanz läuft. Das Log geht in den Statusordner
 sonst `$XDG_STATE_HOME/pushscan2folder/pushscan2folder.log`, Standard
 `~/.local/state/...`), sofern nicht `--log-file` angegeben ist. `stop` schreibt eine
 Stopp-Anforderungsdatei, die die Abfrageschleife einmal pro Sekunde prüft, und
-bricht den Prozess nur ab, wenn er nach 30 Sekunden nicht beendet ist. `status`
+bricht den Prozess nur ab, wenn er nach 30 Sekunden nicht beendet ist. Läuft
+gerade ein Scan, wartet `stop` stattdessen bis zu 600 Sekunden (10 Minuten) und
+gibt "A scan is running; it is finished and saved first ..." aus. Die Instanz
+legt für die Dauer eines Scans eine Busy-Markierungsdatei in ihrem Statusordner
+an. Ein mehrseitiger Scan vom Vorlagenglas, der am Bedienfeld auf die
+Entscheidung über die nächste Seite wartet, endet sofort mit den bisher
+gescannten Seiten, und diese werden gespeichert. Eine Seite, die gerade
+gescannt wird, wird noch fertig. `uninstall` führt ebenfalls `stop` aus und
+wartet genauso. `status`
 endet mit 0, wenn die Instanz läuft, sonst mit 1. Ein `run` im Vordergrund
 startet nicht, solange die Hintergrundinstanz läuft, weil beide dieselben Namen
 anmelden würden. Es verweist auf `pushscan2folder stop`.
@@ -217,6 +226,29 @@ Standardwert.
   CLI-Optionen füllen nur auf, siehe
   [Einstellungen vom Bedienfeld](#einstellungen-vom-bedienfeld) und
   [Voreinstellungen pro Ziel](#voreinstellungen-pro-ziel).
+
+## Datei im laufenden Betrieb ändern
+
+Vor jedem Abfragezyklus, nie während eines Scans, prüft `run` Änderungsdatum
+und Größe der Konfigurationsdatei. Hat sie sich geändert, wird sie wie beim
+Start neu gelesen. Kommandozeilenoptionen und `PUSHSCAN_*`-Umgebungsvariablen
+gelten weiterhin vor der Datei. Das betrifft auch Änderungen von der
+[Weboberfläche](web.de.md).
+
+Sofort übernommen werden: die Scan-Vorgaben (Schlüssel in `[defaults]`, `size`,
+`trim_*`, `filename`), `interval`, `ignore_panel`, `multipage`,
+`open_after_scan`, die Ziele, `output` und `printer`. Ziele, deren Namen
+bleiben, behalten ihre Anmeldung am Bedienfeld. Ändert sich der Drucker, werden
+die Namen am alten Drucker freigegeben und am neuen angemeldet.
+
+Einen Neustart brauchen: die Weboberfläche an oder aus, ihre Bind-Adresse, der
+Port und die Passwortdatei, die Logdatei, das Debug-Log (`verbose`) und die
+Heartbeat-Datei. Ändert die Datei eine davon, nennt eine Warnung im Log sie.
+
+Eine ungültige Datei oder eine ungültige Dateinamen-Vorlage wird einmal als
+Fehler ins Log geschrieben, und die laufenden Einstellungen bleiben. Eine
+gelöschte Datei ändert nichts. In Docker funktioniert das, wenn du
+`./config/config.toml` auf dem Host bearbeitest.
 
 ## Einstellungen vom Bedienfeld
 

@@ -113,13 +113,26 @@ Fehler, damit ein Tippfehler keinen Schutz ausschaltet.
   `trim_*`-Werte aus `[defaults]` sowie `multipage`, `ignore_panel` und
   `interval`, jeweils mit kurzer Erklärung. Die
   Werte werden mit denselben Regeln wie die Konfigurationsdatei geprüft; ein
-  leeres Feld entfernt den Schlüssel. `printer` und der Basis-Ausgabeordner
-  `output` werden nur angezeigt. Überschreibt eine Umgebungsvariable oder
+  leeres Feld entfernt den Schlüssel. Der Basis-Ausgabeordner `output` wird nur
+  angezeigt. Der Abschnitt "Fixed" zeigt den `printer` mit einem Knopf "Search
+  the network", siehe unten. Überschreibt eine Umgebungsvariable oder
   Kommandozeilenoption einen Wert (etwa `PUSHSCAN_INTERVAL` oder
   `PUSHSCAN_TRIM`), weist die Seite darauf hin und zeigt den verwendeten Wert;
   der gespeicherte Wert wirkt nicht, solange die Überschreibung besteht. Die
-  Einstellungen werden nur in die Datei geschrieben und gelten nach einem
-  Neustart.
+  Einstellungen werden in die Datei geschrieben, und der laufende Dienst
+  übernimmt sie innerhalb eines Abfragezyklus, siehe
+  [Datei im laufenden Betrieb ändern](configuration.de.md#datei-im-laufenden-betrieb-ändern).
+  Nur die `[web]`-Optionen brauchen einen Neustart.
+  Die Druckersuche führt dieselbe mDNS-Suche wie das Setup aus (etwa 2
+  Sekunden) und listet Adresse und Modell jedes gefundenen Scanners, jeweils mit
+  einem Knopf "Use". Der verwendete Drucker ist mit "in use" markiert. "Use"
+  schreibt `printer` in die Konfigurationsdatei und lässt alles andere
+  unverändert; der neue Drucker gilt ab dem nächsten Abfragezyklus. Setzt
+  `PUSHSCAN_PRINTER` oder `--printer` den Drucker (die mitgelieferte
+  Docker-Compose-Datei tut das), gibt es keinen Suchknopf, und die Seite nennt,
+  was ihn überschreibt. In Docker mit dem Standard-Bridge-Netz erreicht
+  Multicast das LAN nicht, die Suche findet dort also nichts. Setze die Adresse
+  dann in der Konfigurationsdatei oder der Umgebung.
 - Konfigurationsdatei (`/config`, von den Einstellungen aus verlinkt) ist ein
   Texteditor für die ganze Datei. Der Text wird unverändert gespeichert,
   Kommentare inklusive, nachdem er wie beim Start geprüft wurde; eine ungültige
@@ -131,8 +144,9 @@ Fehler, damit ein Tippfehler keinen Schutz ausschaltet.
   bereits so in der Datei stehen (etwa `output = "/consume"`), dürfen
   unverändert bleiben. Das Formular enthält einen Hash des Dateitexts: Hat sich
   die Datei inzwischen geändert, wird nichts gespeichert und der neue Inhalt
-  angezeigt. Änderungen an den Zielen werden wie auf der Zielseite übernommen,
-  alles andere nach einem Neustart. Die Größengrenze ist 64 KB.
+  angezeigt. Der laufende Dienst übernimmt die Änderungen innerhalb eines
+  Abfragezyklus, außer den `[web]`-Optionen, die einen Neustart brauchen. Die
+  Größengrenze ist 64 KB.
 
 ## Ziele und Ordner bearbeiten
 
@@ -161,7 +175,8 @@ Weboberfläche zeigt es schreibgeschützt an und behält es beim Speichern bei;
 löschen kannst du es dort trotzdem.
 
 Der Rohtext-Editor lehnt außerdem Änderungen an `output`, `printer` und am
-Abschnitt `[web]` ab. `[web]` legt fest, wer die Seite erreicht und wo das
+Abschnitt `[web]` ab. Den Drucker kannst du nur auf der Einstellungsseite mit
+der Netzwerksuche ändern. `[web]` legt fest, wer die Seite erreicht und wo das
 Passwort liegt; das lässt sich nur in der Datei selbst oder mit
 `pushscan2folder setup` ändern.
 
@@ -185,6 +200,11 @@ Passwort liegt; das lässt sich nur in der Datei selbst oder mit
   und die Seiten senden strikte Header (CSP, kein Framing, kein Caching).
   Ausgeliefert werden nur die Seiten selbst, ein Stylesheet, das Icon und das kleine Skript; die
   Weboberfläche kann keine Dateien lesen oder herunterladen.
+- Die Druckersuche akzeptiert nur eine Adresse aus ihrem eigenen letzten
+  Suchergebnis, niemand kann den Dienst also über die Weboberfläche auf einen
+  anderen Rechner richten. Es läuft nur eine Suche gleichzeitig, und das
+  Formular braucht den CSRF-Token wie jedes andere. Der Rohtext-Editor kann
+  `printer` weiterhin nicht ändern.
 - Browser schicken Cookies an jeden Dienst auf demselben Host, egal auf welchem
   Port. Laufen weitere Weboberflächen auf dem NAS, rufe diese Seite besser über
   einen eigenen Hostnamen auf.

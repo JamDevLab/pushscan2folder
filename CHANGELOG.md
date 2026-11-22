@@ -7,6 +7,20 @@ All notable changes are documented here. The format follows
 
 ### Added
 
+- Config file reload: `run` checks the config file before each poll cycle
+  (never during a scan) and applies a change without a restart. Scan defaults,
+  `interval`, `ignore_panel`, `multipage`, `open_after_scan`, the targets,
+  `output` and the printer are applied right away; names that stay keep their
+  panel registration. The web page options, log file, debug log and heartbeat
+  file still need a restart, and a warning names them. An invalid file is
+  logged once and the running settings stay. The web Settings page and the raw
+  config editor now take effect within a poll cycle. See
+  [Configuration](docs/configuration.md#changing-the-file-while-running).
+- Printer search on the web Settings page: "Search the network" runs the mDNS
+  search and lists the scanners found with a "Use" button, which writes
+  `printer` into the config file. Only an address from the last search can be
+  used. There is no button if `PUSHSCAN_PRINTER` or `--printer` sets the
+  printer. See [Web page](docs/web.md#pages).
 - File name template: `[defaults] filename`, `filename` per `[[target]]` (the
   target's own wins), `--filename TEMPLATE`, `PUSHSCAN_FILENAME` and a "File
   name" field on the web Settings page. The default `scan_{now:%Y%m%d_%H%M%S}`
@@ -33,6 +47,11 @@ All notable changes are documented here. The format follows
 
 ### Fixed
 
+- `pushscan2folder stop` during a scan used to terminate the program after 30
+  seconds. It now waits up to 10 minutes while a scan runs, so the scan is
+  finished and saved. A multi-page platen scan that waits for the next page ends
+  right away with the pages scanned so far. The Windows installer and
+  uninstaller run `stop` and wait in the same way.
 - Setup's question "Start automatically when you log in to Windows?" removed
   the autostart entry instead of creating it (since 0.2.0).
 - `--install-autostart` with run options but without a subcommand failed.

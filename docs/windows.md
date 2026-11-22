@@ -20,7 +20,7 @@ A desktop icon is optional and unchecked by default. At the end the installer of
 
 The installer and the program are built by GitHub Actions from the tagged source. The installer is built with Inno Setup around a PyInstaller folder build. It is not code signed.
 
-To update, run the newer installer. If the background instance runs, the installer stops it, replaces the files and starts it again. Your settings stay.
+To update, run the newer installer. If the background instance runs, the installer stops it (with `stop`, so it waits for a running scan), replaces the files and starts it again. Your settings stay.
 
 ### Virus scanner warnings
 
@@ -85,7 +85,7 @@ A program started by double click lives in its console window, and closing the w
 ```
 
 - `status` says whether the background instance runs, its PID and log file, and shows the last lines of the log. The exit code is 0 when it runs and 1 when it does not.
-- `stop` asks the instance to stop. It leaves its loop within a few seconds (a scan in progress finishes first) and releases its names on the printer, so they leave the panel. A detached process gets no Ctrl+C, so `stop` writes a stop request file that the instance checks about once per second. If the instance has not ended after 30 seconds, it is terminated, and the printer drops the names after about a minute.
+- `stop` asks the instance to stop. It leaves its loop within a few seconds (a scan in progress finishes first) and releases its names on the printer, so they leave the panel. A detached process gets no Ctrl+C, so `stop` writes a stop request file that the instance checks about once per second. If the instance has not ended after 30 seconds, it is terminated, and the printer drops the names after about a minute. While a scan runs, `stop` waits up to 10 minutes instead and prints "A scan is running; it is finished and saved first ...". A multi-page platen scan that waits for the next page ends right away with the pages scanned so far, and they are saved.
 
 The instance keeps a lock file, a PID file and the stop request file in `%LOCALAPPDATA%\pushscan2folder\`. The lock is held by the running process and dropped by Windows when it ends, so a leftover file after a crash or reboot never blocks the next `start`.
 
@@ -192,9 +192,9 @@ You can also look at it in Task Manager, tab "Startup apps", or in Settings, App
 
 ## Uninstall
 
-Use Windows Settings, Apps, pushscan2folder. The uninstaller stops the background instance (the names leave the panel), removes the autostart entry and asks whether to delete the settings and the log too (default no). Your scans are never deleted.
+Use Windows Settings, Apps, pushscan2folder. The uninstaller stops the background instance with `stop` (it waits for a running scan, and the names leave the panel), removes the autostart entry and asks whether to delete the settings and the log too (default no). Your scans are never deleted.
 
-`pushscan2folder uninstall` does the same cleanup from the command line. It stops the background instance, removes the autostart entry, and then lists the config folder (`%APPDATA%\pushscan2folder\`, with `config.toml` and `web_password.txt`) and the log and state folder (`%LOCALAPPDATA%\pushscan2folder\`). It asks whether to delete them, default no. Your scans are never deleted, and a folder that contains your scan folder is kept. On an installed copy it ends with the hint to remove the program under Settings, Apps. For a copy without the installer (for example from pip or the source) it reminds you to remove the program yourself, because Windows cannot delete a program while it runs.
+`pushscan2folder uninstall` does the same cleanup from the command line. It stops the background instance (waiting for a running scan like `stop`), removes the autostart entry, and then lists the config folder (`%APPDATA%\pushscan2folder\`, with `config.toml` and `web_password.txt`) and the log and state folder (`%LOCALAPPDATA%\pushscan2folder\`). It asks whether to delete them, default no. Your scans are never deleted, and a folder that contains your scan folder is kept. On an installed copy it ends with the hint to remove the program under Settings, Apps. For a copy without the installer (for example from pip or the source) it reminds you to remove the program yourself, because Windows cannot delete a program while it runs.
 
 For scripts, `uninstall --yes` does not ask and keeps the config and log folders; `uninstall --yes --purge` deletes them. Folders given with `--config PATH` are not touched.
 

@@ -110,6 +110,16 @@ Scanning needs no port mapping; the container only connects out to the
 printer on TCP 80. Port 8080 is only for the [web page](web.md). Docker's
 default bridge networking works.
 
+## Config changes and printer search
+
+The service reads `./config/config.toml` again when it changes, so edits on the
+host apply within a poll cycle without a restart, see
+[Changing the file while running](configuration.md#changing-the-file-while-running).
+The "Search the network" button on the web Settings page finds nothing with the
+default bridge network, because multicast does not reach the LAN. The compose
+file sets `PUSHSCAN_PRINTER`, which also hides the button. Set the address
+there.
+
 ## Healthcheck
 
 The image sets `PUSHSCAN_HEARTBEAT_FILE=/tmp/pushscan2folder.alive` and has a
