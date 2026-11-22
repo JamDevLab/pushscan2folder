@@ -243,6 +243,14 @@ class SetupTests(unittest.TestCase):
         self.assertIn("0.0.0.0", io_.text)      # LAN explanation
         self.assertNotIn(secret, io_.text)
 
+    def test_bind_address_is_checked(self):
+        self.assertIsNone(wizard.bind_problem("127.0.0.1"))
+        self.assertIsNone(wizard.bind_problem("0.0.0.0"))
+        self.assertIsNone(wizard.bind_problem("::1"))
+        self.assertIsNone(wizard.bind_problem("localhost"))
+        for bad in ("localhost:8080", "my pc", "", "300.1.1.1"):
+            self.assertIsNotNone(wizard.bind_problem(bad), bad)
+
     def test_example_password_refused(self):
         self.assertIsNotNone(wizard.password_problem(wizard.EXAMPLE_PASSWORD))
         self.assertIsNotNone(wizard.password_problem("1234567"))
@@ -309,6 +317,10 @@ class SetupTests(unittest.TestCase):
         self.assertEqual([(t.name, t.output) for t in cfg.targets], [("New", ".")])
         self.assertEqual(cfg.output, out_dir)
         self.assertEqual(self.path.with_name("config.toml.bak").read_text(), original)
+        # a second start over keeps the first copy
+        self.run_setup(["3", "192.0.2.6", "Newer", str(out_dir), "n", "n"])
+        self.assertEqual(self.path.with_name("config.toml.bak").read_text(), original)
+        self.assertIn('"New"', self.path.with_name("config.toml.2.bak").read_text())
 
     def test_invalid_existing_config_is_not_overwritten(self):
         self.path.parent.mkdir(parents=True)

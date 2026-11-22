@@ -228,6 +228,11 @@ def start_instance(argv: list[str], inst: Instance, popen=subprocess.Popen,
     while clock() < deadline:
         if inst.is_running():
             pid = inst.read_info().pid
+            for _ in range(4):  # the info file follows right after the lock
+                if pid:
+                    break
+                sleep(0.25)
+                pid = inst.read_info().pid
             return True, "started" + (f" (PID {pid})" if pid else "")
         code = proc.poll()
         if code is not None:

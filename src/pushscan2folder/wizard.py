@@ -6,6 +6,7 @@ out), so the flow can be tested without a console or a network."""
 from __future__ import annotations
 
 import getpass
+import ipaddress
 import os
 import shutil
 from pathlib import Path
@@ -35,6 +36,18 @@ def password_problem(password: str) -> str | None:
         return f"the web password must have at least {MIN_PASSWORD_LENGTH} characters"
     if password == EXAMPLE_PASSWORD:
         return "replace the example web password with your own"
+    return None
+
+
+def bind_problem(address: str) -> str | None:
+    """Why `address` cannot be the bind address of the web page, or None.
+    Only IP addresses and "localhost" (a host name would need DNS at every start)."""
+    if address == "localhost":
+        return None
+    try:
+        ipaddress.ip_address(address)
+    except ValueError:
+        return "enter an IP address such as 127.0.0.1 or 0.0.0.0 (no port)"
     return None
 
 
@@ -151,7 +164,13 @@ class Setup:
             self.out("Enter a port number from 1 to 65535.")
         self.out("Bind address: 127.0.0.1 means only this PC can open the page. "
                  "0.0.0.0 makes it reachable from your whole network.")
-        cfg.web_bind = self.ask("Bind address", cfg.web_bind or DEFAULT_BIND)
+        while True:
+            bind = self.ask("Bind address", cfg.web_bind or DEFAULT_BIND)
+            problem = bind_problem(bind)
+            if problem is None:
+                cfg.web_bind = bind
+                break
+            self.out(f"Error: {problem}")
         existing = Path(cfg.web_password_file) if cfg.web_password_file else None
         if existing is not None and existing.is_file() \
                 and self.yes_no("Keep the existing web password?", True):
@@ -221,6 +240,10 @@ class Setup:
     def backup(self) -> None:
         """Keep a copy of the old file before it is replaced."""
         backup = self.path.with_name(self.path.name + ".bak")
+        number = 1
+        while backup.exists():  # never overwrite an older copy
+            number += 1
+            backup = self.path.with_name(f"{self.path.name}.{number}.bak")
         shutil.copy2(self.path, backup)
         self.out(f"The old file is kept as {backup}")
 

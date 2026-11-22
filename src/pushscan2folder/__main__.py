@@ -437,7 +437,7 @@ def autostart_main(argv: list[str]) -> int:
     rest = [a for a in argv if a not in ("--install-autostart", "--remove-autostart")]
     if install:
         try:
-            parse_args(rest if any(a in autostart.COMMANDS for a in rest) else rest + ["run"])
+            parse_args(rest)  # adds `run` in the right place when no subcommand is given
             command = autostart.install_command(rest)
         except ConfigError as exc:
             print(f"error: {exc}", file=sys.stderr)
@@ -514,10 +514,15 @@ def summary_lines(args: argparse.Namespace, targets: list[Target], config_path: 
     return lines
 
 
+def install_autostart(args: list[str]) -> int:
+    """Install the logon entry that runs the given options (used by setup)."""
+    return autostart_main(["--install-autostart"] + args)
+
+
 def setup_main(args: argparse.Namespace | None) -> int:
     """`setup`: ask, write the config file, then optionally start."""
     path = Path(args.config) if args and args.config else default_config_path()
-    session = wizard.Setup(path, autostart_fn=autostart_main, default_name=default_name(),
+    session = wizard.Setup(path, autostart_fn=install_autostart, default_name=default_name(),
                            start_fn=lambda a: start_main(a, hints=False))
     try:
         start = session.run()
@@ -812,8 +817,14 @@ def _main(argv=None) -> int:
         interactive = False
 
     def claim() -> bool:
-        """Background mode: become the one instance (False: another runs)."""
+        """Background mode: become the one instance (False: another runs).
+        In the foreground: refuse while the background instance runs, as both
+        would register the same names."""
         if not args.background:
+            if inst.is_running():
+                logging.error("pushscan2folder already runs in the background; stop it "
+                              "first with: pushscan2folder stop")
+                return False
             return True
         try:
             if inst.claim(args.log_file):

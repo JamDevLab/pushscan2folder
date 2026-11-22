@@ -431,6 +431,21 @@ class BackgroundRunTests(TempDirCase):
         run.assert_not_called()
 
 
+    def test_foreground_run_refuses_while_background_runs(self):
+        env = {"XDG_STATE_HOME": str(self.dir), "LOCALAPPDATA": str(self.dir)}
+        with clean_env(), mock.patch.dict(os.environ, env):
+            runner = background.Instance()
+            self.addCleanup(runner.release)
+            self.assertTrue(runner.claim())
+            with mock.patch.object(cli.PushScanService, "run") as run, \
+                    mock.patch("pushscan2folder.__main__.install_signal_handlers"), \
+                    mock.patch("pushscan2folder.__main__.pause_before_exit"), \
+                    mock.patch("pushscan2folder.__main__.greeting", return_value=None):
+                code = cli.main(["--printer", "192.0.2.1", "--output", str(self.dir / "o")])
+        self.assertEqual(code, 2)
+        run.assert_not_called()
+
+
 class SummaryHintTests(unittest.TestCase):
     def test_foreground_hint(self):
         with clean_env():
