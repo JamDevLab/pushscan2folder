@@ -824,10 +824,66 @@ def double_click() -> bool:
     return is_windows() and count is not None and count <= 1
 
 
-def greeting(raw: list[str], instance: background.Instance | None = None) -> int | None:
+def menu(instance: background.Instance, input_fn=input) -> int:
+    """Small numbered menu for a double click: start, stop, status, settings, quit.
+    Status shows the menu again; every other choice returns its result."""
+    while True:
+        running = instance.is_running()
+        if running:
+            pid = instance.read_info().pid
+            state = "Running in the background" + (f" (PID {pid})." if pid else ".")
+        else:
+            state = "Not running."
+        print(f"pushscan2folder {__version__}\n{state}\n")
+        actions = [] if running else [("Start in the background", "start")]
+        actions += [("Stop", "stop")] if running else []
+        actions += [("Status", "status"), ("Change the settings", "setup"), ("Quit", "quit")]
+        default = "status" if running else "start"
+        default_number = [name for _, name in actions].index(default) + 1
+        for number, (label, _) in enumerate(actions, 1):
+            print(f"  {number}  {label}")
+        try:
+            answer = input_fn(f"Choice [{default_number}]: ").strip()
+        except (EOFError, KeyboardInterrupt):
+            print()
+            return 0
+        if answer and not (answer.isdigit() and 1 <= int(answer) <= len(actions)):
+            print("Please enter one of the numbers.\n")
+            continue
+        action = actions[int(answer) - 1][1] if answer else default
+        if action == "start":
+            return start_main(["start"], instance=instance)
+        if action == "stop":
+            return stop_main(instance)
+        if action == "status":
+            print()
+            status_main(instance)
+            print()
+            continue
+        if action == "quit":
+            return 0
+        if running:
+            print("\nThe background instance must be stopped before the settings change.")
+            try:
+                stop_first = input_fn("Stop it now? [Y/n]: ").strip().lower()
+            except (EOFError, KeyboardInterrupt):
+                print()
+                return 0
+            if stop_first not in ("", "y", "yes", "j", "ja"):
+                print()
+                continue
+            code = stop_main(instance)
+            if code != 0:
+                return code
+            print()
+        return setup_main(None)
+
+
+def greeting(raw: list[str], instance: background.Instance | None = None,
+             input_fn=input) -> int | None:
     """Without arguments: the setup questions if nothing is configured yet;
-    on a Windows double click with a config file, the choice to use it,
-    change it or start over. None: go on with a normal run."""
+    on a Windows double click with a config file, a menu (start, stop,
+    status, settings). None: go on with a normal run."""
     if not manual_start(raw):
         return None
     if not default_config_path().is_file():
@@ -836,15 +892,7 @@ def greeting(raw: list[str], instance: background.Instance | None = None) -> int
         return setup_main(None)
     if not double_click():
         return None
-    instance = instance or background.Instance()
-    if instance.is_running():
-        pid = instance.read_info().pid
-        print(f"pushscan2folder {__version__} is already running in the background"
-              + (f" (PID {pid})." if pid else ".")
-              + "\nTo change the settings, stop it first: pushscan2folder stop")
-        return 0
-    print(f"pushscan2folder {__version__}\n")
-    return setup_main(None)
+    return menu(instance or background.Instance(), input_fn)
 
 
 def main(argv=None) -> int:

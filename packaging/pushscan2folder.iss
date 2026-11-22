@@ -44,10 +44,6 @@ Name: "de"; MessagesFile: "compiler:Languages\German.isl"
 [CustomMessages]
 en.RunSetup=Set up and start pushscan2folder
 de.RunSetup=pushscan2folder einrichten und starten
-en.SetupEntry=pushscan2folder setup
-de.SetupEntry=pushscan2folder einrichten
-en.StopEntry=Stop pushscan2folder
-de.StopEntry=pushscan2folder beenden
 en.DeleteSettings=Also delete the settings and the log of pushscan2folder?%n%nYour scans are not touched.
 de.DeleteSettings=Auch die Einstellungen und das Protokoll von pushscan2folder löschen?%n%nDeine Scans bleiben erhalten.
 
@@ -63,8 +59,6 @@ Source: "..\dist\pushscan2folder\*"; DestDir: "{app}"; Flags: ignoreversion recu
 
 [Icons]
 Name: "{group}\pushscan2folder"; Filename: "{app}\{#Exe}"
-Name: "{group}\{cm:SetupEntry}"; Filename: "{app}\{#Exe}"; Parameters: "setup"
-Name: "{group}\{cm:StopEntry}"; Filename: "{app}\{#Exe}"; Parameters: "stop"
 Name: "{autodesktop}\pushscan2folder"; Filename: "{app}\{#Exe}"; Tasks: desktopicon
 
 [Run]

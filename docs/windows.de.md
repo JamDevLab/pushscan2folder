@@ -10,11 +10,7 @@ Linux und Docker stehen in der README. macOS steht am Ende dieser Seite.
 2. Zur Kontrolle in PowerShell `Get-FileHash pushscan2folder-VERSION-windows-setup.exe` ausführen und mit `SHA256SUMS.txt` vergleichen.
 3. Den Installer starten. Er fragt nach seiner Sprache (Englisch oder Deutsch). Er installiert nur für deinen Benutzer, braucht keine Administratorrechte und legt das Programm in `%LOCALAPPDATA%\Programs\pushscan2folder` ab.
 
-Der Installer legt im Startmenü einen Ordner "pushscan2folder" mit drei Einträgen an:
-
-- "pushscan2folder" startet das Programm normal,
-- "pushscan2folder einrichten" führt die Setup-Fragen aus (`setup`),
-- "pushscan2folder beenden" beendet die Hintergrundinstanz (`stop`).
+Der Installer legt im Startmenü einen Ordner "pushscan2folder" mit einem Eintrag "pushscan2folder" an. Es ist dasselbe Programm für alles: Gibt es eine Konfigurationsdatei, zeigt es ein kleines Menü, um es im Hintergrund zu starten, zu beenden, den Status anzuzeigen oder die Einstellungen zu ändern (siehe unten).
 
 Ein Desktop-Symbol ist optional und standardmäßig nicht angehakt. Am Ende bietet der Installer "Set up and start pushscan2folder" an. Das öffnet das Konsolenfenster mit den Setup-Fragen (siehe unten).
 
@@ -41,21 +37,29 @@ Weil der Installer nicht signiert ist, zeigt Windows SmartScreen beim Start even
 
 Danach schreibt es `%APPDATA%\pushscan2folder\config.toml`, zeigt, wo alles liegt, und fragt "Run in the background now?" (Standard ja, siehe unten). Bei nein fragt es "Start now?" und läuft im Konsolenfenster. Das Webpasswort steht nicht in `config.toml`, sondern in `web_password.txt` daneben. `%APPDATA%` gehört nur deinem Benutzerkonto.
 
-Beim nächsten Start per Doppelklick oder aus dem Startmenü findet das Programm die Konfigurationsdatei und zeigt die aktuellen Einstellungen: den Drucker, jeden Namen mit seinem Ordner und ob die Weboberfläche an ist. Dann fragt es:
+Beim nächsten Start per Doppelklick oder aus dem Startmenü findet das Programm die Konfigurationsdatei und zeigt ein Menü mit der Version und der Angabe, ob das Programm im Hintergrund läuft:
+
+- Start in the background (nur wenn es nicht läuft; dann der Standard),
+- Stop (nur wenn es läuft),
+- Status (Standard, wenn es läuft; danach kommt das Menü wieder),
+- Change the settings (läuft es, muss es vorher beendet werden, und das Menü bietet das an),
+- Quit.
+
+Das Menü ist auf Englisch. "Change the settings" zeigt die aktuellen Einstellungen (den Drucker, jeden Namen mit seinem Ordner und ob die Weboberfläche an ist) und fragt:
 
 - `1` diese Einstellungen verwenden (Standard),
 - `2` sie ändern (die Setup-Fragen, deine Namen und Ordner bleiben erhalten),
 - `3` neu anfangen mit einer neuen Konfiguration. Die alte Datei bleibt als `config.toml.bak` erhalten. Fängst du noch einmal neu an, bleibt die ältere Kopie bestehen und die nächste heißt `config.toml.2.bak`, danach `config.toml.3.bak` und so weiter.
 
-Ist die Konfigurationsdatei defekt, sagt das Programm das und bietet an, neu anzufangen, ebenfalls mit der `.bak`-Kopie. Läuft das Programm schon im Hintergrund, sagt es das und verweist dich auf `pushscan2folder stop`, bevor du die Einstellungen ändern kannst.
+Ist die Konfigurationsdatei defekt, sagt das Programm das und bietet an, neu anzufangen, ebenfalls mit der `.bak`-Kopie.
 
-Diese Frage kommt nur bei einem Doppelklick. In einer Eingabeaufforderung mit Argumenten läuft das Programm einfach los, ebenso unter Linux und macOS.
+Dieses Menü kommt nur bei einem Doppelklick. In einer Eingabeaufforderung mit Argumenten läuft das Programm einfach los, ebenso unter Linux und macOS.
 
 Bei `1` läuft das Programm. Es zeigt eine kurze Zusammenfassung (Version, Drucker, Konfigurationsdatei, Name und Ordner, Weboberfläche, Logdatei) und "Press Ctrl+C to stop." Das Schließen dieses Fensters beendet das Programm; die Zusammenfassung sagt das auch. Das Log zeigt die Anmeldung. Am Druckerdisplay erscheint unter "Scannen" und "Computer" ein Name wie `BENUTZER  PCNAME`. Auswählen und Start drücken. Mit Strg+C beenden; das Programm gibt den Namen am Drucker vorher frei.
 
 Wurde das Konsolenfenster nur für dieses Programm geöffnet, wartet es vor dem Schließen auf Enter, damit du die letzte Meldung lesen kannst. Das passiert nicht in einem Fenster, das du selbst geöffnet hast, nicht bei nicht interaktiver Eingabe und nicht beim Start über den Anmelde-Eintrag. `--no-pause` (oder `PUSHSCAN_NO_PAUSE=1`) schaltet es ab.
 
-Einstellungen später ändern: Konfigurationsdatei bearbeiten oder die Fragen erneut stellen lassen (auch im Startmenü als "pushscan2folder einrichten"). Hat die Datei schon `[[target]]`-Einträge, bleiben deine Namen und Ordner beim Setup unverändert:
+Einstellungen später ändern: Konfigurationsdatei bearbeiten oder die Fragen erneut stellen lassen (auch im Menü als "Change the settings"). Hat die Datei schon `[[target]]`-Einträge, bleiben deine Namen und Ordner beim Setup unverändert:
 
 ```
 .\pushscan2folder.exe setup

@@ -504,15 +504,72 @@ class GreetingTests(unittest.TestCase):
         self.cfg.write_text('printer = "x"\n')
         # typed in a shell (or not Windows): just run
         self.assertEqual(self.greet(clicked=False)[:2], (None, False))
-        # double click: use, change or start over
-        self.assertEqual(self.greet()[:2], (7, True))
-        # already running in the background: say so instead
-        self.instance.is_running.return_value = True
-        self.instance.read_info.return_value = mock.Mock(pid=42)
-        result, setup, out = self.greet()
-        self.assertEqual((result, setup), (0, False))
-        self.assertIn("PID 42", out)
-        self.assertIn("pushscan2folder stop", out)
+
+    def menu(self, answers, running=False, pid=42, stop_code=12):
+        """Run the double click menu with typed answers (an exception ends the input)."""
+        self.instance.is_running.return_value = running
+        self.instance.read_info.return_value = mock.Mock(pid=pid)
+        typed = iter(answers)
+
+        def fake_input(prompt):
+            value = next(typed)
+            if isinstance(value, BaseException):
+                raise value
+            return value
+
+        with mock.patch.object(cli, "setup_main", return_value=7) as setup, \
+                mock.patch.object(cli, "start_main", return_value=11) as start, \
+                mock.patch.object(cli, "stop_main", return_value=stop_code) as stop, \
+                mock.patch.object(cli, "status_main", return_value=0) as status, \
+                mock.patch.object(cli, "double_click", return_value=True), \
+                redirect_stdout(io.StringIO()) as out:
+            result = cli.greeting([], self.instance, input_fn=fake_input)
+        return result, dict(setup=setup, start=start, stop=stop, status=status), out.getvalue()
+
+    def test_menu_not_running_starts_by_default(self):
+        self.cfg.parent.mkdir()
+        self.cfg.write_text('printer = "x"\n')
+        result, calls, out = self.menu([""])
+        self.assertEqual(result, 11)
+        calls["start"].assert_called_once_with(["start"], instance=self.instance)
+        self.assertIn("Not running.", out)
+        self.assertNotIn("Stop", out)
+
+    def test_menu_running_default_is_status_and_loops(self):
+        self.cfg.parent.mkdir()
+        self.cfg.write_text('printer = "x"\n')
+        result, calls, out = self.menu(["", "x", "4"], running=True)
+        self.assertEqual(result, 0)
+        self.assertEqual(calls["status"].call_count, 1)
+        self.assertIn("Running in the background (PID 42).", out)
+        self.assertIn("Please enter one of the numbers.", out)
+        self.assertNotIn("Start in the background", out)
+
+    def test_menu_running_stop(self):
+        self.cfg.parent.mkdir()
+        self.cfg.write_text('printer = "x"\n')
+        result, calls, _ = self.menu(["1"], running=True)
+        self.assertEqual(result, 12)
+        calls["stop"].assert_called_once_with(self.instance)
+
+    def test_menu_settings(self):
+        self.cfg.parent.mkdir()
+        self.cfg.write_text('printer = "x"\n')
+        result, calls, _ = self.menu(["3"])  # start, status, settings
+        self.assertEqual(result, 7)
+        # running: stop first (declined: back to the menu, then quit)
+        result, calls, out = self.menu(["3", "n", "4"], running=True)
+        self.assertEqual((result, calls["setup"].called), (0, False))
+        self.assertIn("must be stopped", out)
+        result, calls, _ = self.menu(["3", ""], running=True, stop_code=0)
+        self.assertEqual((result, calls["stop"].called, calls["setup"].called), (7, True, True))
+
+    def test_menu_quit_and_eof(self):
+        self.cfg.parent.mkdir()
+        self.cfg.write_text('printer = "x"\n')
+        self.assertEqual(self.menu(["4"])[0], 0)
+        self.assertEqual(self.menu([EOFError()])[0], 0)
+        self.assertEqual(self.menu([KeyboardInterrupt()], running=True)[0], 0)
 
     def test_double_click_only_on_windows(self):
         with mock.patch.object(cli, "console_process_count", return_value=1), \

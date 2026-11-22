@@ -7,6 +7,10 @@ All notable changes are documented here. The format follows
 
 ### Added
 
+- Windows: one Start menu entry instead of three. A double click with an
+  existing config file shows a small menu: start in the background, stop,
+  status, change the settings, quit. The separate "setup" and "stop" entries
+  of the installer are gone.
 - `open_after_scan` per `[[target]]` (also in the web target editor), for
   example `"off"` for an archive folder. It wins over `[defaults]`.
 - The config file that setup and the web page write starts with a short header

@@ -10,11 +10,7 @@ Linux and Docker are described in the README. macOS is covered at the end of thi
 2. To check the download, run `Get-FileHash pushscan2folder-VERSION-windows-setup.exe` in PowerShell and compare it with `SHA256SUMS.txt`.
 3. Run the installer. It asks for its language (English or German). It installs for your user only, needs no administrator rights, and puts the program into `%LOCALAPPDATA%\Programs\pushscan2folder`.
 
-The installer creates a Start menu folder "pushscan2folder" with three entries:
-
-- "pushscan2folder" starts the program normally,
-- "pushscan2folder setup" runs the setup questions (`setup`),
-- "Stop pushscan2folder" stops the background instance (`stop`).
+The installer creates a Start menu folder "pushscan2folder" with one entry, "pushscan2folder". It is the same program for everything: once a config file exists, it shows a small menu to start it in the background, stop it, show the status or change the settings (see below).
 
 A desktop icon is optional and unchecked by default. At the end the installer offers "Set up and start pushscan2folder". It opens the console window with the setup questions (see below).
 
@@ -41,21 +37,28 @@ Start "pushscan2folder" from the Start menu (or the desktop icon, or `pushscan2f
 
 Then it writes `%APPDATA%\pushscan2folder\config.toml`, shows where everything is and asks "Run in the background now?" (default yes, see below). If you answer no, it asks "Start now?" and runs in the console window. The web password is not stored in `config.toml` but in `web_password.txt` next to it. `%APPDATA%` belongs to your user account only.
 
-The next time you start it by double click or from the Start menu, the program finds the config file and shows the current settings: the printer, each panel name with its folder, and whether the web page is on. Then it asks:
+The next time you start it by double click or from the Start menu, the program finds the config file and shows a menu with the version and whether the program runs in the background:
+
+- Start in the background (only when it is not running; the default then),
+- Stop (only when it is running),
+- Status (the default when it runs; the menu comes back afterwards),
+- Change the settings (when it runs, it must be stopped first and the menu offers to do that),
+- Quit.
+
+"Change the settings" shows the current settings (the printer, each panel name with its folder, and whether the web page is on) and asks:
 
 - `1` use these settings (default),
 - `2` change them (the setup questions, with your panel names and folders kept),
 - `3` start over with a new configuration. The old file is kept as `config.toml.bak`. If you start over again, the older copy stays and the next one is named `config.toml.2.bak`, then `config.toml.3.bak`, and so on.
 
-If the config file is broken, the program says so and offers to start over, also keeping the `.bak` copy. If the program already runs in the background, it says so and tells you to run `pushscan2folder stop` first to change the settings.
-
-This question only appears on a double click. Typed in a command prompt with arguments, the program just runs, and so it does on Linux and macOS.
+If the config file is broken, the program says so and offers to start over, also keeping the `.bak` copy. 
+This menu only appears on a double click. Typed in a command prompt with arguments, the program just runs, and so it does on Linux and macOS.
 
 With `1` the program runs. It prints a short summary (version, printer, config file, panel name and folder, web page, log file) and "Press Ctrl+C to stop." Closing this window stops the program; the summary says so. The log shows the registration. On the printer panel, "Scan" then "Computer" lists a name like `USER  PCNAME`. Pick it and press Start. Stop the program with Ctrl+C; it releases the name on the printer before it exits.
 
 If the console window was opened only for this program, it waits for Enter before it closes, so you can read the last message. This never happens in a window you opened yourself, when the input is not interactive, or when the program was started by the logon entry. `--no-pause` (or `PUSHSCAN_NO_PAUSE=1`) turns it off.
 
-To change the settings later, edit the config file or run the questions again (also in the Start menu as "pushscan2folder setup"). Setup keeps your panel names and folders if the file already has `[[target]]` entries:
+To change the settings later, edit the config file or run the questions again (also in the menu as "Change the settings"). Setup keeps your panel names and folders if the file already has `[[target]]` entries:
 
 ```
 .\pushscan2folder.exe setup
