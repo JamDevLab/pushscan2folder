@@ -201,7 +201,7 @@ def build_parser(cfg: Config | None = None) -> argparse.ArgumentParser:
                          default=env("SOURCE", cfg.source or "auto"))
         opts.add_argument("--trim", type=_trim_arg, default=_trim_default(cfg), metavar="SIDES",
                          help="cut off a border by scanning a smaller area (platen only), "
-                              "e.g. right=3,bottom=2 (keys left/top/right/bottom, mm, 0 to 50); "
+                              "e.g. right=1,bottom=2 (keys left/top/right/bottom, mm, 0 to 50); "
                               "replaces the four trim_* values of the config file")
         opts.add_argument("--targets", default=env("TARGETS"),
                          help='several panel entries, e.g. "scan1,paperless=consume@300dpi,archiv@600dpi"; '

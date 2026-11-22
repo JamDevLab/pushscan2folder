@@ -64,7 +64,7 @@ class Trim:
 
 
 def parse_trim(text: str | None) -> Trim:
-    """Parse "right=3,bottom=2" (keys left/top/right/bottom, mm, any subset).
+    """Parse "right=1,bottom=2" (keys left/top/right/bottom, mm, any subset).
     Empty means no trim. Raises ValueError."""
     values: dict[str, float] = {}
     for part in (text or "").split(","):
@@ -75,7 +75,7 @@ def parse_trim(text: str | None) -> Trim:
         key = key.strip().lower()
         if not sep or key not in ("left", "top", "right", "bottom"):
             raise ValueError(f"invalid trim entry {part!r}: use left/top/right/bottom=MM, "
-                             f"e.g. right=3,bottom=2")
+                             f"e.g. right=1,bottom=2")
         if key in values:
             raise ValueError(f"trim side {key!r} given twice")
         try:
