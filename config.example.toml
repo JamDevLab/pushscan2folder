@@ -10,12 +10,8 @@
 
 printer = "192.168.1.50"   # printer IP or host name (--printer)
 output = "/scans"          # base output folder (--output)
-interval = 4               # poll interval in seconds
-verbose = false
-ignore_panel = false       # true: always use [defaults], ignore the panel
-multipage = "document"     # next-page dialog for: document | auto | both | off
 
-# Fallback scan settings (used where the panel sends nothing).
+# Scan settings used where the printer panel sends nothing.
 [defaults]
 resolution = 300           # 75 | 150 | 300 | 600
 color = "color"            # color | gray
@@ -28,12 +24,28 @@ open_after_scan = "off"    # off | folder | file (desktop PC only: open the resu
 # {now:FORMAT} with strftime codes. Existing files are never overwritten (-1, -2 ...).
 # A [[target]] can set its own filename, it wins over this one.
 filename = "scan_{now:%Y%m%d_%H%M%S}"   # e.g. scan_20261122_183005.pdf
+
+# Document type "Document" on the printer panel (Doc. type).
+[defaults.document]
+multipage = true           # ask on the panel for more pages after each one
+
+# Document type "Auto" on the printer panel. The panel sends no size, format
+# or resolution then, so [defaults] and [target.auto] decide. ("Photo" needs
+# no table: the panel sends all of its settings itself.)
+[defaults.auto]
+multipage = false
+
+# Rarely needed.
+[advanced]
+interval = 4               # poll interval in seconds
+verbose = false            # debug log; needs a restart
+ignore_panel = false       # true: always use [defaults], ignore the panel
 # Trim: cut off a border at the glass edge by scanning a smaller area
 # (platen only, not the ADF). In mm, 0 to 50; 0 means no trim.
 trim_left = 0              # mm
 trim_top = 0               # mm
-trim_right = 0             # mm; TR8550: about 3 (to be verified)
-trim_bottom = 0            # mm; TR8550: about 2 (to be verified)
+trim_right = 1             # mm; tested on a TR8550
+trim_bottom = 2            # mm; tested on a TR8550
 
 # Optional web page (status, log, target editor). The password is NOT stored
 # here: put it in a file of its own (`pushscan2folder setup` does this) and
@@ -56,9 +68,11 @@ name = "Scans"
 # "Auto scan" (the preset wins over the panel there).
 [[target]]
 name = "Paperless"
-document_multipage = true
 # filename = "{name}_{date}_{time}"   # this target only, e.g. Paperless_2026-11-22_183005.pdf
 open_after_scan = "off"   # this target only: never open after a scan (off | folder | file)
+
+[target.document]
+multipage = true
 
 [target.auto]
 resolution = 300
@@ -69,7 +83,9 @@ multipage = true           # dialog for auto scan too
 [[target]]
 name = "Archive"
 output = "archive"
-document_multipage = false
+
+[target.document]
+multipage = false
 
 [target.auto]
 resolution = 600

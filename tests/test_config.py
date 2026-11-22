@@ -83,20 +83,56 @@ class ConfigTestBase(unittest.TestCase):
 class ParseTests(ConfigTestBase):
     def test_dump_has_header_and_examples_that_parse(self):
         cfg = Config(printer="x", targets=[TargetSpec("PC", output="."),
-                                           TargetSpec("Archive", open_after_scan="off")])
+                                           TargetSpec("Old", open_after_scan="off")])
         text = dump_config(cfg)
         self.assertTrue(text.startswith("# pushscan2folder configuration."))
         self.assertIn("need a restart", text)
         self.assertIn('# open_after_scan = "folder"', text)
         self.assertEqual(load_config_text(text), cfg)
-        # every example line works once the "#" is removed
-        for line in text.splitlines():
-            if line.startswith("# ") and " = " in line and "[[" not in line:
-                key_line = line[2:]
-                if key_line.split("=")[0].strip() in ("name", "output"):
-                    continue
-                table = "[defaults]" if "this target" not in line else '[[target]]\nname = "x"'
-                load_config_text(f"{table}\n{key_line}\n")
+        # every example line works once the "#" is removed, in its place
+        body, example = text.rsplit("\n\n", 1)
+        lines = body.splitlines()
+        for i, line in enumerate(lines):
+            if line.startswith("# ") and " = " in line:
+                changed = lines[:i] + [line[2:]] + lines[i + 1:]
+                load_config_text("\n".join(changed))
+        uncommented = [l[2:] for l in example.splitlines()[1:]]
+        self.assertEqual(len(load_config_text(body + "\n" + "\n".join(uncommented)).targets), 3)
+
+    def test_layout_since_0_3(self):
+        cfg = load_config_text(
+            '[defaults]\nresolution = 600\n[defaults.document]\nmultipage = false\n'
+            '[defaults.auto]\nmultipage = true\n'
+            '[advanced]\ninterval = 2\nverbose = true\nignore_panel = true\ntrim_right = 1\n'
+            '[[target]]\nname = "A"\n[target.document]\nmultipage = true\n')
+        self.assertEqual((cfg.multipage, cfg.interval, cfg.verbose, cfg.ignore_panel,
+                          cfg.trim_right), ("auto", 2.0, True, True, 1.0))
+        self.assertTrue(cfg.targets[0].document_multipage)
+        self.assertEqual(cfg.old_keys, [])
+        self.assertEqual(load_config_text(dump_config(cfg)), cfg)
+
+    def test_one_multipage_flag_keeps_the_other_default(self):
+        self.assertEqual(load_config_text('[defaults.auto]\nmultipage = true\n').multipage,
+                         "both")
+        self.assertEqual(load_config_text('[defaults.document]\nmultipage = false\n')
+                         .multipage, "off")
+
+    def test_old_layout_is_read_and_written_new(self):
+        old = ('multipage = "both"\ninterval = 5\n[defaults]\ntrim_bottom = 2\n'
+               '[[target]]\nname = "A"\ndocument_multipage = false\n')
+        cfg = load_config_text(old)
+        self.assertEqual((cfg.multipage, cfg.interval, cfg.trim_bottom), ("both", 5.0, 2.0))
+        self.assertIn("interval -> [advanced] interval", cfg.old_keys)
+        self.assertEqual(len(cfg.old_keys), 4)
+        text = dump_config(cfg)
+        self.assertNotIn("document_multipage", text)
+        again = load_config_text(text)
+        self.assertEqual(again, cfg)
+        self.assertEqual(again.old_keys, [])
+
+    def test_old_and_new_place_at_once_is_an_error(self):
+        with self.assertRaisesRegex(ConfigError, "keep only"):
+            load_config_text('interval = 5\n[advanced]\ninterval = 4\n')
 
     def test_open_after_scan_per_target(self):
         cfg = load_config_text('[[target]]\nname = "Archive"\nopen_after_scan = "off"\n'
@@ -281,10 +317,10 @@ class TrimConfigTests(ConfigTestBase):
                 cli.parse_args(argv)
             self.assertEqual(cm.exception.code, 2)
 
-    def test_example_has_trim_keys_at_zero(self):
+    def test_example_has_the_tested_trim_values(self):
         cfg = load_config(EXAMPLE)
         self.assertEqual((cfg.trim_left, cfg.trim_top, cfg.trim_right, cfg.trim_bottom),
-                         (0.0, 0.0, 0.0, 0.0))
+                         (0.0, 0.0, 1.0, 2.0))
 
 
 class PrecedenceTests(ConfigTestBase):

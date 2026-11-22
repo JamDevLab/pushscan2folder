@@ -489,6 +489,7 @@ def check_settings(values: dict[str, str]) -> tuple[Config | None, list[str]]:
     only these settings, errors)."""
     top: dict = {}
     defaults: dict = {}
+    advanced: dict = {}
     for key, text in values.items():
         if not text:
             continue
@@ -502,9 +503,21 @@ def check_settings(values: dict[str, str]) -> tuple[Config | None, list[str]]:
             value = int(text)
         elif key == "ignore_panel":
             value = True
-        (top if key in ("interval", "ignore_panel", "multipage") else defaults)[key] = value
+        if key == "multipage":
+            modes = MULTIPAGE_MODES.get(text)
+            if modes is None:
+                return None, [f'multipage: "{text}" must be one of: '
+                              + ", ".join(MULTIPAGE_MODES)]
+            for kind in ("document", "auto"):
+                defaults[kind] = {"multipage": kind in modes}
+        elif key in ("interval", "ignore_panel") or key in TRIM_KEYS:
+            advanced[key] = value
+        else:
+            defaults[key] = value
     if defaults:
         top["defaults"] = defaults
+    if advanced:
+        top["advanced"] = advanced
     try:
         return parse_config(top, "settings"), []
     except ConfigError as exc:

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import errno
+import logging
 import math
 import os
 import stat
@@ -21,6 +22,8 @@ from .service import (MULTIPAGE_MODES, RESOLUTIONS, TRIM_MAX_MM, Target, Trim,
 COLORS = ("color", "gray")
 FORMATS = ("pdf", "jpeg")
 SOURCES = ("auto", "platen", "adf")
+
+log = logging.getLogger(__name__)
 
 
 class ConfigError(ValueError):
@@ -66,6 +69,8 @@ class Config:
     web_port: int | None = None
     web_password_file: str | None = None
     targets: list[TargetSpec] = field(default_factory=list)
+    # Keys found in the layout before 0.3.0, as "old place -> new place".
+    old_keys: list[str] = field(default_factory=list, compare=False)
 
     def trim(self) -> Trim:
         """The [defaults] trim_* values (unset sides are 0)."""
@@ -191,7 +196,8 @@ def _preset(rd: _Reader) -> dict:
     return preset
 
 
-def _target(table, index: int, name_for_msgs: str) -> TargetSpec:
+def _target(table, index: int, name_for_msgs: str,
+            old_keys: list[str]) -> TargetSpec:
     if not isinstance(table, dict):
         raise ConfigError(f"{name_for_msgs}: [[target]] #{index} must be a table")
     label = f"{name_for_msgs}: target #{index}"
@@ -199,7 +205,7 @@ def _target(table, index: int, name_for_msgs: str) -> TargetSpec:
     if name is not None and isinstance(name, str) and name.strip():
         label = f'{name_for_msgs}: target "{name}"'
     rd = _Reader(table, label, {"name", "output", "filename", "open_after_scan",
-                                "document_multipage", "auto"})
+                                "document", "auto", "document_multipage"})
     if "name" not in table:
         raise ConfigError(f'{label}: missing required key "name"')
     name = rd.str_("name").strip()
@@ -208,9 +214,15 @@ def _target(table, index: int, name_for_msgs: str) -> TargetSpec:
     except ValueError as exc:
         raise ConfigError(f"{label}: {exc}") from exc
     spec = TargetSpec(name, output=rd.str_("output"),
-                      document_multipage=rd.bool_("document_multipage"),
                       filename=rd.filename("filename"),
                       open_after_scan=rd.str_("open_after_scan", OPEN_MODES))
+    document = rd.table_("document")
+    new_doc = None
+    if document is not None:
+        new_doc = _Reader(document, f"{label}.document", {"multipage"}).bool_("multipage")
+    spec.document_multipage = _moved(rd.bool_("document_multipage"), new_doc,
+                                     f"{label}: document_multipage",
+                                     f"[target.document] multipage", old_keys)
     auto = rd.table_("auto")
     if auto is not None and "color" in auto:
         raise ConfigError(f'{label}.auto: unknown key "color": the colour comes from the '
@@ -224,6 +236,29 @@ def _target(table, index: int, name_for_msgs: str) -> TargetSpec:
     return spec
 
 
+def _moved(old, new, old_name: str, new_name: str, old_keys: list[str]):
+    """A key that moved in 0.3.0: the old place still works (noted in
+    `old_keys`), both places at once is an error."""
+    if old is None:
+        return new
+    if new is not None:
+        raise ConfigError(f"{old_name} and {new_name} are the same setting; "
+                          f"keep only {new_name}")
+    old_keys.append(f"{old_name} -> {new_name}")
+    return old
+
+
+def mode_from_flags(document: bool | None, auto: bool | None) -> str | None:
+    """Global multipage mode from the [defaults.document] and [defaults.auto]
+    flags; an unset flag keeps the built-in mode (document on, auto off)."""
+    if document is None and auto is None:
+        return None
+    document = True if document is None else document
+    auto = False if auto is None else auto
+    return {(True, False): "document", (False, True): "auto",
+            (True, True): "both", (False, False): "off"}[(document, auto)]
+
+
 def load_config(path: Path) -> Config:
     path = Path(path)
     try:
@@ -232,7 +267,11 @@ def load_config(path: Path) -> Config:
         raise ConfigError(f"{path.name}: cannot read file: {exc.strerror or exc}") from exc
     except UnicodeDecodeError as exc:
         raise ConfigError(f"{path.name}: invalid TOML: {exc}") from exc
-    return load_config_text(text, path.name)
+    cfg = load_config_text(text, path.name)
+    if cfg.old_keys:
+        log.warning("%s uses keys from before 0.3.0 (still read; setup or the web page "
+                    "write the new layout): %s", path.name, "; ".join(cfg.old_keys))
+    return cfg
 
 
 def load_config_text(text: str, fname: str = "config.toml") -> Config:
@@ -247,30 +286,43 @@ def load_config_text(text: str, fname: str = "config.toml") -> Config:
 
 def parse_config(data: dict, fname: str = "config.toml") -> Config:
     """Validate an already parsed TOML table. Raises ConfigError."""
-    top = _Reader(data, fname, {"printer", "output", "interval", "verbose",
-                                "ignore_panel", "multipage", "defaults", "web", "target"})
-    cfg = Config(printer=top.str_("printer"), interval=top.number("interval"),
-                 verbose=top.bool_("verbose"), ignore_panel=top.bool_("ignore_panel"),
-                 multipage=top.str_("multipage", tuple(MULTIPAGE_MODES)))
+    top = _Reader(data, fname, {"printer", "output", "defaults", "advanced", "web", "target",
+                                # before 0.3.0; now in [advanced] and [defaults.*]
+                                "interval", "verbose", "ignore_panel", "multipage"})
+    cfg = Config(printer=top.str_("printer"))
     output = top.str_("output")
     cfg.output = Path(output) if output is not None else None
+    old = cfg.old_keys
 
-    defaults = top.table_("defaults")
-    if defaults is not None:
-        d = _Reader(defaults, f"{fname}: [defaults]",
-                    {"resolution", "color", "format", "source", "size", "open_after_scan", "filename",
-                     "trim_left", "trim_top", "trim_right", "trim_bottom"})
-        cfg.resolution = d.int_("resolution", RESOLUTIONS)
-        cfg.color = d.str_("color", COLORS)
-        cfg.format = d.str_("format", FORMATS)
-        cfg.source = d.str_("source", SOURCES)
-        cfg.size = d.str_("size", tuple(panel.REGIONS))
-        cfg.open_after_scan = d.str_("open_after_scan", OPEN_MODES)
-        cfg.filename = d.filename("filename")
-        cfg.trim_left = d.mm("trim_left")
-        cfg.trim_top = d.mm("trim_top")
-        cfg.trim_right = d.mm("trim_right")
-        cfg.trim_bottom = d.mm("trim_bottom")
+    adv = _Reader(top.table_("advanced") or {}, f"{fname}: [advanced]",
+                  {"interval", "verbose", "ignore_panel"} | set(_TRIM))
+    cfg.interval = _moved(top.number("interval"), adv.number("interval"),
+                          "interval", "[advanced] interval", old)
+    cfg.verbose = _moved(top.bool_("verbose"), adv.bool_("verbose"),
+                         "verbose", "[advanced] verbose", old)
+    cfg.ignore_panel = _moved(top.bool_("ignore_panel"), adv.bool_("ignore_panel"),
+                              "ignore_panel", "[advanced] ignore_panel", old)
+
+    d = _Reader(top.table_("defaults") or {}, f"{fname}: [defaults]",
+                {"resolution", "color", "format", "source", "size", "open_after_scan",
+                 "filename", "document", "auto"} | set(_TRIM))
+    cfg.resolution = d.int_("resolution", RESOLUTIONS)
+    cfg.color = d.str_("color", COLORS)
+    cfg.format = d.str_("format", FORMATS)
+    cfg.source = d.str_("source", SOURCES)
+    cfg.size = d.str_("size", tuple(panel.REGIONS))
+    cfg.open_after_scan = d.str_("open_after_scan", OPEN_MODES)
+    cfg.filename = d.filename("filename")
+    for key in _TRIM:
+        setattr(cfg, key, _moved(d.mm(key), adv.mm(key), f"[defaults] {key}",
+                                 f"[advanced] {key}", old))
+    flags = []
+    for kind in ("document", "auto"):
+        sub = _Reader(d.table_(kind) or {}, f"{fname}: [defaults.{kind}]", {"multipage"})
+        flags.append(sub.bool_("multipage"))
+    cfg.multipage = _moved(top.str_("multipage", tuple(MULTIPAGE_MODES)),
+                           mode_from_flags(*flags), "multipage",
+                           "[defaults.document] / [defaults.auto] multipage", old)
 
     web = top.table_("web")
     if web is not None:
@@ -285,7 +337,7 @@ def parse_config(data: dict, fname: str = "config.toml") -> Config:
         raise ConfigError(f'{fname}: "target" must be an array of tables ([[target]])')
     seen: set[str] = set()
     for i, table in enumerate(raw_targets, 1):
-        spec = _target(table, i, fname)
+        spec = _target(table, i, fname, old)
         if spec.name in seen:
             raise ConfigError(f'{fname}: duplicate target name "{spec.name}"')
         seen.add(spec.name)
@@ -321,6 +373,7 @@ def _quote(value: str) -> str:
     return '"' + "".join(out) + '"'
 
 
+_TRIM = ("trim_left", "trim_top", "trim_right", "trim_bottom")
 _ESCAPES = {"\b": "\\b", "\t": "\\t", "\n": "\\n", "\f": "\\f", "\r": "\\r"}
 
 
@@ -339,7 +392,8 @@ def _lines(pairs) -> list[str]:
 HEADER = """\
 # pushscan2folder configuration.
 # Changes are used while the program runs, within a few seconds. Only [web]
-# and "verbose" need a restart: pushscan2folder stop, then pushscan2folder start.
+# and verbose in [advanced] need a restart: pushscan2folder stop, then
+# pushscan2folder start.
 # Lines starting with "#" are examples; remove the "#" to use one.
 # All keys: https://github.com/JamDevLab/pushscan2folder/blob/main/docs/configuration.md"""
 
@@ -359,28 +413,43 @@ _EXAMPLE_TARGET = "\n".join((
     "# [[target]]",
     '# name = "Archive"',
     '# output = "Archive"',
-    '# open_after_scan = "off"'))
+    '# open_after_scan = "off"',
+    "# [target.document]",
+    "# multipage = false"))
 
 
 def dump_config(cfg: Config) -> str:
     """Render a Config as TOML (the exact schema load_config reads), with a
     short header and commented examples for some keys that are not set.
-    Comments of an existing file are not preserved. A preset size that
-    matches no known paper size is dropped."""
+    Comments of an existing file are not preserved, and keys from before
+    0.3.0 are written at their new place. A preset size that matches no
+    known paper size is dropped."""
     blocks: list[list[str]] = [[HEADER]]
     top = _lines([("printer", cfg.printer),
-                  ("output", str(cfg.output) if cfg.output is not None else None),
-                  ("interval", cfg.interval), ("verbose", cfg.verbose),
-                  ("ignore_panel", cfg.ignore_panel), ("multipage", cfg.multipage)])
+                  ("output", str(cfg.output) if cfg.output is not None else None)])
     if top:
         blocks.append(top)
     defaults = _lines([("resolution", cfg.resolution), ("color", cfg.color),
                        ("format", cfg.format), ("source", cfg.source), ("size", cfg.size),
-                       ("open_after_scan", cfg.open_after_scan), ("filename", cfg.filename),
-                       ("trim_left", cfg.trim_left), ("trim_top", cfg.trim_top),
-                       ("trim_right", cfg.trim_right), ("trim_bottom", cfg.trim_bottom)])
+                       ("open_after_scan", cfg.open_after_scan), ("filename", cfg.filename)])
     defaults += [line for key, line in _DEFAULTS_EXAMPLES if getattr(cfg, key) is None]
-    blocks.append(["[defaults]"] + defaults)
+    blocks.append(["# Used where the printer panel sends nothing.", "[defaults]"] + defaults)
+    modes = MULTIPAGE_MODES.get(cfg.multipage) if cfg.multipage else None
+    notes = {"document": '# Document type "Document" on the printer panel.',
+             "auto": '# Document type "Auto" on the printer panel. The panel sends no size,\n'
+                     "# format or resolution then, so [defaults] and [target.auto] decide."}
+    for kind in ("document", "auto"):
+        flag = "#" if modes is None else ""
+        value = ("document" == kind) if modes is None else (kind in modes)
+        blocks.append([notes[kind],
+                       f"[defaults.{kind}]",
+                       f"{flag + ' ' if flag else ''}multipage = {_value(value)}"
+                       "   # true: ask for more pages after each one"])
+    advanced = _lines([("interval", cfg.interval), ("verbose", cfg.verbose),
+                       ("ignore_panel", cfg.ignore_panel)]
+                      + [(key, getattr(cfg, key)) for key in _TRIM])
+    if advanced:
+        blocks.append(["[advanced]"] + advanced)
     web = _lines([("enabled", cfg.web_enabled), ("bind", cfg.web_bind),
                   ("port", cfg.web_port), ("password_file", cfg.web_password_file)])
     if web:
@@ -388,10 +457,11 @@ def dump_config(cfg: Config) -> str:
     for spec in cfg.targets:
         block = ["[[target]]"] + _lines([("name", spec.name), ("output", spec.output),
                                          ("filename", spec.filename),
-                                         ("open_after_scan", spec.open_after_scan),
-                                         ("document_multipage", spec.document_multipage)])
+                                         ("open_after_scan", spec.open_after_scan)])
         block += [line for key, line in _TARGET_EXAMPLES if getattr(spec, key) is None]
         blocks.append(block)
+        if spec.document_multipage is not None:
+            blocks.append(["[target.document]"] + _lines([("multipage", spec.document_multipage)]))
         auto = _lines([("resolution", spec.preset.get("resolution")),
                        ("format", spec.preset.get("fmt")),
                        ("size", size_name(spec.preset)),
