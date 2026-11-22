@@ -281,6 +281,9 @@ class PushScanService:
         self.open_after_scan = open_after_scan
         # Optional callable: True asks the loop to stop (background `stop`).
         self.stop_check: Callable[[], bool] | None = None
+        # Optional callable, called with True when a scan starts and False when
+        # it ends (the background instance marks itself busy for `stop`).
+        self.busy_hook: Callable[[bool], None] | None = None
         self.use_panel = use_panel
         self.native = native
         self.multipage = multipage
@@ -455,7 +458,7 @@ class PushScanService:
         pages = self.native.scan(
             PageSettings(settings.color, settings.resolution, settings.width, settings.height,
                          settings.x_offset, settings.y_offset),
-            multipage=True, keepalive=self.keepalive)
+            multipage=True, keepalive=self.keepalive, should_stop=self.stop_wanted)
         complete = [p for p in pages if is_complete(p, "jpeg")]
         self._pages = len(complete)
         if len(complete) != len(pages):
@@ -469,6 +472,8 @@ class PushScanService:
     def scan_to(self, target: Target, event: int = 0, interrupt: bytes = b"") -> list[Path]:
         """Scan for target and save the files; the result goes to self.status."""
         self.status.set_busy(target.name)
+        if self.busy_hook is not None:
+            self.busy_hook(True)
         self._pages = 0
         self._method = ""
         try:
@@ -479,6 +484,8 @@ class PushScanService:
             raise
         finally:
             self.status.set_busy(None)
+            if self.busy_hook is not None:
+                self.busy_hook(False)
         self.status.record(ScanRecord(time.time(), target.name, self._method, self._pages,
                                       tuple(str(p) for p in paths),
                                       "ok" if paths else "nothing saved"))
@@ -566,6 +573,10 @@ class PushScanService:
             self.heartbeat.write_text(f"{time.time():.0f}\n", encoding="ascii")
         except OSError as exc:
             log.debug("heartbeat file %s: %s", self.heartbeat, exc)
+
+    def stop_wanted(self) -> bool:
+        """True after stop() or a stop request (does not set the event)."""
+        return self.stop_event.is_set() or (self.stop_check is not None and self.stop_check())
 
     def _wait(self, seconds: float) -> None:
         """Sleep between poll cycles, but end early on stop() or a stop request."""

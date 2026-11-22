@@ -26,6 +26,7 @@ from .platform_support import default_state_dir, is_windows
 LOCK_NAME = "pushscan2folder.lock"
 INFO_NAME = "pushscan2folder.pid"
 STOP_NAME = "pushscan2folder.stop"
+BUSY_NAME = "pushscan2folder.busy"   # exists while a scan runs
 
 # Windows process creation flags (spelled out: the subprocess constants exist on Windows only).
 CREATE_NO_WINDOW = 0x08000000
@@ -33,7 +34,8 @@ DETACHED_PROCESS = 0x00000008
 CREATE_NEW_PROCESS_GROUP = 0x00000200
 WINDOWS_FLAGS = CREATE_NO_WINDOW | DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP
 
-STOP_TIMEOUT = 30.0   # seconds to wait for a clean stop (a running scan finishes first)
+STOP_TIMEOUT = 30.0   # seconds to wait for a clean stop
+SCAN_STOP_TIMEOUT = 600.0   # longer while a scan runs: the job finishes and is saved first
 START_TIMEOUT = 10.0  # seconds to wait until the new instance holds its lock
 
 ALREADY_RUNNING = "already running"
@@ -82,6 +84,7 @@ class Instance:
         self.lock_path = self.dir / LOCK_NAME
         self.info_path = self.dir / INFO_NAME
         self.stop_path = self.dir / STOP_NAME
+        self.busy_path = self.dir / BUSY_NAME
         self._fd: int | None = None
 
     def is_running(self) -> bool:
@@ -120,12 +123,26 @@ class Instance:
             return
         self._remove(self.info_path)
         self._remove(self.stop_path)
+        self._remove(self.busy_path)
         _unlock(self._fd)
         os.close(self._fd)
         self._fd = None
 
     def stop_requested(self) -> bool:
         return self.stop_path.exists()
+
+    def set_busy(self, busy: bool) -> None:
+        """Mark that a scan runs (so `stop` waits for it). Best effort."""
+        if not busy:
+            self._remove(self.busy_path)
+            return
+        try:
+            self.busy_path.write_text("scan\n", encoding="utf-8")
+        except OSError:
+            pass
+
+    def is_busy(self) -> bool:
+        return self.busy_path.exists()
 
     def request_stop(self) -> None:
         self.dir.mkdir(parents=True, exist_ok=True)
@@ -142,7 +159,7 @@ class Instance:
 
     def clean_stale(self) -> None:
         """Remove the files of an instance that is gone."""
-        for path in (self.info_path, self.stop_path):
+        for path in (self.info_path, self.stop_path, self.busy_path):
             self._remove(path)
 
     @staticmethod
@@ -165,16 +182,30 @@ def terminate(pid: int) -> None:
 def stop_instance(inst: Instance, timeout: float = STOP_TIMEOUT, poll: float = 0.5,
                   sleep: Callable[[float], None] = time.sleep,
                   clock: Callable[[], float] = time.monotonic,
-                  kill: Callable[[int], None] = terminate) -> str:
+                  kill: Callable[[int], None] = terminate,
+                  scan_timeout: float = SCAN_STOP_TIMEOUT,
+                  on_wait_for_scan: Callable[[], None] = lambda: None) -> str:
     """Stop the background instance cleanly (it releases its panel entries),
-    terminate it if it does not react within `timeout` seconds. Returns
-    NOT_RUNNING, STOPPED, TERMINATED or FAILED."""
+    terminate it if it does not react within `timeout` seconds. While a scan
+    runs it waits up to `scan_timeout` seconds instead, so the job is saved
+    (`on_wait_for_scan` is called once then). Returns NOT_RUNNING, STOPPED,
+    TERMINATED or FAILED."""
     if not inst.is_running():
         inst.clean_stale()
         return NOT_RUNNING
     inst.request_stop()
-    deadline = clock() + timeout
-    while inst.is_running() and clock() < deadline:
+    start = clock()
+    told = False
+    while inst.is_running():
+        now = clock()
+        if inst.is_busy():
+            if not told:
+                on_wait_for_scan()
+                told = True
+            if now >= start + max(timeout, scan_timeout):
+                break
+        elif now >= start + timeout:
+            break
         sleep(poll)
     if not inst.is_running():
         inst.clean_stale()

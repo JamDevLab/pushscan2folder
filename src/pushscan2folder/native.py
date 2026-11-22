@@ -280,9 +280,13 @@ class NativeScanner:
         self.command(OP_IMAGE_INFO, 0x100)
         return page
 
-    def _next_page(self, keepalive: Callable[[], None]) -> int:
+    def _next_page(self, keepalive: Callable[[], None],
+                   should_stop: Callable[[], bool] = lambda: False) -> int:
         deadline = time.monotonic() + self.decision_timeout
         while time.monotonic() < deadline:
+            if should_stop():
+                log.info("stop requested, finishing the job with the pages scanned so far")
+                return NEXT_FINISH
             answer = self.command(OP_NEXT_PAGE, 8)
             code = answer[0] if answer else NEXT_WAITING
             if code != NEXT_WAITING:
@@ -295,10 +299,12 @@ class NativeScanner:
 
     def scan(self, settings: PageSettings, multipage: bool = True,
              keepalive: Callable[[], None] = lambda: None,
-             job: str = "00000001") -> list[bytes]:
+             job: str = "00000001",
+             should_stop: Callable[[], bool] = lambda: False) -> list[bytes]:
         """Scan from the platen; with multipage the panel asks for more pages.
         Returns one JPEG per page. Pages already scanned are kept if a later
-        page fails or is cancelled."""
+        page fails or is cancelled, or if `should_stop` turns true while the
+        panel waits for the next-page decision."""
         pages: list[bytes] = []
         # The official software switches the mode once before starting the job.
         self.xml(xml_mode_shift(" "))
@@ -329,7 +335,7 @@ class NativeScanner:
                     log.warning("stopping after %d pages (size or page limit)", len(pages))
                     break
                 try:
-                    code = self._next_page(keepalive)
+                    code = self._next_page(keepalive, should_stop)
                 except NativeError as exc:
                     log.warning("next page request failed (%s), finishing", exc)
                     break

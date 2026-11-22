@@ -611,6 +611,8 @@ def start_main(raw: list[str], hints: bool = True, popen=subprocess.Popen,
 
 def stop_main(instance: background.Instance | None = None, **kwargs) -> int:
     inst = instance or background.Instance()
+    kwargs.setdefault("on_wait_for_scan", lambda: print(
+        "A scan is running; it is finished and saved first ...", flush=True))
     result = background.stop_instance(inst, **kwargs)
     if result == background.NOT_RUNNING:
         print("pushscan2folder is not running in the background.")
@@ -860,6 +862,7 @@ def _main(argv=None) -> int:
     inst = background.Instance()
     if args.background:
         service.stop_check = inst.stop_requested  # `pushscan2folder stop`
+        service.busy_hook = inst.set_busy          # `stop` waits for a running scan
     try:
         interactive = sys.stdin.isatty()
     except (AttributeError, ValueError):

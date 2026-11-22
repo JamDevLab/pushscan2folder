@@ -158,6 +158,18 @@ class NativeTests(unittest.TestCase):
         self.assertTrue(log[-1].startswith(b"<?xml") and b"EndJob" in log[-1])
         self.assertEqual(log[-2][:2], b"\xef\x20")
 
+    def test_stop_while_the_panel_waits_keeps_the_pages(self):
+        p1 = fake_jpeg()
+        FakeNativePrinter.state.update(pages=[split(p1)], decisions=[native.NEXT_WAITING] * 50)
+        asks = []
+
+        def should_stop():
+            asks.append(1)
+            return len(asks) >= 3   # stop comes while the dialog is open
+        self.assertEqual(self.scanner.scan(PageSettings(), should_stop=should_stop), [p1])
+        self.assertGreater(len(FakeNativePrinter.state["decisions"]), 40)
+        self.assertTrue(b"EndJob" in FakeNativePrinter.state["log"][-1])
+
     def test_cancel_during_first_page_returns_nothing(self):
         FakeNativePrinter.state.update(pages=[split(fake_jpeg())], decisions=[], cancel=True)
         self.assertEqual(self.scanner.scan(PageSettings()), [])

@@ -2,6 +2,7 @@
 import tempfile
 import threading
 import unittest
+from unittest import mock
 from datetime import datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -119,6 +120,28 @@ class ServiceTests(unittest.TestCase):
         self.assertEqual(len(files), 1)
         self.assertEqual(files[0].read_bytes(), b"%PDF-1.3 fake\n%%EOF\n")
         self.assertIn("<pwg:InputSource>Platen</pwg:InputSource>", FakePrinter.state["settings"])
+
+    def test_busy_hook_brackets_the_scan(self):
+        FakePrinter.state["pending"] = True
+        calls = []
+        self.service.busy_hook = calls.append
+        self.service.step()
+        self.assertEqual(calls, [True, False])
+
+    def test_busy_hook_is_cleared_after_a_failed_scan(self):
+        calls = []
+        self.service.busy_hook = calls.append
+        target = self.service.targets[0]
+        with mock.patch.object(self.service, "_scan_to", side_effect=OSError("boom")):
+            with self.assertRaises(OSError):
+                self.service.scan_to(target)
+        self.assertEqual(calls, [True, False])
+
+    def test_stop_wanted(self):
+        self.assertFalse(self.service.stop_wanted())
+        self.service.stop_check = lambda: True
+        self.assertTrue(self.service.stop_wanted())
+        self.assertFalse(self.service.stop_event.is_set())
 
     def test_auto_source_uses_adf_when_loaded(self):
         FakePrinter.state.update(pending=True, adf=True)

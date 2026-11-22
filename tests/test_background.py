@@ -115,6 +115,51 @@ class StopTests(TempDirCase):
                                           kill=lambda pid: runner.release())
         self.assertEqual(result, background.TERMINATED)
 
+    def test_waits_longer_while_a_scan_runs(self):
+        runner, caller = self.instance(), self.instance()
+        runner.claim()
+        runner.set_busy(True)
+        now = [0.0]
+        told = []
+
+        def sleep(seconds):
+            now[0] += seconds
+            if now[0] >= 100:          # the scan ends and the loop stops
+                runner.set_busy(False)
+                runner.release()
+
+        kill = mock.Mock()
+        result = background.stop_instance(caller, timeout=3, poll=1, sleep=sleep,
+                                          clock=lambda: now[0], kill=kill,
+                                          on_wait_for_scan=lambda: told.append(1))
+        self.assertEqual(result, background.STOPPED)
+        self.assertEqual(told, [1])
+        kill.assert_not_called()
+
+    def test_terminated_when_the_scan_never_ends(self):
+        runner, caller = self.instance(), self.instance()
+        runner.claim()
+        runner.set_busy(True)
+        now = [0.0]
+
+        def kill(pid):
+            self.assertGreaterEqual(now[0], 20)
+            runner.release()
+
+        result = background.stop_instance(caller, timeout=3, poll=1,
+                                          sleep=lambda s: now.__setitem__(0, now[0] + s),
+                                          clock=lambda: now[0], kill=kill, scan_timeout=20)
+        self.assertEqual(result, background.TERMINATED)
+        self.assertFalse(caller.busy_path.exists())
+
+    def test_release_clears_the_busy_mark(self):
+        inst = self.instance()
+        inst.claim()
+        inst.set_busy(True)
+        self.assertTrue(inst.is_busy())
+        inst.release()
+        self.assertFalse(inst.is_busy())
+
     def test_failed_if_nothing_helps(self):
         runner, caller = self.instance(), self.instance()
         runner.claim()
