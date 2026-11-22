@@ -16,6 +16,7 @@ from urllib.parse import urlencode
 
 from pushscan2folder import __main__ as cli
 from pushscan2folder import web
+from pushscan2folder.discovery import Scanner
 from pushscan2folder.config import Config, TargetSpec, dump_config, load_config, write_config
 from pushscan2folder.service import Target
 from pushscan2folder.status import LogBuffer, ScanRecord, ServiceStatus
@@ -1611,6 +1612,103 @@ class MainTests(unittest.TestCase):
                           if isinstance(h, LogBuffer)], [])
         ctx = start.call_args.args[0]
         self.assertFalse(ctx.targets_from_env)
+
+
+class PrinterSearchTests(WebTestBase):
+    def setUp(self):
+        super().setUp()
+        self.searches = 0
+        self.result = [Scanner("192.0.2.7", "Canon TR8500 series", "Canon <TR8500>"),
+                       Scanner("192.0.2.1", "Old", "")]
+
+        def discover():
+            self.searches += 1
+            return list(self.result)
+        self.ctx.discover_fn = discover
+        write_config(self.config_path, dump_config(Config(printer="192.0.2.1", interval=3.0)))
+        self.logged_in()
+
+    def search(self):
+        csrf = self.client.csrf("/settings")
+        return self.client.request("POST", "/printer/search", {"csrf": csrf})
+
+    def test_settings_page_offers_the_search(self):
+        page = self.client.request("GET", "/settings")[2]
+        self.assertIn('action="/printer/search"', page)
+        self.assertEqual(self.searches, 0)   # only on request
+
+    def test_search_lists_scanners_escaped(self):
+        status, _, page = self.search()
+        self.assertEqual(status, 200)
+        self.assertEqual(self.searches, 1)
+        self.assertIn("Canon &lt;TR8500&gt;", page)
+        self.assertNotIn("<TR8500>", page)
+        self.assertIn('name="address" value="192.0.2.7"', page)
+        self.assertNotIn('name="address" value="192.0.2.1"', page)   # the one in use
+        self.assertIn("in use", page)
+
+    def test_nothing_found(self):
+        self.result = []
+        page = self.search()[2]
+        self.assertIn("No scanner answered", page)
+
+    def test_use_writes_the_printer_and_keeps_the_rest(self):
+        self.search()
+        csrf = self.client.csrf("/settings")
+        status, resp, _ = self.client.request("POST", "/printer/use",
+                                              {"csrf": csrf, "address": "192.0.2.7"})
+        self.assertEqual(status, 303)
+        cfg = load_config(self.config_path)
+        self.assertEqual((cfg.printer, cfg.interval), ("192.0.2.7", 3.0))
+        page = self.client.request("GET", resp.getheader("Location"))[2]
+        self.assertIn("The printer 192.0.2.7 is used from the next poll cycle", page)
+
+    def test_only_found_addresses_are_accepted(self):
+        self.search()
+        csrf = self.client.csrf("/settings")
+        for address in ("10.0.0.1", "", "192.0.2.7 "):
+            status, _, page = self.client.request("POST", "/printer/use",
+                                                  {"csrf": csrf, "address": address + "x"})
+            self.assertEqual(status, 400)
+            self.assertIn("Only an address found by the search", page)
+        self.assertEqual(load_config(self.config_path).printer, "192.0.2.1")
+
+    def test_use_without_a_search_is_refused(self):
+        csrf = self.client.csrf("/settings")
+        status, _, _ = self.client.request("POST", "/printer/use",
+                                           {"csrf": csrf, "address": "192.0.2.7"})
+        self.assertEqual(status, 400)
+
+    def test_csrf_is_required(self):
+        for path in ("/printer/search", "/printer/use"):
+            status, _, _ = self.client.request("POST", path, {"csrf": "wrong",
+                                                              "address": "192.0.2.7"})
+            self.assertEqual(status, 403)
+        self.assertEqual(self.searches, 0)
+
+    def test_one_search_at_a_time(self):
+        self.server.search_lock.acquire()
+        try:
+            status, _, page = self.search()
+        finally:
+            self.server.search_lock.release()
+        self.assertEqual(status, 409)
+        self.assertIn("already running", page)
+        self.assertEqual(self.searches, 0)
+
+    def test_overridden_printer_has_no_search(self):
+        self.ctx.overrides["printer"] = "environment variable PUSHSCAN_PRINTER"
+        page = self.client.request("GET", "/settings")[2]
+        self.assertNotIn("/printer/search", page)
+        self.assertIn("PUSHSCAN_PRINTER", page)
+        csrf = self.client.csrf("/settings")
+        self.assertEqual(self.client.request("POST", "/printer/search", {"csrf": csrf})[0], 404)
+
+    def test_without_search_function(self):
+        self.ctx.discover_fn = None
+        page = self.client.request("GET", "/settings")[2]
+        self.assertNotIn("/printer/search", page)
+        self.assertIn("Change it in the config file", page)
 
 
 if __name__ == "__main__":

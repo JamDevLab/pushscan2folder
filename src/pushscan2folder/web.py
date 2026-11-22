@@ -103,6 +103,10 @@ class WebContext:
     variable or command line option), shown on the settings page.
     effective: config key -> the value in use (display text).
     auth: False when the web page runs without a login (PUSHSCAN_WEB_AUTH=0).
+    discover_fn: searches the network for scanners (discovery.discover); None
+    hides the search. found: the result of the last search. Only an address
+    from it can be set as the printer, so the page cannot point the service
+    at any other host.
     """
     service: object                  # .status, .request_targets()
     log_buffer: LogBuffer
@@ -114,6 +118,9 @@ class WebContext:
     overrides: dict = field(default_factory=dict)
     effective: dict = field(default_factory=dict)
     auth: bool = True
+    discover_fn: object = None       # () -> list[discovery.Scanner]
+    found: list = field(default_factory=list)
+    printer_pending: str | None = None   # set from the page, not yet read back
 
     def default_label(self, key: str, builtin: str) -> str:
         """The value in use for a setting without a per-target value."""
@@ -704,6 +711,7 @@ label.check { display:flex; gap:8px; align-items:center; margin:10px 0 2px; font
 .login label { text-align:left; }
 .login button { width:100%; margin-top:14px; }
 .save { margin:16px 0; } .save button { padding:10px 28px; }
+form.inline { display:inline-block; margin:.3rem 0; }
 .ro { margin:.4rem 0 0; } .ro + .hint { margin-bottom:.6rem; } .ro code { word-break:break-all; }
 .ok { color:var(--ok); } .bad { color:var(--bad); } .warn { color:var(--warn); }
 .error { border-color:var(--bad); } .muted { color:var(--muted); font-size:.9rem; }
@@ -1124,9 +1132,54 @@ def _setting_select(key: str, value: str, options: list[tuple[str, str]]) -> str
     return _select(key, value, unset + options, False)
 
 
+def _printer_html(ctx: WebContext, csrf: str, scanners: list | None) -> str:
+    """The printer line of the settings page, with the network search."""
+    out = [f'<p class="ro">Printer: <code>{esc(ctx.printer)}</code></p>']
+    if "printer" in ctx.overrides:
+        out.append(f'<p class="hint">Overridden by {esc(ctx.overrides["printer"])}, so it '
+                   "can only be changed there.</p>")
+        return "".join(out)
+    if ctx.discover_fn is None:
+        out.append('<p class="hint">Not editable here. Change it in the config file.</p>')
+        return "".join(out)
+    hidden = f'<input type="hidden" name="csrf" value="{esc(csrf)}">'
+    out.append('<form method="post" action="/printer/search" class="inline">' + hidden
+               + '<button type="submit" class="secondary">Search the network</button></form>'
+               '<p class="hint">Looks for scanners (eSCL, mDNS) for about 2 seconds. In Docker '
+               "with the default bridge network it finds nothing; set the address in the "
+               "config file then.</p>")
+    if scanners is None:
+        return "".join(out)
+    if not scanners:
+        out.append('<p class="warn">No scanner answered. A firewall, a VPN or a separate '
+                   "network can block the search.</p>")
+        return "".join(out)
+    rows = []
+    for scanner in scanners:
+        if scanner.address == ctx.printer:
+            action = '<span class="badge">in use</span>'
+        else:
+            action = ('<form method="post" action="/printer/use" class="inline">' + hidden
+                      + f'<input type="hidden" name="address" value="{esc(scanner.address)}">'
+                      '<button type="submit" class="secondary">Use</button></form>')
+        rows.append(f"<tr><td><code>{esc(scanner.address)}</code></td>"
+                    f"<td>{esc(scanner.model or scanner.name)}</td><td>{action}</td></tr>")
+    out.append('<div class="scroll"><table><thead><tr><th>Address</th><th>Scanner</th>'
+               "<th></th></tr></thead><tbody>" + "".join(rows) + "</tbody></table></div>")
+    return "".join(out)
+
+
+def set_printer(ctx: WebContext, address: str) -> None:
+    """Write `address` as "printer" into the config file (everything else is
+    kept). The caller checked it against ctx.found. Raises ConfigError/OSError."""
+    cfg = read_config(ctx)
+    cfg.printer = address
+    write_config(ctx.config_path, dump_config(cfg))
+
+
 def render_settings(ctx: WebContext, csrf: str, values: dict[str, str] | None = None,
                     errors: list[str] = (), notes: list[str] = (),
-                    dirty: bool = False) -> bytes:
+                    dirty: bool = False, scanners: list | None = None) -> bytes:
     parts = ["<h1>Settings</h1>"]
     for e in errors:
         parts.append(f'<section class="error bad">{esc(e)}</section>')
@@ -1152,12 +1205,11 @@ def render_settings(ctx: WebContext, csrf: str, values: dict[str, str] | None = 
                  'file, so the built-in value applies. <a href="/config">Edit config.toml '
                  "directly</a> keeps comments.</p>")
 
-    ro = []
-    for key, label in (("printer", "Printer"), ("output", "Output folder")):
-        shown = ctx.printer if key == "printer" else ctx.output
-        note = (f' Overridden by {esc(ctx.overrides[key])}.' if key in ctx.overrides else "")
-        ro.append(f'<p class="ro">{label}: <code>{esc(shown)}</code></p>'
-                  f'<p class="hint">Not editable here. Change it in the config file.{note}</p>')
+    ro = [_printer_html(ctx, csrf, scanners)]
+    note = (f' Overridden by {esc(ctx.overrides["output"])}.' if "output" in ctx.overrides
+            else "")
+    ro.append(f'<p class="ro">Output folder: <code>{esc(ctx.output)}</code></p>'
+              f'<p class="hint">Not editable here. Change it in the config file.{note}</p>')
     try:
         disk = read_config(ctx)
     except ConfigError:
@@ -1325,6 +1377,7 @@ class WebServer(ThreadingHTTPServer):
         self.open_csrf = secrets.token_urlsafe(32)
         self.sessions = Sessions()
         self.save_lock = threading.Lock()
+        self.search_lock = threading.Lock()   # one network search at a time
         self.secure_cookie = secure_cookie
         self.cookie_name = SECURE_COOKIE if secure_cookie else COOKIE
         self._slots = threading.BoundedSemaphore(MAX_CONNECTIONS)
@@ -1466,6 +1519,9 @@ class Handler(BaseHTTPRequestHandler):
         saved = "1" in parse_qs(urlsplit(self.path).query).get("saved", [])
         if path == "/settings":
             notes = ["Saved. The new values are used from the next poll cycle."] if saved else []
+            if "1" in parse_qs(urlsplit(self.path).query).get("printer", []):
+                notes = [f"Saved. The printer {ctx.printer_pending or ctx.printer} is used from "
+                         "the next poll cycle."]
             return self._send(200, render_settings(ctx, csrf, notes=notes))
         if path == "/config":
             notes = (["Saved. The changes are used from the next poll cycle; changes to "
@@ -1560,6 +1616,10 @@ class Handler(BaseHTTPRequestHandler):
             return self._save_settings(form, csrf)
         if path == "/config":
             return self._save_config(form, csrf)
+        if path == "/printer/search":
+            return self._search_printer(csrf)
+        if path == "/printer/use":
+            return self._use_printer(form, csrf)
         self._text_error(404, "Not found")
 
     def _login(self, form: dict) -> None:
@@ -1617,6 +1677,45 @@ class Handler(BaseHTTPRequestHandler):
         except OSError as exc:
             errors = [f"Cannot write {ctx.config_path}: {exc.strerror or exc}"]
         self._send(400, render_settings(ctx, csrf, values=values, errors=errors, dirty=True))
+
+    def _search_printer(self, csrf: str) -> None:
+        ctx = self.server.ctx
+        if ctx.discover_fn is None or "printer" in ctx.overrides:
+            return self._text_error(404, "Not found")
+        if not self.server.search_lock.acquire(blocking=False):
+            return self._send(409, render_settings(ctx, csrf,
+                                                   errors=["A search is already running."]))
+        try:
+            found = list(ctx.discover_fn())
+        finally:
+            self.server.search_lock.release()
+        ctx.found = found
+        log.info("printer search from the web page: %d scanner(s) found", len(found))
+        self._send(200, render_settings(ctx, csrf, scanners=found))
+
+    def _use_printer(self, form: dict, csrf: str) -> None:
+        ctx = self.server.ctx
+        if ctx.discover_fn is None or "printer" in ctx.overrides:
+            return self._text_error(404, "Not found")
+        reason = ctx.config_block_reason()
+        if reason:
+            return self._send(403, render_settings(ctx, csrf, errors=[reason]))
+        address = form.get("address", "").strip()
+        if address not in {scanner.address for scanner in ctx.found}:
+            return self._send(400, render_settings(
+                ctx, csrf, errors=["Only an address found by the search can be used. "
+                                   "Search again."]))
+        try:
+            with self.server.save_lock:
+                set_printer(ctx, address)
+        except ConfigError as exc:
+            return self._send(400, render_settings(ctx, csrf, errors=[str(exc)]))
+        except OSError as exc:
+            return self._send(400, render_settings(
+                ctx, csrf, errors=[f"Cannot write {ctx.config_path}: {exc.strerror or exc}"]))
+        ctx.printer_pending = address
+        log.info("printer set to %s from the web page", address)
+        self._redirect("/settings?saved=1&printer=1")
 
     def _save_config(self, form: dict, csrf: str) -> None:
         ctx = self.server.ctx

@@ -454,6 +454,7 @@ class ConfigWatcher:
             ctx.printer, ctx.output, ctx.multipage_mode = args.printer, args.output, args.multipage
             ctx.targets_from_env = bool(args.targets)
             ctx.overrides, ctx.effective = web_overrides(args, cfg, self.argv)
+            ctx.printer_pending = None
         self.args = args
         logging.info("%s changed, the new settings are in use", self.path)
         restart = [label for key, label in NOT_RELOADED
@@ -1007,7 +1008,8 @@ def _main(argv=None) -> int:
                          multipage_mode=args.multipage,
                          config_path=config_path,
                          targets_from_env=bool(args.targets),
-                         overrides=overrides, effective=effective)
+                         overrides=overrides, effective=effective,
+                         discover_fn=discovery.discover)
     watcher.ctx = ctx
     try:
         server, thread = web.start_server(ctx, web_password, args.web_bind, args.web_port,
