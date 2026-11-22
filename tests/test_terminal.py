@@ -18,11 +18,18 @@ class LinkTests(unittest.TestCase):
         self.assertEqual(terminal.link("/a/b.toml", io.StringIO(), {"TERM": "xterm"}),
                          "/a/b.toml")
 
+    @unittest.skipIf(sys.platform == "win32", "a Linux path")
     def test_linux_terminal_gets_a_link(self):
         with mock.patch.object(sys, "platform", "linux"):
             text = terminal.link(Path("/home/u/my config.toml"), Tty(), {"TERM": "xterm"})
         self.assertEqual(text, "\033]8;;file:///home/u/my%20config.toml\033\\"
                                "/home/u/my config.toml\033]8;;\033\\")
+
+    @unittest.skipUnless(sys.platform == "win32", "a Windows path")
+    def test_windows_path_gets_a_link(self):
+        text = terminal.link(Path(r"C:\Users\u\my config.toml"), Tty(), {"WT_SESSION": "x"})
+        self.assertEqual(text, "\033]8;;file:///C:/Users/u/my%20config.toml\033\\"
+                               "C:\\Users\\u\\my config.toml\033]8;;\033\\")
 
     def test_dumb_terminal_gets_text(self):
         with mock.patch.object(sys, "platform", "linux"):
