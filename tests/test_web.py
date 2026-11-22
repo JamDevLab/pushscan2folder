@@ -19,6 +19,7 @@ from pushscan2folder import web
 from pushscan2folder.config import Config, TargetSpec, dump_config, load_config, write_config
 from pushscan2folder.service import Target
 from pushscan2folder.status import LogBuffer, ScanRecord, ServiceStatus
+from support import CAN_SYMLINK, assert_mode, needs_symlinks
 
 EXAMPLE = Path(__file__).resolve().parent.parent / "config.example.toml"
 PASSWORD = "correct horse"
@@ -520,7 +521,7 @@ class TargetEditorTests(WebTestBase):
         cfg = load_config(self.config_path)
         self.assertEqual([t.name for t in cfg.targets], ["scan1", "paperless"])
         self.assertEqual(cfg.targets[0].document_multipage, False)
-        self.assertEqual(self.config_path.stat().st_mode & 0o777, 0o600)
+        assert_mode(self, self.config_path, 0o600)
         p = cfg.targets[1]
         self.assertEqual((p.output, p.document_multipage, p.auto_multipage),
                          ("consume/in", True, True))
@@ -602,19 +603,38 @@ class FolderCheckTests(unittest.TestCase):
 
     def test_accepts_plain_relative_paths(self):
         (self.base / "inner").mkdir()
-        (self.base / "link_in").symlink_to(self.base / "inner")
-        for good in ("a", "a/b", "Paperless Inbox", "ü-x_1.2", "link_in", "link_in/sub",
-                     "not/yet/existing"):
-            web.check_web_folder(good, self.base)
+        good = ["a", "a/b", "Paperless Inbox", "ü-x_1.2", "not/yet/existing", "con_x", "a.b"]
+        if CAN_SYMLINK:
+            (self.base / "link_in").symlink_to(self.base / "inner")
+            good += ["link_in", "link_in/sub"]
+        for folder in good:
+            web.check_web_folder(folder, self.base)
 
     def test_rejects_escapes(self):
-        (self.base / "link_out").symlink_to(self.outside)
-        (self.base / "link_base").symlink_to(self.base)
-        for bad in ("", "/abs", "//net/share", "..", "../x", "a/../../x", "a/..", "a//b",
-                    "a/", "./a", ".", "a\\b", "..\\x", "a\x00b", "a\nb", "a\tb", "a\x7fb",
-                    "link_out", "link_out/sub", "link_base", "x" * 300):
+        bad = ["", "/abs", "//net/share", "..", "../x", "a/../../x", "a/..", "a//b",
+               "a/", "./a", ".", "a\\b", "..\\x", "a\x00b", "a\nb", "a\tb", "a\x7fb",
+               "x" * 300]
+        if CAN_SYMLINK:
+            (self.base / "link_out").symlink_to(self.outside)
+            (self.base / "link_base").symlink_to(self.base)
+            bad += ["link_out", "link_out/sub", "link_base"]
+        for folder in bad:
+            with self.assertRaises(ValueError, msg=repr(folder)):
+                web.check_web_folder(folder, self.base)
+
+    def test_rejects_windows_tricks(self):
+        # Same result on every platform, so Linux CI covers the Windows rules.
+        for bad in ("C:x", "C:", "c:/x", "a:b", "a/b:c", "file.txt:stream", "a/b::$DATA",
+                    "con", "CON", "aux", "Nul", "prn", "com1", "COM9", "lpt1", "LPT9",
+                    "a/con", "a/NUL.txt", "con.tar.gz", "x/com3.log/y", "con .txt",
+                    "trailing.", "trailing ", "a./b", "a /b", "a/b.", "a/b ", "...",
+                    "a<b", "a>b", 'a"b', "a|b", "a?b", "a*b"):
             with self.assertRaises(ValueError, msg=repr(bad)):
                 web.check_web_folder(bad, self.base)
+
+    def test_reserved_lookalikes_are_fine(self):
+        for good in ("console", "com", "com10", "lpt", "aux_1", "nulls", "xcon", "a.con"):
+            web.check_web_folder(good, self.base)
 
     def test_relative_base(self):
         cwd = os.getcwd()
@@ -663,6 +683,7 @@ output = "inbox"
         self.assertEqual(self.service.requested, [])
         self.assertFalse((self.dir / "scans").exists())   # nothing created
 
+    @needs_symlinks
     def test_symlink_out_of_base_rejected(self):
         (self.dir / "scans").mkdir()
         (self.dir / "outside").mkdir()
@@ -775,6 +796,7 @@ output = "inbox"
         self.assertEqual([(t.name, t.output) for t in load_config(self.config_path).targets],
                          [("new", None)])
 
+    @needs_symlinks
     def test_locked_default_folder_is_kept(self):
         (self.dir / "scans").mkdir()
         (self.dir / "outside").mkdir()
@@ -871,7 +893,7 @@ class SettingsTests(WebTestBase):
         self.assertFalse(self.config_path.exists())
         self.assertEqual(self.post(color="gray")[0], 303)
         self.assertEqual(load_config(self.config_path).color, "gray")
-        self.assertEqual(self.config_path.stat().st_mode & 0o777, 0o600)
+        assert_mode(self, self.config_path, 0o600)
 
     def test_validation_errors_write_nothing(self):
         self.logged_in()
@@ -1011,7 +1033,7 @@ class RawConfigTests(WebTestBase):
         status, resp, _ = self.save(text.replace("\n", "\r\n"))   # as a browser sends it
         self.assertEqual((status, resp.getheader("Location")), (303, "/config?saved=1"))
         self.assertEqual(self.config_path.read_text(), text)       # verbatim, LF
-        self.assertEqual(self.config_path.stat().st_mode & 0o777, 0o644)
+        assert_mode(self, self.config_path, 0o644)
         self.assertEqual(len(self.service.requested), 1)
         names = [t.name for t in self.service.requested[0]]
         self.assertEqual(names, ["plain2", "paperless"])
@@ -1044,7 +1066,7 @@ class RawConfigTests(WebTestBase):
         self.assertEqual(self.save('output = "/scans"\n' + self.START + "# x\n")[0], 303)
 
     def test_output_equal_to_the_one_in_use_is_accepted(self):
-        text = f'output = "{self.dir / "scans"}"\n' + self.START
+        text = f'output = "{(self.dir / "scans").as_posix()}"\n' + self.START
         self.assertEqual(self.save(text)[0], 303)
 
     def test_printer_change_rejected(self):
@@ -1058,12 +1080,14 @@ class RawConfigTests(WebTestBase):
             text = self.START + f'\n[[target]]\nname = "evil"\noutput = "{output}"\n'
             self.assertRejected(text, 'Target "evil"')
 
+    @needs_symlinks
     def test_target_symlink_out_of_output_rejected(self):
         (self.dir / "scans").mkdir()
         (self.dir / "scans" / "link").symlink_to(self.dir)
         text = self.START + '\n[[target]]\nname = "evil"\noutput = "link"\n'
         self.assertRejected(text, 'Target "evil"')
 
+    @needs_symlinks
     def test_target_default_folder_is_checked_too(self):
         (self.dir / "scans").mkdir()
         (self.dir / "scans" / "evil").symlink_to(self.dir)   # safe_dirname("evil")
@@ -1112,7 +1136,7 @@ class RawConfigTests(WebTestBase):
         self.assertIn("does not exist yet", page)
         self.assertEqual(self.save('[defaults]\ncolor = "gray"\n')[0], 303)
         self.assertEqual(load_config(self.config_path).color, "gray")
-        self.assertEqual(self.config_path.stat().st_mode & 0o777, 0o600)
+        assert_mode(self, self.config_path, 0o600)
 
     def test_no_targets_in_text_leaves_the_service_alone(self):
         self.assertEqual(self.save('printer = "192.0.2.1"\n[defaults]\ncolor = "gray"\n')[0], 303)
@@ -1432,7 +1456,7 @@ class ConfigWriteTests(unittest.TestCase):
     def test_new_file_is_private(self):
         path = self.dir / "sub" / "c.toml"
         write_config(path, "x = 1\n")
-        self.assertEqual(path.stat().st_mode & 0o777, 0o600)
+        assert_mode(self, path, 0o600)
 
     def test_atomic_write_keeps_mode_and_leaves_no_temp(self):
         path = self.dir / "c.toml"
@@ -1440,7 +1464,7 @@ class ConfigWriteTests(unittest.TestCase):
         path.chmod(0o640)
         write_config(path, "new")
         self.assertEqual(path.read_text(), "new")
-        self.assertEqual(path.stat().st_mode & 0o777, 0o640)
+        assert_mode(self, path, 0o640)
         self.assertEqual([p.name for p in self.dir.iterdir()], ["c.toml"])
 
     def test_busy_fallback_writes_in_place(self):

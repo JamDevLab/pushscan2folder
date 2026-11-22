@@ -4,17 +4,20 @@ from __future__ import annotations
 import argparse
 import getpass
 import logging
+import logging.handlers
 import os
 import signal
 import socket
+import subprocess
 import sys
 from pathlib import Path
 
-from . import __version__, panel, protocol, web
+from . import __version__, autostart, panel, protocol, web
 from .client import ChmpClient
 from .config import Config, ConfigError, load_config
 from .escl import EsclClient, ScanSettings
 from .native import NativeScanner
+from .platform_support import default_config_path, default_output, is_windows
 from .service import (MULTIPAGE_MODES, PushScanService, Target, Trim, check_targets,
                       parse_targets, parse_trim)
 from .status import LogBuffer
@@ -52,11 +55,6 @@ def multipage_env(fallback: str | None = None) -> str:
     aliases = {"1": "document", "true": "document", "yes": "document",
                "0": "off", "false": "off", "no": "off"}
     return aliases.get(value, value)
-
-
-def default_config_path() -> Path:
-    base = os.environ.get("XDG_CONFIG_HOME") or str(Path.home() / ".config")
-    return Path(base) / "pushscan2folder" / "config.toml"
 
 
 def find_config(argv=None) -> Config:
@@ -99,20 +97,30 @@ def build_parser(cfg: Config | None = None) -> argparse.ArgumentParser:
     (Command line options override all of these via argparse.)"""
     cfg = cfg or Config()
     p = argparse.ArgumentParser(prog="pushscan2folder",
-                                description="Scan-to-PC target for Canon IJ printers on Linux")
+                                description="Scan-to-PC target for Canon IJ printers (Linux, Windows, macOS)")
     p.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
     p.add_argument("--config", default=env("CONFIG"), metavar="PATH",
-                   help="TOML configuration file (default: "
-                        "$XDG_CONFIG_HOME/pushscan2folder/config.toml if present)")
+                   help="TOML configuration file (default if present: Windows "
+                        "%%APPDATA%%\\pushscan2folder\\config.toml, otherwise "
+                        "$XDG_CONFIG_HOME/pushscan2folder/config.toml)")
     p.add_argument("--printer", default=env("PRINTER", cfg.printer), help="printer IP or host name")
     p.add_argument("--name", default=env("NAME"),
                    help="name shown on the printer panel (max 31 chars)")
     p.add_argument("-v", "--verbose", action="store_true", default=env_bool("VERBOSE", cfg.verbose))
+    p.add_argument("--log-file", default=env("LOG_FILE"), metavar="PATH",
+                   help="also write the log to this file (rotating, 1 MB x 3 files)")
+    p.add_argument("--install-autostart", action="store_true",
+                   help="Windows only: start at logon with the other options given "
+                        "(e.g. --config PATH --log-file PATH), then exit")
+    p.add_argument("--remove-autostart", action="store_true",
+                   help="Windows only: remove the logon entry, then exit")
     sub = p.add_subparsers(dest="cmd", required=True)
-    output_default = env("OUTPUT") or cfg.output or "./scans"
+    output_default = env("OUTPUT") or cfg.output or default_output()
 
     run = sub.add_parser("run", help="register and wait for scan requests")
-    run.add_argument("--output", default=output_default, type=Path)
+    run.add_argument("--output", default=output_default, type=Path,
+                     help="base folder for scans (default: ./scans; on Windows and "
+                          "macOS Documents/Scans in your home folder)")
     run.add_argument("--interval", type=float, default=float(env("INTERVAL", cfg.interval or 4)))
     run.add_argument("--format", choices=["pdf", "jpeg"], default=env("FORMAT", cfg.format or "pdf"))
     run.add_argument("--color", choices=["color", "gray"], default=env("COLOR", cfg.color or "color"))
@@ -286,7 +294,83 @@ def default_name() -> str:
     return protocol.panel_safe(protocol.default_name(user, socket.gethostname()))
 
 
+def setup_console() -> None:
+    """Never fail on a character the console cannot show (a Windows console
+    often uses a legacy code page): print a replacement character instead."""
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(errors="replace")
+        except (AttributeError, ValueError, OSError):
+            pass  # no console (windowed exe) or not a text stream
+
+
+def setup_logging(verbose: bool, log_file: str | None = None) -> None:
+    """Log to the console and, with log_file, to a rotating file.
+    Raises OSError if the file cannot be opened."""
+    fmt = "%(asctime)s %(levelname)s %(message)s"
+    logging.basicConfig(level=logging.DEBUG if verbose else logging.INFO, format=fmt)
+    if log_file:
+        path = Path(log_file)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        handler = logging.handlers.RotatingFileHandler(
+            path, maxBytes=1_000_000, backupCount=3, encoding="utf-8")
+        handler.setFormatter(logging.Formatter(fmt))
+        logging.getLogger().addHandler(handler)
+
+
+def install_signal_handlers(service: PushScanService) -> None:
+    """Ctrl+C and SIGTERM stop the service cleanly (the targets are released).
+    Windows has no real SIGTERM, but Ctrl+Break (SIGBREAK) and closing the
+    console are the equivalent there."""
+    names = ["SIGINT", "SIGTERM"] + (["SIGBREAK"] if is_windows() else [])
+    for name in names:
+        number = getattr(signal, name, None)
+        if number is not None:
+            signal.signal(number, lambda *_: service.stop())
+
+
+def autostart_main(argv: list[str]) -> int:
+    """--install-autostart / --remove-autostart. The other options on the
+    command line are what the logon entry will run."""
+    install, remove = "--install-autostart" in argv, "--remove-autostart" in argv
+    if install and remove:
+        print("error: use either --install-autostart or --remove-autostart", file=sys.stderr)
+        return 2
+    if not is_windows():
+        print("error: autostart is only implemented for Windows. On Linux use a "
+              "systemd user service or Docker, see the README.", file=sys.stderr)
+        return 2
+    rest = [a for a in argv if a not in ("--install-autostart", "--remove-autostart")]
+    if install:
+        try:
+            parse_args(rest if any(a in autostart.COMMANDS for a in rest) else rest + ["run"])
+            command = autostart.install_command(rest)
+        except ConfigError as exc:
+            print(f"error: {exc}", file=sys.stderr)
+            return 2
+        except ValueError as exc:
+            print(f"error: {exc}", file=sys.stderr)
+            return 2
+    else:
+        command = autostart.remove_command()
+    done = subprocess.run(command, capture_output=True, text=True, check=False)
+    if done.returncode != 0:
+        print(f"error: reg.exe failed: {(done.stderr or done.stdout).strip()}", file=sys.stderr)
+        return 1
+    if install:
+        print("Autostart installed: pushscan2folder starts minimised when you log in.")
+        if not any(a == "--log-file" or a.startswith("--log-file=") for a in rest):
+            print("Tip: add --log-file PATH to keep a log of the autostart runs.")
+    else:
+        print("Autostart removed.")
+    return 0
+
+
 def main(argv=None) -> int:
+    setup_console()
+    raw = list(sys.argv[1:] if argv is None else argv)
+    if "--install-autostart" in raw or "--remove-autostart" in raw:
+        return autostart_main(raw)
     try:
         args, cfg = parse_args(argv)
     except ConfigError as exc:
@@ -295,8 +379,11 @@ def main(argv=None) -> int:
     if getattr(args, "multipage", "off") not in MULTIPAGE_MODES:
         print(f"error: invalid PUSHSCAN_MULTIPAGE {args.multipage!r}", file=sys.stderr)
         return 2
-    logging.basicConfig(level=logging.DEBUG if args.verbose else logging.INFO,
-                        format="%(asctime)s %(levelname)s %(message)s")
+    try:
+        setup_logging(args.verbose, args.log_file)
+    except OSError as exc:
+        print(f"error: --log-file {args.log_file}: {exc.strerror or exc}", file=sys.stderr)
+        return 2
     if not args.printer:
         print("error: --printer or PUSHSCAN_PRINTER is required", file=sys.stderr)
         return 2
@@ -349,8 +436,7 @@ def main(argv=None) -> int:
             print(path)
         return 0
 
-    signal.signal(signal.SIGTERM, lambda *_: service.stop())
-    signal.signal(signal.SIGINT, lambda *_: service.stop())
+    install_signal_handlers(service)
     for t in targets:
         logging.info("target %r -> %s", t.name, t.outdir)
     logging.info("waiting for scan requests from %s", args.printer)

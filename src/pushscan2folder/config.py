@@ -11,6 +11,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from . import panel
+from .platform_support import replace_file
 from .protocol import check_name
 from .service import (MULTIPAGE_MODES, RESOLUTIONS, TRIM_MAX_MM, Target, Trim,
                       safe_dirname)
@@ -334,7 +335,8 @@ def write_config(path: Path, text: str) -> None:
     """Write `text` to `path`: atomically (temp file + os.replace) when
     possible, otherwise in place. Creates the parent directory. Keeps the
     permissions of an existing file; a new file is private (0600), as the
-    web page may create it. Raises OSError."""
+    web page may create it. On Windows chmod only toggles the read-only flag,
+    so the file is protected by the user's profile folder instead. Raises OSError."""
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     existed = path.exists()
@@ -348,7 +350,7 @@ def write_config(path: Path, text: str) -> None:
             fh.flush()
             os.fsync(fh.fileno())
         os.chmod(tmp, mode)
-        os.replace(tmp, path)
+        replace_file(tmp, path)
         tmp = None
     except OSError as exc:
         if not existed or exc.errno not in _INPLACE_ERRNOS:

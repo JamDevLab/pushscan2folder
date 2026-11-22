@@ -64,6 +64,7 @@ class ConfigTestBase(unittest.TestCase):
         for key in [k for k in os.environ if k.startswith("PUSHSCAN_")]:
             del os.environ[key]
         os.environ["XDG_CONFIG_HOME"] = str(self.dir / "xdg")
+        os.environ["APPDATA"] = str(self.dir / "appdata")   # Windows equivalent
 
     def write(self, text, name="config.toml"):
         path = self.dir / name

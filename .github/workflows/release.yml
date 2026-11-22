@@ -1,0 +1,70 @@
+name: release
+
+# Builds the single-file Windows program and attaches it to the GitHub
+# release of the tag. A manual run only builds and keeps the exe as a
+# workflow artifact.
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  windows-exe:
+    runs-on: windows-latest
+    env:
+      PYTHONPATH: src
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Run tests
+        run: python -m unittest discover -s tests
+      - name: Check the tag matches the version
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          $version = python -c "import pushscan2folder; print(pushscan2folder.__version__)"
+          if ("v$version" -ne $env:TAG) {
+            Write-Error "tag $env:TAG does not match version $version in src/pushscan2folder/__init__.py"
+            exit 1
+          }
+      - name: Install PyInstaller
+        run: python -m pip install pyinstaller==6.22.3
+      - name: Build pushscan2folder.exe
+        run: >
+          pyinstaller --onefile --name pushscan2folder --paths src
+          --add-data "src/pushscan2folder/favicon.svg;pushscan2folder"
+          --noconfirm packaging/run_pushscan2folder.py
+      - name: Smoke test
+        run: |
+          dist\pushscan2folder.exe --version
+          dist\pushscan2folder.exe --help
+      - name: Checksum
+        working-directory: dist
+        run: |
+          $hash = (Get-FileHash pushscan2folder.exe -Algorithm SHA256).Hash.ToLower()
+          "$hash  pushscan2folder.exe" | Out-File -Encoding ascii SHA256SUMS.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pushscan2folder-windows
+          path: |
+            dist/pushscan2folder.exe
+            dist/SHA256SUMS.txt
+      - name: Attach to the GitHub release
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          gh release view $env:TAG --repo ${{ github.repository }} *> $null
+          if ($LASTEXITCODE -ne 0) {
+            gh release create $env:TAG --repo ${{ github.repository }} --title $env:TAG --generate-notes
+            if ($LASTEXITCODE -ne 0) { exit 1 }
+          }
+          gh release upload $env:TAG dist/pushscan2folder.exe dist/SHA256SUMS.txt --clobber --repo ${{ github.repository }}
+          if ($LASTEXITCODE -ne 0) { exit 1 }

@@ -1,0 +1,58 @@
+name: Bug report
+description: Something does not work as expected.
+labels: ["bug"]
+body:
+  - type: input
+    id: printer
+    attributes:
+      label: Printer model
+      placeholder: Canon PIXMA TR8550
+    validations:
+      required: true
+  - type: input
+    id: firmware
+    attributes:
+      label: Printer firmware version
+      description: Only if you know it.
+  - type: dropdown
+    id: platform
+    attributes:
+      label: How do you run it?
+      options:
+        - Docker
+        - Linux (without Docker)
+        - Windows
+        - macOS
+    validations:
+      required: true
+  - type: input
+    id: platform_version
+    attributes:
+      label: Docker, OS or Python version
+      placeholder: Docker 27 on Ubuntu 24.04
+  - type: input
+    id: version
+    attributes:
+      label: pushscan2folder version
+      description: Output of `python3 -m pushscan2folder --version`.
+      placeholder: 0.1.0
+    validations:
+      required: true
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened and what did you expect?
+    validations:
+      required: true
+  - type: textarea
+    id: log
+    attributes:
+      label: Log output
+      description: Run with `--verbose` (or `PUSHSCAN_VERBOSE=1`). Remove IP addresses and names first if you want.
+      render: text
+  - type: textarea
+    id: config
+    attributes:
+      label: Config excerpt
+      description: The relevant part of your config file, environment variables or command line. Never include the web password.
+      render: toml

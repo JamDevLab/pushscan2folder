@@ -36,6 +36,7 @@ from urllib.parse import parse_qs, urlsplit
 from . import SOURCE_URL, __version__, panel
 from .config import (COLORS, FORMATS, SOURCES, Config, ConfigError, TargetSpec, dump_config,
                      load_config, load_config_text, parse_config, size_name, write_config)
+from .platform_support import component_problem
 from .protocol import PANEL_CHARS, VISIBLE_NAME_CHARS, check_name
 from .service import (MULTIPAGE_MODES, RESOLUTIONS, TRIM_MAX_MM, check_targets,
                       safe_dirname)
@@ -59,7 +60,15 @@ ARIA_CURRENT = ' aria-current="page"'
 MAX_FOLDER_CHARS = 255
 COOKIE = "p2f_session"
 SECURE_COOKIE = "__Host-p2f_session"  # needs Secure, Path=/ and no Domain
-FAVICON = (Path(__file__).with_name("favicon.svg")).read_bytes()
+def _read_resource(name: str) -> bytes:
+    """Data file next to this module; also found in a PyInstaller bundle."""
+    path = Path(__file__).with_name(name)
+    if not path.is_file() and getattr(sys, "_MEIPASS", None):
+        path = Path(sys._MEIPASS) / "pushscan2folder" / name
+    return path.read_bytes()
+
+
+FAVICON = _read_resource("favicon.svg")
 
 SECURITY_HEADERS = {
     "Content-Security-Policy": "default-src 'none'; script-src 'self'; connect-src 'self'; "
@@ -228,8 +237,11 @@ _FOLDER_BAD_CHARS = re.compile(r"[\x00-\x1f\x7f\\]")
 def check_web_folder(value: str, base: Path) -> None:
     """A folder typed on the web page must be a plain relative path below the
     base output directory: no absolute path, no "." or ".." component, no
-    empty component, no backslash or control character, and (symlinks
-    resolved) it must end up strictly inside the resolved base. Raises
+    empty component, no backslash, control character or any of : < > " | ? *
+    (drive letters, NTFS streams, wildcards), no Windows device name (CON,
+    NUL, COM1 ...) and no component ending in a dot or a space. These rules
+    are the same on every platform. Finally (symlinks resolved, UNC paths
+    included) it must end up strictly inside the resolved base. Raises
     ValueError."""
     if not value:
         raise ValueError("folder is empty")
@@ -243,6 +255,10 @@ def check_web_folder(value: str, base: Path) -> None:
     parts = value.split("/")
     if any(part in ("", ".", "..") for part in parts):
         raise ValueError('folder must not contain empty, "." or ".." parts')
+    for part in parts:
+        problem = component_problem(part)
+        if problem:
+            raise ValueError(f"folder part {part!r}: {problem}")
     root = Path(base).resolve(strict=False)
     resolved = (root / value).resolve(strict=False)
     if resolved == root or not resolved.is_relative_to(root):

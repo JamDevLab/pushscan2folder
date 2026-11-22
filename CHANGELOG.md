@@ -5,6 +5,24 @@ All notable changes are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- Windows support: default config in `%APPDATA%\pushscan2folder`, scans in
+  `Documents\Scans`, a single-file `pushscan2folder.exe` built by GitHub
+  Actions and attached to each release, `--install-autostart` /
+  `--remove-autostart` (per-user Run key), see `docs/windows.md`.
+- `--log-file` / `PUSHSCAN_LOG_FILE`: rotating log file (1 MB x 3).
+- Tests run on Linux, Windows and macOS. macOS is untested on real hardware.
+- Issue forms for bug reports and printer reports.
+
+### Changed
+
+- The README is shorter; details moved to pages under `docs/`. It now has a
+  complete compose example.
+- Folder names typed on the web page must also be valid on Windows: no
+  `: < > " | ? *`, no device names like `CON`, no trailing dot or space.
+  Target names that are device names get a `_` prefix for their folder.
+
 ## [0.1.0] - 2026-11-22
 
 First release, tested with a Canon PIXMA TR8550 (TR8500 series).

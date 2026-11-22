@@ -18,6 +18,7 @@ from .client import ChmpClient
 from .escl import EXTENSIONS, FORMATS, EsclClient, ScanSettings
 from .native import NativeScanner, PageSettings
 from .pdf import jpegs_to_pdf
+from .platform_support import is_reserved_name
 from .status import ScanRecord, ServiceStatus
 from .protocol import STATUS_OK, STATUS_SCAN_REQUESTED, VISIBLE_NAME_CHARS, check_name
 
@@ -109,8 +110,11 @@ def is_complete(data: bytes, fmt: str) -> bool:
 
 
 def safe_dirname(name: str) -> str:
-    """Folder name derived from a panel name: no path separators or odd characters."""
+    """Folder name derived from a panel name: no path separators or odd characters,
+    and a valid Windows name (no reserved device names, no trailing dot)."""
     cleaned = re.sub(r"[^A-Za-z0-9._-]+", "_", name.strip()).strip("._")
+    if is_reserved_name(cleaned):
+        cleaned = "_" + cleaned   # CON, aux, NUL.x ... are device names on Windows
     return cleaned or "scan"
 
 

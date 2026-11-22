@@ -1,7 +1,8 @@
 # Example configuration for pushscan2folder.
 #
 # Default location: ~/.config/pushscan2folder/config.toml
-# (or $XDG_CONFIG_HOME/pushscan2folder/config.toml), or pass --config PATH /
+# (or $XDG_CONFIG_HOME/pushscan2folder/config.toml; on Windows
+# %APPDATA%\pushscan2folder\config.toml), or pass --config PATH /
 # set PUSHSCAN_CONFIG. Precedence: command line > PUSHSCAN_* env vars > this file >
 # built-in defaults. Every key is optional.
 # Docker (docker-compose.yml): this file is ./config/config.toml, and
