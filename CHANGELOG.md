@@ -7,6 +7,12 @@ All notable changes are documented here. The format follows
 
 ### Added
 
+- `open_after_scan` per `[[target]]` (also in the web target editor), for
+  example `"off"` for an archive folder. It wins over `[defaults]`.
+- The config file that setup and the web page write starts with a short header
+  (changes apply while running, only `[web]` and `verbose` need a restart) and
+  has commented examples for `open_after_scan`, `filename`, `resolution`,
+  `format` and a second target.
 - Clickable paths: setup and `start` print the config file, the scan folders and
   the log file as links (OSC 8) in Windows Terminal and in Linux terminals. The
   classic Windows console and the log file get the plain path.
@@ -51,6 +57,8 @@ All notable changes are documented here. The format follows
 
 ### Fixed
 
+- `color` in `[target.auto]` now explains that the colour comes from the start
+  button on the panel.
 - Windows, `open_after_scan = "folder"`: every scan opened one more Explorer
   window. If a window already shows the folder, the new file is now selected
   there.

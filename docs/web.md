@@ -145,8 +145,12 @@ Whether the targets can be edited depends on where they come from:
 - from the config file (`PUSHSCAN_CONFIG`, `--config` or the default location):
   editable; if the file does not exist yet, the first save creates it.
 
+Each target card also has "Open after a scan" (`open_after_scan` of the target;
+"Default" uses the Settings page value).
+
 Comments in the config file are lost when saving from the Targets or Settings
-form. The file is rewritten; other keys keep their values. Only the raw editor
+form, except the short header and the commented examples, which are written
+again. The file is rewritten; other keys keep their values. Only the raw editor
 keeps comments. Every saved target gets both
 multi-page switches written explicitly.
 

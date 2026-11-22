@@ -203,6 +203,7 @@ Meldung abgelehnt, die Datei und Schlüssel nennt, damit Tippfehler auffallen.
 | `[[target]]` `name` | erforderlich, max. 31 Zeichen, eindeutig | `NAME` |
 | `[[target]]` `output` | Ordner; `"."` ist der Ausgabeordner selbst; Standard `<output>/<name>` | `NAME=DIR` |
 | `[[target]]` `filename` | Vorlage, siehe [Dateinamen](#dateinamen); gilt vor `[defaults]` für dieses Ziel | - |
+| `[[target]]` `open_after_scan` | `off`, `folder`, `file`; gilt vor `[defaults]` für dieses Ziel, etwa `off` für einen Archivordner | - |
 | `[[target]]` `document_multipage` | `true` / `false` | `mp:` für den Dokumenttyp *Dokument* |
 | `[target.auto]` `resolution`, `format`, `size` | wie oben | die `@preset`-Optionen |
 | `[target.auto]` `multipage` | `true` / `false` | `mp:` für den Dokumenttyp *Automatisch* |

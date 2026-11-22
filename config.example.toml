@@ -58,6 +58,7 @@ name = "Scans"
 name = "Paperless"
 document_multipage = true
 # filename = "{name}_{date}_{time}"   # this target only, e.g. Paperless_2026-11-22_183005.pdf
+open_after_scan = "off"   # this target only: never open after a scan (off | folder | file)
 
 [target.auto]
 resolution = 300

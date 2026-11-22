@@ -158,8 +158,12 @@ Ob sich die Ziele bearbeiten lassen, hängt davon ab, woher sie kommen:
   Standardort): editierbar; existiert die Datei noch nicht, legt das erste
   Speichern sie an.
 
+Jede Zielkarte hat außerdem "Open after a scan" (`open_after_scan` des Ziels;
+"Default" nimmt den Wert der Einstellungsseite).
+
 Kommentare in der Konfigurationsdatei gehen beim Speichern über das Ziel- oder
-Einstellungsformular verloren. Die Datei wird neu geschrieben; andere Schlüssel
+Einstellungsformular verloren, bis auf den kurzen Kopf und die auskommentierten
+Beispiele, die neu geschrieben werden. Die Datei wird neu geschrieben; andere Schlüssel
 behalten ihre Werte. Nur der Rohtext-Editor behält Kommentare. Bei jedem
 gespeicherten Ziel werden beide Schalter für mehrseitige Scans ausdrücklich
 geschrieben.

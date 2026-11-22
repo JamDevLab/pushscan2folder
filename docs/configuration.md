@@ -197,6 +197,7 @@ the file and the key, so typos are caught.
 | `[[target]]` `name` | required, max 31 chars, unique | `NAME` |
 | `[[target]]` `output` | folder; `"."` is the output directory itself; default `<output>/<name>` | `NAME=DIR` |
 | `[[target]]` `filename` | template, see [File names](#file-names); wins over `[defaults]` for this target | - |
+| `[[target]]` `open_after_scan` | `off`, `folder`, `file`; wins over `[defaults]` for this target, for example `off` for an archive folder | - |
 | `[[target]]` `document_multipage` | `true` / `false` | `mp:` for document type *Document* |
 | `[target.auto]` `resolution`, `format`, `size` | as above | the `@preset` options |
 | `[target.auto]` `multipage` | `true` / `false` | `mp:` for document type *Auto scan* |
