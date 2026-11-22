@@ -114,6 +114,7 @@ class Instance:
             return False
         self._fd = fd
         self._remove(self.stop_path)
+        self._remove(self.busy_path)   # left over if the last instance crashed mid-scan
         self.info_path.write_text(json.dumps({"pid": os.getpid(), "log": log_file}),
                                   encoding="utf-8")
         return True

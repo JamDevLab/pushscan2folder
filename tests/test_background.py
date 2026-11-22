@@ -160,6 +160,14 @@ class StopTests(TempDirCase):
         inst.release()
         self.assertFalse(inst.is_busy())
 
+    def test_claim_clears_a_stale_busy_mark(self):
+        inst = self.instance()
+        inst.dir.mkdir(parents=True, exist_ok=True)
+        inst.busy_path.write_text("scan\n")
+        self.assertTrue(inst.claim())
+        self.assertFalse(inst.is_busy())
+        inst.release()
+
     def test_failed_if_nothing_helps(self):
         runner, caller = self.instance(), self.instance()
         runner.claim()
