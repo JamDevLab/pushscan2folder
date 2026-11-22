@@ -166,7 +166,7 @@ Meldung abgelehnt, die Datei und Schlüssel nennt, damit Tippfehler auffallen.
 | `[web]` `port` | 1 bis 65535, Standard 8080 | `--web-port` |
 | `[web]` `password_file` | Datei mit dem Passwort; relativ zur Konfigurationsdatei. Das Passwort selbst ist nie ein Schlüssel | `PUSHSCAN_WEB_PASSWORD_FILE` |
 | `[[target]]` `name` | erforderlich, max. 31 Zeichen, eindeutig | `NAME` |
-| `[[target]]` `output` | Ordner; Standard `<output>/<name>` | `NAME=DIR` |
+| `[[target]]` `output` | Ordner; `"."` ist der Ausgabeordner selbst; Standard `<output>/<name>` | `NAME=DIR` |
 | `[[target]]` `document_multipage` | `true` / `false` | `mp:` für den Dokumenttyp *Dokument* |
 | `[target.auto]` `resolution`, `format`, `size` | wie oben | die `@preset`-Optionen |
 | `[target.auto]` `multipage` | `true` / `false` | `mp:` für den Dokumenttyp *Automatisch* |
@@ -287,7 +287,7 @@ Die Liste wird durch Kommas getrennt, und jeder Eintrag hat eine von zwei Formen
 - `NAME` speichert in `<output>/NAME`. Andere Zeichen als Buchstaben, Ziffern,
   `.`, `_` und `-` werden zu `_`.
 - `NAME=DIR` speichert in `DIR`. Ein relatives `DIR` wird relativ zu `--output`
-  aufgelöst, ein absolutes unverändert verwendet.
+  aufgelöst, ein absolutes unverändert verwendet. `.` ist `--output` selbst, ohne Unterordner.
 
 Namen müssen eindeutig sein und die [Regeln für Namen auf dem Bedienfeld](#namen-auf-dem-bedienfeld)
 einhalten. Zwei Ziele dürfen sich keinen Ordner teilen (`a b` und `a_b`

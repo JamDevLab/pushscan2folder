@@ -1,41 +1,61 @@
 # Running on Windows
 
-pushscan2folder runs natively on Windows 10 and 11 as a single program, as an alternative to Canon's own scan software. It registers a name on the printer panel, polls the printer, and saves scans into a folder. Nothing needs to be installed.
+pushscan2folder runs natively on Windows 10 and 11 as a single program, as an alternative to Canon's own scan software. It registers a name on the printer panel, polls the printer, and saves scans into a folder. It comes with an installer that needs no administrator rights.
 
 Linux and Docker are described in the README. macOS is covered at the end of this page.
 
-## Download
+## Install
 
-1. Open the Releases page of the project on GitHub and download `pushscan2folder-VERSION-windows.zip` (and, if you like, `SHA256SUMS.txt`).
-2. To check the download, run `Get-FileHash pushscan2folder-VERSION-windows.zip` in PowerShell and compare it with `SHA256SUMS.txt`.
-3. Unpack the zip into a folder of your own, for example `C:\Tools\`. You get `C:\Tools\pushscan2folder\` with `pushscan2folder.exe` and an `_internal` folder; keep them together.
+1. Open the Releases page of the project on GitHub and download `pushscan2folder-VERSION-windows-setup.exe` (and, if you like, `SHA256SUMS.txt`).
+2. To check the download, run `Get-FileHash pushscan2folder-VERSION-windows-setup.exe` in PowerShell and compare it with `SHA256SUMS.txt`.
+3. Run the installer. It asks for its language (English or German). It installs for your user only, needs no administrator rights, and puts the program into `%LOCALAPPDATA%\Programs\pushscan2folder`.
 
-The program is built by GitHub Actions from the tagged source. It is not code signed.
+The installer creates a Start menu folder "pushscan2folder" with three entries:
+
+- "pushscan2folder" starts the program normally,
+- "pushscan2folder setup" runs the setup questions (`setup`),
+- "Stop pushscan2folder" stops the background instance (`stop`).
+
+A desktop icon is optional and unchecked by default. At the end the installer offers "Set up and start pushscan2folder". It opens the console window with the setup questions (see below).
+
+The installer and the program are built by GitHub Actions from the tagged source. The installer is built with Inno Setup around a PyInstaller folder build. It is not code signed.
+
+To update, run the newer installer. If the background instance runs, the installer stops it, replaces the files and starts it again. Your settings stay.
 
 ### Virus scanner warnings
 
-Programs packed with PyInstaller are sometimes flagged by virus scanners, for example by Microsoft Defender as `Trojan:Win32/Bearfoos.A!ml`. The `!ml` means a machine learning guess, not a known signature. To make this rare, the release is a folder build (nothing is unpacked at start) with a bootloader compiled by the build itself. If it still happens, check the checksum, restore the file from the protection history and, if you like, report the false positive at https://www.microsoft.com/wdsi/filesubmission. Please open an issue too, so it can be reported for the release.
+Programs packed with PyInstaller are sometimes flagged by virus scanners, for example by Microsoft Defender as `Trojan:Win32/Bearfoos.A!ml`. The `!ml` means a machine learning guess, not a known signature. To make this rare, the installed program is a folder build (nothing is unpacked at start) with a bootloader compiled by the build itself. If it still happens, check the checksum of the installer, restore the file from the protection history and, if you like, report the false positive at https://www.microsoft.com/wdsi/filesubmission. Please open an issue too, so it can be reported for the release.
 
 ## First run and SmartScreen
 
-Because the exe is unsigned, Windows SmartScreen shows "Windows protected your PC" the first time. Click "More info", then "Run anyway". If you downloaded it in a browser, you can also right click the file, open Properties, and tick "Unblock".
+Because the installer is unsigned, Windows SmartScreen may show "Windows protected your PC" when you run it. Click "More info", then "Run anyway". If you downloaded it in a browser, you can also right click the file, open Properties, and tick "Unblock".
 
-Double-click `pushscan2folder.exe`. A console window opens. When there is no config file yet, the program says hello and asks a few questions (this is the `setup` command):
+Start "pushscan2folder" from the Start menu (or the desktop icon, or `pushscan2folder.exe` in the program folder). A console window opens. When there is no config file yet, the program says hello and asks a few questions (this is the `setup` command):
 
 - the IP address or host name of the printer (it is checked right away, and you can type it again or continue anyway),
 - the name that appears on the printer panel (default `USER  PCNAME`),
-- the folder for scans (default `Documents\Scans`),
+- the folder for scans (default `Documents\Scans`; the scans go straight into this folder, not into a subfolder),
 - whether to turn on the web page (default no; if yes: port, bind address and a password typed twice),
 - whether to open the folder after each scan (default yes, see [Open the folder after a scan](#open-the-folder-after-a-scan)),
 - whether to start the program automatically when you log in (default yes).
 
 Then it writes `%APPDATA%\pushscan2folder\config.toml`, shows where everything is and asks "Run in the background now?" (default yes, see below). If you answer no, it asks "Start now?" and runs in the console window. The web password is not stored in `config.toml` but in `web_password.txt` next to it. `%APPDATA%` belongs to your user account only.
 
-On the next double-click the program just runs. It prints a short summary (version, printer, config file, panel name and folder, web page, log file) and "Press Ctrl+C to stop." Closing this window stops the program; the summary says so. The log shows the registration. On the printer panel, "Scan" then "Computer" lists a name like `USER  PCNAME`. Pick it and press Start. Stop the program with Ctrl+C, it releases the name on the printer before it exits.
+The next time you start it by double click or from the Start menu, the program finds the config file and shows the current settings: the printer, each panel name with its folder, and whether the web page is on. Then it asks:
+
+- `1` use these settings (default),
+- `2` change them (the setup questions, with your panel names and folders kept),
+- `3` start over with a new configuration. The old file is kept as `config.toml.bak`.
+
+If the config file is broken, the program says so and offers to start over, also keeping the `.bak` copy. If the program already runs in the background, it says so and tells you to run `pushscan2folder stop` first to change the settings.
+
+This question only appears on a double click. Typed in a command prompt with arguments, the program just runs, and so it does on Linux and macOS.
+
+With `1` the program runs. It prints a short summary (version, printer, config file, panel name and folder, web page, log file) and "Press Ctrl+C to stop." Closing this window stops the program; the summary says so. The log shows the registration. On the printer panel, "Scan" then "Computer" lists a name like `USER  PCNAME`. Pick it and press Start. Stop the program with Ctrl+C, it releases the name on the printer before it exits.
 
 If the console window was opened only for this program, it waits for Enter before it closes, so you can read the last message. This never happens in a window you opened yourself, when the input is not interactive, or when the program was started by the logon entry. `--no-pause` (or `PUSHSCAN_NO_PAUSE=1`) turns it off.
 
-To change the settings later, edit the config file or run the questions again. Setup keeps your panel names and folders if the file already has `[[target]]` entries:
+To change the settings later, edit the config file or run the questions again (also in the Start menu as "pushscan2folder setup"). Setup keeps your panel names and folders if the file already has `[[target]]` entries:
 
 ```
 .\pushscan2folder.exe setup
@@ -99,13 +119,16 @@ Setup stores the password in `web_password.txt` next to the config file and name
 | --- | --- |
 | Config file (written by setup) | `%APPDATA%\pushscan2folder\config.toml` |
 | Web password (if the web page is on) | `%APPDATA%\pushscan2folder\web_password.txt` |
-| Scans | `Documents\Scans` in your user folder (`C:\Users\NAME\Documents\Scans`), one subfolder per target |
+| Program | `%LOCALAPPDATA%\Programs\pushscan2folder` |
+| Scans | `Documents\Scans` in your user folder (`C:\Users\NAME\Documents\Scans`). Setup creates one target that saves straight into it. |
 | Log file | `%LOCALAPPDATA%\pushscan2folder\pushscan2folder.log` for the background instance and autostart; with `--log-file PATH` anywhere else |
 | Background instance files (lock, PID, stop request) | `%LOCALAPPDATA%\pushscan2folder\` |
 
 The program looks for the config file automatically. Use `--config PATH` to use another one. If your Documents folder is moved (for example by OneDrive), set `output` in the config file to the real path, because the default is `Documents` below your user folder.
 
 A new config file written by the web page is meant to be private. On Windows the "private" file mode (0600) cannot be applied; the file is protected by your user profile folder, which other standard users cannot read.
+
+A target with `output = "."` saves into the output directory itself, without a subfolder. That is what the setup questions write. Without `output`, a target saves into `<output>/<name>`.
 
 Folder names for targets are made valid for Windows: characters such as `<>:"/\|?*` become `_`, names that end in a dot are trimmed, and reserved device names (`CON`, `PRN`, `AUX`, `NUL`, `COM1` to `COM9`, `LPT1` to `LPT9`) get a `_` in front. A target called `CON` therefore saves into `_CON`.
 
@@ -145,7 +168,7 @@ This adds the entry `pushscan2folder` to your per-user Run list (`HKCU\Software\
 
 Keep a log with `--log-file`; the background instance has no visible console. Without it the log goes to the default path above. The file rotates at 1 MB and keeps 3 old files.
 
-Do not move or rename the exe afterwards. If you do, install again from the new place.
+Do not move or rename the exe afterwards. If you do, install again from the new place. The installer takes care of this when you update.
 
 To remove it:
 
@@ -157,15 +180,13 @@ You can also look at it in Task Manager, tab "Startup apps", or in Settings, App
 
 ## Uninstall
 
-```
-.\pushscan2folder.exe uninstall
-```
+Use Windows Settings, Apps, pushscan2folder. The uninstaller stops the background instance (the names leave the panel), removes the autostart entry and asks whether to delete the settings and the log too (default no). Your scans are never deleted.
 
-This stops the background instance (the names leave the panel), removes the autostart entry, and then lists the config folder (`%APPDATA%\pushscan2folder\`, with `config.toml` and `web_password.txt`) and the log and state folder (`%LOCALAPPDATA%\pushscan2folder\`). It asks whether to delete them, default no. Your scans are never deleted, and a folder that contains your scan folder is kept. At the end it reminds you to delete the `pushscan2folder` program folder yourself, because Windows cannot delete a program while it runs.
+`pushscan2folder uninstall` does the same cleanup from the command line. It stops the background instance, removes the autostart entry, and then lists the config folder (`%APPDATA%\pushscan2folder\`, with `config.toml` and `web_password.txt`) and the log and state folder (`%LOCALAPPDATA%\pushscan2folder\`). It asks whether to delete them, default no. Your scans are never deleted, and a folder that contains your scan folder is kept. On an installed copy it ends with the hint to remove the program under Settings, Apps. For a copy without the installer (for example from pip or the source) it reminds you to remove the program yourself, because Windows cannot delete a program while it runs.
 
 For scripts, `uninstall --yes` does not ask and keeps the config and log folders; `uninstall --yes --purge` deletes them. Folders given with `--config PATH` are not touched.
 
-On Linux and macOS the command does the same except for the autostart entry (the program file is removed the way it was installed, for example `pip uninstall pushscan2folder`). By hand on Windows: `--remove-autostart`, delete the exe, delete the two folders.
+On Linux and macOS the command does the same except for the autostart entry (the program file is removed the way it was installed, for example `pip uninstall pushscan2folder`). By hand on Windows: `--remove-autostart`, delete the program folder, delete the two data folders.
 
 ## Using it next to Canon IJ Scan Utility
 
@@ -173,7 +194,7 @@ Both can be installed at the same time. Each registers its own entry on the prin
 
 ## Running from source
 
-If you prefer not to use the exe, install Python 3.11 or newer from python.org and use the source of a release (or `git clone`):
+If you prefer not to use the installer, install Python 3.11 or newer from python.org and use the source of a release (or `git clone`):
 
 ```
 cd pushscan2folder

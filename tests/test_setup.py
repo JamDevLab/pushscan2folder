@@ -281,6 +281,16 @@ class SetupTests(unittest.TestCase):
         self.assertIn("start over", io_.text)
         self.assertFalse(self.path.with_name("config.toml.bak").exists())
 
+    def test_change_offers_no_subfolder_for_a_single_target(self):
+        self.path.parent.mkdir(parents=True)
+        self.path.write_text('printer = "192.0.2.1"\noutput = "s"\n\n[[target]]\nname = "PC"\n',
+                             encoding="utf-8")
+        # 2 = change, printer (keep), straight into s? yes (default), web no, start no
+        _, io_, _ = self.run_setup(["2", "", "", "n", "n"])
+        cfg = load_config_text(self.path.read_text())
+        self.assertEqual(cfg.targets[0].output, ".")
+        self.assertIn("instead of", "".join(io_.questions))
+
     def test_existing_config_choice_is_asked_again(self):
         self.path.parent.mkdir(parents=True)
         self.path.write_text('printer = "192.0.2.1"\n', encoding="utf-8")

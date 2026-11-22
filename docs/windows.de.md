@@ -1,41 +1,61 @@
 # Unter Windows nutzen
 
-pushscan2folder läuft unter Windows 10 und 11 nativ als einzelnes Programm, als Alternative zu Canons eigener Scan-Software. Es meldet einen Namen am Display des Druckers an, fragt den Drucker ab und speichert Scans in einen Ordner. Es muss nichts installiert werden.
+pushscan2folder läuft unter Windows 10 und 11 nativ als einzelnes Programm, als Alternative zu Canons eigener Scan-Software. Es meldet einen Namen am Display des Druckers an, fragt den Drucker ab und speichert Scans in einen Ordner. Es gibt einen Installer, der keine Administratorrechte braucht.
 
 Linux und Docker stehen in der README. macOS steht am Ende dieser Seite.
 
-## Download
+## Installieren
 
-1. Auf der Releases-Seite des Projekts bei GitHub `pushscan2folder-VERSION-windows.zip` herunterladen (und bei Bedarf `SHA256SUMS.txt`).
-2. Zur Kontrolle in PowerShell `Get-FileHash pushscan2folder-VERSION-windows.zip` ausführen und mit `SHA256SUMS.txt` vergleichen.
-3. Die Zip in einen eigenen Ordner entpacken, zum Beispiel `C:\Tools\`. Es entsteht `C:\Tools\pushscan2folder\` mit `pushscan2folder.exe` und einem Ordner `_internal`; beide gehören zusammen.
+1. Auf der Releases-Seite des Projekts bei GitHub `pushscan2folder-VERSION-windows-setup.exe` herunterladen (und bei Bedarf `SHA256SUMS.txt`).
+2. Zur Kontrolle in PowerShell `Get-FileHash pushscan2folder-VERSION-windows-setup.exe` ausführen und mit `SHA256SUMS.txt` vergleichen.
+3. Den Installer starten. Er fragt nach seiner Sprache (Englisch oder Deutsch). Er installiert nur für deinen Benutzer, braucht keine Administratorrechte und legt das Programm in `%LOCALAPPDATA%\Programs\pushscan2folder` ab.
 
-Das Programm wird von GitHub Actions aus dem getaggten Quellcode gebaut. Es ist nicht code-signiert.
+Der Installer legt im Startmenü einen Ordner "pushscan2folder" mit drei Einträgen an:
+
+- "pushscan2folder" startet das Programm normal,
+- "pushscan2folder einrichten" führt die Setup-Fragen aus (`setup`),
+- "pushscan2folder beenden" beendet die Hintergrundinstanz (`stop`).
+
+Ein Desktop-Symbol ist optional und standardmäßig nicht angehakt. Am Ende bietet der Installer "Set up and start pushscan2folder" an. Das öffnet das Konsolenfenster mit den Setup-Fragen (siehe unten).
+
+Installer und Programm werden von GitHub Actions aus dem getaggten Quellcode gebaut. Der Installer entsteht mit Inno Setup um einen PyInstaller-Ordner-Build. Er ist nicht code-signiert.
+
+Zum Aktualisieren startest du den neueren Installer. Läuft die Hintergrundinstanz, beendet der Installer sie, ersetzt die Dateien und startet sie wieder. Deine Einstellungen bleiben erhalten.
 
 ### Warnungen von Virenscannern
 
-Mit PyInstaller gepackte Programme werden manchmal von Virenscannern gemeldet, etwa von Microsoft Defender als `Trojan:Win32/Bearfoos.A!ml`. Das `!ml` steht für eine Vermutung des Machine-Learning-Modells, nicht für eine bekannte Signatur. Damit das selten passiert, ist das Release ein Ordner-Build (beim Start wird nichts entpackt) mit einem Starter, den der Build selbst kompiliert. Passiert es trotzdem: Prüfsumme kontrollieren, die Datei im Schutzverlauf wiederherstellen und den Fehlalarm bei Bedarf unter https://www.microsoft.com/wdsi/filesubmission melden. Bitte auch ein Issue öffnen, damit er für das Release gemeldet werden kann.
+Mit PyInstaller gepackte Programme werden manchmal von Virenscannern gemeldet, etwa von Microsoft Defender als `Trojan:Win32/Bearfoos.A!ml`. Das `!ml` steht für eine Vermutung des Machine-Learning-Modells, nicht für eine bekannte Signatur. Damit das selten passiert, ist das installierte Programm ein Ordner-Build (beim Start wird nichts entpackt) mit einem Starter, den der Build selbst kompiliert. Passiert es trotzdem: Prüfsumme des Installers kontrollieren, die Datei im Schutzverlauf wiederherstellen und den Fehlalarm bei Bedarf unter https://www.microsoft.com/wdsi/filesubmission melden. Bitte auch ein Issue öffnen, damit er für das Release gemeldet werden kann.
 
 ## Erster Start und SmartScreen
 
-Weil die exe nicht signiert ist, zeigt Windows SmartScreen beim ersten Start "Der Computer wurde durch Windows geschützt". Auf "Weitere Informationen" und dann auf "Trotzdem ausführen" klicken. Wenn du die Datei im Browser geladen hast, geht es auch über Rechtsklick, Eigenschaften, Haken bei "Zulassen".
+Weil der Installer nicht signiert ist, zeigt Windows SmartScreen beim Start eventuell "Der Computer wurde durch Windows geschützt". Auf "Weitere Informationen" und dann auf "Trotzdem ausführen" klicken. Wenn du die Datei im Browser geladen hast, geht es auch über Rechtsklick, Eigenschaften, Haken bei "Zulassen".
 
-Doppelklick auf `pushscan2folder.exe`. Es öffnet sich ein Konsolenfenster. Gibt es noch keine Konfigurationsdatei, begrüßt dich das Programm und stellt ein paar Fragen (das ist der Befehl `setup`):
+"pushscan2folder" im Startmenü starten (oder das Desktop-Symbol, oder `pushscan2folder.exe` im Programmordner). Es öffnet sich ein Konsolenfenster. Gibt es noch keine Konfigurationsdatei, begrüßt dich das Programm und stellt ein paar Fragen (das ist der Befehl `setup`):
 
 - IP-Adresse oder Hostname des Druckers (wird sofort geprüft; du kannst neu eingeben oder trotzdem weitermachen),
 - der Name, der am Druckerdisplay erscheint (Standard `BENUTZER  PCNAME`),
-- der Ordner für Scans (Standard `Dokumente\Scans`),
+- der Ordner für Scans (Standard `Dokumente\Scans`; die Scans landen direkt in diesem Ordner, nicht in einem Unterordner),
 - ob die Weboberfläche an sein soll (Standard nein; wenn ja: Port, Bind-Adresse und ein Passwort, zweimal eingegeben),
 - ob nach jedem Scan der Ordner geöffnet werden soll (Standard ja, siehe [Ordner nach dem Scan öffnen](#ordner-nach-dem-scan-öffnen)),
 - ob das Programm beim Anmelden automatisch starten soll (Standard ja).
 
 Danach schreibt es `%APPDATA%\pushscan2folder\config.toml`, zeigt, wo alles liegt, und fragt "Run in the background now?" (Standard ja, siehe unten). Bei nein fragt es "Start now?" und läuft im Konsolenfenster. Das Webpasswort steht nicht in `config.toml`, sondern in `web_password.txt` daneben. `%APPDATA%` gehört nur deinem Benutzerkonto.
 
-Beim nächsten Doppelklick läuft das Programm einfach los. Es zeigt eine kurze Zusammenfassung (Version, Drucker, Konfigurationsdatei, Name und Ordner, Weboberfläche, Logdatei) und "Press Ctrl+C to stop." Das Schließen dieses Fensters beendet das Programm; die Zusammenfassung sagt das auch. Das Log zeigt die Anmeldung. Am Druckerdisplay erscheint unter "Scannen" und "Computer" ein Name wie `BENUTZER  PCNAME`. Auswählen und Start drücken. Mit Strg+C beenden; das Programm gibt den Namen am Drucker vorher frei.
+Beim nächsten Start per Doppelklick oder aus dem Startmenü findet das Programm die Konfigurationsdatei und zeigt die aktuellen Einstellungen: den Drucker, jeden Namen mit seinem Ordner und ob die Weboberfläche an ist. Dann fragt es:
+
+- `1` diese Einstellungen verwenden (Standard),
+- `2` sie ändern (die Setup-Fragen, deine Namen und Ordner bleiben erhalten),
+- `3` neu anfangen mit einer neuen Konfiguration. Die alte Datei bleibt als `config.toml.bak` erhalten.
+
+Ist die Konfigurationsdatei defekt, sagt das Programm das und bietet an, neu anzufangen, ebenfalls mit der `.bak`-Kopie. Läuft das Programm schon im Hintergrund, sagt es das und verweist dich auf `pushscan2folder stop`, bevor du die Einstellungen ändern kannst.
+
+Diese Frage kommt nur bei einem Doppelklick. In einer Eingabeaufforderung mit Argumenten läuft das Programm einfach los, ebenso unter Linux und macOS.
+
+Bei `1` läuft das Programm. Es zeigt eine kurze Zusammenfassung (Version, Drucker, Konfigurationsdatei, Name und Ordner, Weboberfläche, Logdatei) und "Press Ctrl+C to stop." Das Schließen dieses Fensters beendet das Programm; die Zusammenfassung sagt das auch. Das Log zeigt die Anmeldung. Am Druckerdisplay erscheint unter "Scannen" und "Computer" ein Name wie `BENUTZER  PCNAME`. Auswählen und Start drücken. Mit Strg+C beenden; das Programm gibt den Namen am Drucker vorher frei.
 
 Wurde das Konsolenfenster nur für dieses Programm geöffnet, wartet es vor dem Schließen auf Enter, damit du die letzte Meldung lesen kannst. Das passiert nicht in einem Fenster, das du selbst geöffnet hast, nicht bei nicht interaktiver Eingabe und nicht beim Start über den Anmelde-Eintrag. `--no-pause` (oder `PUSHSCAN_NO_PAUSE=1`) schaltet es ab.
 
-Einstellungen später ändern: Konfigurationsdatei bearbeiten oder die Fragen erneut stellen lassen. Hat die Datei schon `[[target]]`-Einträge, bleiben deine Namen und Ordner beim Setup unverändert:
+Einstellungen später ändern: Konfigurationsdatei bearbeiten oder die Fragen erneut stellen lassen (auch im Startmenü als "pushscan2folder einrichten"). Hat die Datei schon `[[target]]`-Einträge, bleiben deine Namen und Ordner beim Setup unverändert:
 
 ```
 .\pushscan2folder.exe setup
@@ -99,13 +119,16 @@ Für den Autostart legst du das Passwort in eine Datei und setzt `PUSHSCAN_WEB_P
 | --- | --- |
 | Konfigurationsdatei (vom Setup geschrieben) | `%APPDATA%\pushscan2folder\config.toml` |
 | Webpasswort (wenn die Weboberfläche an ist) | `%APPDATA%\pushscan2folder\web_password.txt` |
-| Scans | `Dokumente\Scans` im Benutzerordner (`C:\Users\NAME\Documents\Scans`), je Ziel ein Unterordner |
+| Programm | `%LOCALAPPDATA%\Programs\pushscan2folder` |
+| Scans | `Dokumente\Scans` im Benutzerordner (`C:\Users\NAME\Documents\Scans`). Das Setup legt ein Ziel an, das direkt dort speichert. |
 | Logdatei | `%LOCALAPPDATA%\pushscan2folder\pushscan2folder.log` für die Hintergrundinstanz und den Autostart; mit `--log-file PFAD` woanders |
 | Dateien der Hintergrundinstanz (Lock, PID, Stopp-Anforderung) | `%LOCALAPPDATA%\pushscan2folder\` |
 
 Das Programm sucht die Konfigurationsdatei selbst. Mit `--config PFAD` nimmst du eine andere. Wenn dein Dokumente-Ordner verschoben ist (zum Beispiel durch OneDrive), setze `output` in der Konfigurationsdatei auf den echten Pfad, denn der Standard ist `Documents` unterhalb des Benutzerordners.
 
 Eine neue Konfigurationsdatei, die die Webseite schreibt, soll privat sein. Unter Windows lässt sich der Dateimodus 0600 nicht setzen; die Datei ist durch deinen Benutzerordner geschützt, den andere Standardbenutzer nicht lesen können.
+
+Ein Ziel mit `output = "."` speichert direkt im Ausgabeordner, ohne Unterordner. Das schreiben die Setup-Fragen. Ohne `output` speichert ein Ziel in `<output>/<name>`.
 
 Ordnernamen für Ziele werden Windows-tauglich gemacht: Zeichen wie `<>:"/\|?*` werden zu `_`, Punkte am Ende fallen weg, und reservierte Gerätenamen (`CON`, `PRN`, `AUX`, `NUL`, `COM1` bis `COM9`, `LPT1` bis `LPT9`) bekommen ein `_` davor. Ein Ziel namens `CON` speichert also nach `_CON`.
 
@@ -145,7 +168,7 @@ Das legt den Eintrag `pushscan2folder` in der Run-Liste deines Benutzers an (`HK
 
 Nutze `--log-file`; die Hintergrundinstanz hat keine sichtbare Konsole. Ohne die Option geht das Log in den oben genannten Standardpfad. Die Datei rotiert bei 1 MB und behält 3 alte Dateien.
 
-Die exe danach nicht verschieben oder umbenennen. Sonst den Befehl vom neuen Ort aus wiederholen.
+Die exe danach nicht verschieben oder umbenennen. Sonst den Befehl vom neuen Ort aus wiederholen. Beim Aktualisieren mit dem Installer ist das nicht nötig.
 
 Entfernen:
 
@@ -157,15 +180,13 @@ Du siehst den Eintrag auch im Task-Manager auf dem Tab "Autostart-Apps" oder unt
 
 ## Deinstallieren
 
-```
-.\pushscan2folder.exe uninstall
-```
+Über Windows-Einstellungen, Apps, pushscan2folder. Der Deinstaller beendet die Hintergrundinstanz (die Namen verschwinden vom Display), entfernt den Autostart-Eintrag und fragt, ob auch die Einstellungen und das Log gelöscht werden sollen (Standard nein). Deine Scans werden nie gelöscht.
 
-Das beendet die Hintergrundinstanz (die Namen verschwinden vom Display), entfernt den Autostart-Eintrag und listet dann den Konfigurationsordner (`%APPDATA%\pushscan2folder\`, mit `config.toml` und `web_password.txt`) sowie den Log- und Statusordner (`%LOCALAPPDATA%\pushscan2folder\`) auf. Es fragt, ob sie gelöscht werden sollen, Standard nein. Deine Scans werden nie gelöscht, und ein Ordner, der deinen Scan-Ordner enthält, bleibt erhalten. Am Ende erinnert es dich, den Programmordner `pushscan2folder` selbst zu löschen, denn Windows kann ein laufendes Programm nicht löschen.
+`pushscan2folder uninstall` räumt von der Kommandozeile aus genauso auf. Es beendet die Hintergrundinstanz, entfernt den Autostart-Eintrag und listet dann den Konfigurationsordner (`%APPDATA%\pushscan2folder\`, mit `config.toml` und `web_password.txt`) sowie den Log- und Statusordner (`%LOCALAPPDATA%\pushscan2folder\`) auf. Es fragt, ob sie gelöscht werden sollen, Standard nein. Deine Scans werden nie gelöscht, und ein Ordner, der deinen Scan-Ordner enthält, bleibt erhalten. Bei einer installierten Kopie endet es mit dem Hinweis, das Programm unter Einstellungen, Apps zu entfernen. Bei einer Kopie ohne Installer (zum Beispiel von pip oder aus dem Quellcode) erinnert es dich, das Programm selbst zu entfernen, denn Windows kann ein laufendes Programm nicht löschen.
 
 Für Skripte: `uninstall --yes` fragt nicht und behält Konfiguration und Log; `uninstall --yes --purge` löscht sie. Ordner, die über `--config PFAD` angegeben sind, werden nicht angefasst.
 
-Unter Linux und macOS macht der Befehl dasselbe, nur ohne Autostart-Eintrag (das Programm selbst entfernst du so, wie du es installiert hast, zum Beispiel `pip uninstall pushscan2folder`). Von Hand unter Windows: `--remove-autostart`, die exe löschen, die beiden Ordner löschen.
+Unter Linux und macOS macht der Befehl dasselbe, nur ohne Autostart-Eintrag (das Programm selbst entfernst du so, wie du es installiert hast, zum Beispiel `pip uninstall pushscan2folder`). Von Hand unter Windows: `--remove-autostart`, den Programmordner löschen, die beiden Datenordner löschen.
 
 ## Neben Canon IJ Scan Utility
 
@@ -173,7 +194,7 @@ Beide können gleichzeitig installiert sein. Jedes meldet einen eigenen Eintrag 
 
 ## Aus dem Quellcode starten
 
-Wer die exe nicht nutzen will, installiert Python 3.11 oder neuer von python.org und nimmt den Quellcode eines Releases (oder `git clone`):
+Wer den Installer nicht nutzen will, installiert Python 3.11 oder neuer von python.org und nimmt den Quellcode eines Releases (oder `git clone`):
 
 ```
 cd pushscan2folder

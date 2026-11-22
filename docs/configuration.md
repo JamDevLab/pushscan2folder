@@ -163,7 +163,7 @@ the file and the key, so typos are caught.
 | `[web]` `port` | 1 to 65535, default 8080 | `--web-port` |
 | `[web]` `password_file` | file holding the password; relative to the config file. The password itself is never a key | `PUSHSCAN_WEB_PASSWORD_FILE` |
 | `[[target]]` `name` | required, max 31 chars, unique | `NAME` |
-| `[[target]]` `output` | folder; default `<output>/<name>` | `NAME=DIR` |
+| `[[target]]` `output` | folder; `"."` is the output directory itself; default `<output>/<name>` | `NAME=DIR` |
 | `[[target]]` `document_multipage` | `true` / `false` | `mp:` for document type *Document* |
 | `[target.auto]` `resolution`, `format`, `size` | as above | the `@preset` options |
 | `[target.auto]` `multipage` | `true` / `false` | `mp:` for document type *Auto scan* |
@@ -273,7 +273,7 @@ The list is separated by commas, and each entry takes one of two forms:
 - `NAME` saves into `<output>/NAME`. Characters other than letters, digits, `.`, `_`
   and `-` become `_`.
 - `NAME=DIR` saves into `DIR`. A relative `DIR` is resolved against `--output`,
-  an absolute one is used as is.
+  an absolute one is used as is. `.` means `--output` itself, without a subfolder.
 
 Names must be unique and follow the [panel name rules](#panel-names). Two
 targets may not share a folder (`a b` and `a_b` both map to `a_b`, for

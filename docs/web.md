@@ -135,7 +135,7 @@ multi-page switches written explicitly.
 
 Folders set on the web page are always inside the output directory
 (`--output` / `PUSHSCAN_OUTPUT`, `/scans` in Docker). Enter a plain relative
-path such as `Paperless` or `office/invoices`. The page rejects absolute paths,
+path such as `Paperless` or `office/invoices`, or `.` for the output directory itself. The page rejects absolute paths,
 `..`, backslashes and symlinks that lead outside the output directory, so it
 cannot write anywhere else. A target whose folder is outside the output
 directory (for example `output = "/consume"`) can only be changed in the config

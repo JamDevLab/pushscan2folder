@@ -81,6 +81,9 @@ jobs:
           & "$app\pushscan2folder.exe" --version
           if ($LASTEXITCODE -ne 0) { exit 1 }
           if (-not (Test-Path "$app\unins000.exe")) { Write-Error "no uninstaller"; exit 1 }
+          # the form the installer's code uses: --no-pause before the subcommand
+          & "$app\pushscan2folder.exe" --no-pause status
+          if ($LASTEXITCODE -ne 1) { Write-Error "status should report not running"; exit 1 }
           Start-Process "$app\unins000.exe" -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES" -Wait
           # the uninstaller finishes in a copy of itself, so wait for the files to go
           for ($i = 0; $i -lt 30 -and (Test-Path "$app\pushscan2folder.exe"); $i++) { Start-Sleep 1 }

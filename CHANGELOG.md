@@ -36,10 +36,21 @@ All notable changes are documented here. The format follows
   password stays out of `config.toml`; setup stores it in `web_password.txt`.
 - Windows: a console opened only for the program waits for Enter before it
   closes. `--no-pause` / `PUSHSCAN_NO_PAUSE` turns it off; autostart sets it.
-- Windows support (zip with `pushscan2folder.exe`, folder build with a self-compiled bootloader to avoid virus scanner false alarms): default config in `%APPDATA%\pushscan2folder`, scans in
-  `Documents\Scans`, a single-file `pushscan2folder.exe` built by GitHub
-  Actions and attached to each release, `--install-autostart` /
+- Windows support (installer built with Inno Setup, per user, no administrator
+  rights, Start menu entries, uninstall via Settings > Apps, around a folder
+  build with a self-compiled bootloader to avoid virus scanner false alarms):
+  default config in `%APPDATA%\pushscan2folder`, scans in `Documents\Scans`,
+  built by GitHub Actions and attached to each release, `--install-autostart` /
   `--remove-autostart` (per-user Run key), see `docs/windows.md`.
+- A double click (or the Start menu entry) with an existing config file shows
+  the current settings and asks: use them (default), change them, or start over
+  (the old file is kept as `config.toml.bak`). A broken config file offers to
+  start over. If the program already runs in the background, it says so and
+  points to `pushscan2folder stop`. With arguments in a command prompt, and on
+  Linux and macOS, nothing changes.
+- A target with `output = "."` saves into the output directory itself. Setup
+  now writes its single target that way, so scans go straight into the chosen
+  folder, without a subfolder per name. The web page accepts `.` too.
 - `--log-file` / `PUSHSCAN_LOG_FILE`: rotating log file (1 MB x 3).
 - Tests run on Linux, Windows and macOS. macOS is untested on real hardware.
 - Issue forms for bug reports and printer reports.

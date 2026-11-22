@@ -207,6 +207,17 @@ class Setup:
                 return EXISTING_CHOICES[answer]
             self.out("Please answer 1, 2 or 3.")
 
+    def ask_same_folder(self, cfg: Config) -> None:
+        """One target that saves into a subfolder of its name (older setups):
+        offer to save straight into the output folder instead."""
+        if len(cfg.targets) != 1 or cfg.targets[0].output:
+            return
+        spec = cfg.targets[0]
+        base = Path(cfg.output or platform_support.default_output())
+        if self.yes_no(f"Save the scans straight into {base} instead of "
+                       f"{target_folder(base, spec)}?", True):
+            spec.output = SAME_FOLDER
+
     def backup(self) -> None:
         """Keep a copy of the old file before it is replaced."""
         backup = self.path.with_name(self.path.name + ".bak")
@@ -243,6 +254,7 @@ class Setup:
 
         cfg.printer = self.ask_printer(cfg.printer)
         if cfg.targets:
+            self.ask_same_folder(cfg)
             self.out("Your panel names and folders (the [[target]] entries) stay as they are. "
                      "Edit the config file to change them.")
         else:

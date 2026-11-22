@@ -147,7 +147,7 @@ geschrieben.
 
 Ordner, die du auf der Weboberfläche einträgst, liegen immer innerhalb des
 Ausgabeordners (`--output` / `PUSHSCAN_OUTPUT`, in Docker `/scans`). Gib einen
-einfachen relativen Pfad ein, etwa `Paperless` oder `buero/rechnungen`.
+einfachen relativen Pfad ein, etwa `Paperless` oder `buero/rechnungen`, oder `.` für den Ausgabeordner selbst.
 Absolute Pfade, `..`, Backslashes und Symlinks, die aus dem Ausgabeordner
 herausführen, lehnt die Seite ab, sie kann also nirgendwo anders schreiben.
 Ein Ziel mit einem Ordner außerhalb des Ausgabeordners (zum Beispiel
