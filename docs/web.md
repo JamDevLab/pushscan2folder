@@ -43,12 +43,19 @@ PYTHONPATH=src python3 -m pushscan2folder --printer 192.168.1.50 run
 | `PUSHSCAN_WEB_BIND` / `--web-bind` | address, default `0.0.0.0` (use `127.0.0.1` to keep it local) |
 | `PUSHSCAN_WEB_PASSWORD` | password, at least 8 characters |
 | `PUSHSCAN_WEB_PASSWORD_FILE` | file with the password (e.g. a Docker secret); used if the variable above is unset |
+| `[web] password_file` | config file key, same as above; used if both variables are unset. Relative paths are relative to the config file |
 | `PUSHSCAN_WEB_SECURE_COOKIE=1` | only behind an HTTPS reverse proxy: `Secure` cookie, see [HTTPS](#https-behind-a-reverse-proxy) |
 | `PUSHSCAN_WEB_PASSWORD_CHECK=0` | skip the password rules, see [Password options](#password-options) |
 | `PUSHSCAN_WEB_AUTH=0` | no login at all, see [Password options](#password-options) |
 
+The config file can hold a `[web]` table with `enabled`, `bind`, `port` and
+`password_file` (see [Configuration](configuration.md)); `pushscan2folder setup`
+writes it and stores the password in `web_password.txt` next to the config file.
+The command line and the environment win over the table. The Settings page shows
+the table read-only: the login cannot be changed from the web page.
+
 Without a valid password the program refuses to start (exit code 2). It never
-reads the password from the config file and never logs or shows it.
+reads the password itself from the config file and never logs or shows it.
 
 ## Password options
 
@@ -134,6 +141,10 @@ cannot write anywhere else. A target whose folder is outside the output
 directory (for example `output = "/consume"`) can only be changed in the config
 file. The web page shows it read-only and keeps it when you save; you can still
 delete it there.
+
+The raw editor also refuses changes to `output`, `printer` and the `[web]`
+table. `[web]` decides who can reach the page and where the password is, so it
+can only be changed in the file itself or with `pushscan2folder setup`.
 
 ## Security model
 

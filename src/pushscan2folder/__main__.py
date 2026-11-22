@@ -10,9 +10,10 @@ import signal
 import socket
 import subprocess
 import sys
+import traceback
 from pathlib import Path
 
-from . import __version__, autostart, panel, protocol, web
+from . import __version__, autostart, panel, protocol, web, wizard
 from .client import ChmpClient
 from .config import Config, ConfigError, load_config
 from .escl import EsclClient, ScanSettings
@@ -78,6 +79,62 @@ def find_config(argv=None) -> Config:
     return load_config(path) if path.is_file() else Config()
 
 
+COMMANDS = ("run", "probe", "scan", "setup")
+# Global options (before the subcommand): name -> takes a value.
+GLOBAL_OPTIONS = {"--config": True, "--printer": True, "--name": True, "--log-file": True,
+                  "--verbose": False, "-v": False, "--install-autostart": False,
+                  "--remove-autostart": False, "--no-pause": False}
+
+
+def _global_option(token: str) -> bool | None:
+    """None if token is no global option, else whether it takes a separate value
+    (False for "--x=value" and for flags). Unambiguous abbreviations count."""
+    if token in GLOBAL_OPTIONS:
+        return GLOBAL_OPTIONS[token]
+    name = token.split("=", 1)[0]
+    if name.startswith("--") and len(name) > 2:
+        matches = [o for o in GLOBAL_OPTIONS if o.startswith(name)]
+        if len(matches) == 1:
+            return GLOBAL_OPTIONS[matches[0]] and "=" not in token
+    return None
+
+
+def command_of(argv: list[str]) -> str | None:
+    """The subcommand in argv (global options in front), or None."""
+    i = 0
+    while i < len(argv):
+        takes_value = _global_option(argv[i])
+        if takes_value is None:
+            return argv[i] if argv[i] in COMMANDS else None
+        i += 2 if takes_value else 1
+    return None
+
+
+def with_default_command(argv: list[str]) -> list[str]:
+    """Without a subcommand the command is `run`: "--printer X --web" becomes
+    "--printer X run --web". Global options stay in front, everything else
+    goes behind `run`. argv with a subcommand (or --help/--version) is unchanged."""
+    front: list[str] = []
+    rest: list[str] = []
+    i = 0
+    while i < len(argv):
+        token = argv[i]
+        if token in ("-h", "--help", "--version", "--"):
+            return list(argv)
+        if not rest and token in COMMANDS:
+            return list(argv)  # explicit subcommand
+        takes_value = _global_option(token)
+        if takes_value is None:
+            rest.append(token)
+        else:
+            front.append(token)
+            if takes_value and i + 1 < len(argv):
+                i += 1
+                front.append(argv[i])
+        i += 1
+    return front + ["run"] + rest
+
+
 def _trim_arg(text: str) -> Trim:
     try:
         return parse_trim(text)
@@ -109,12 +166,15 @@ def build_parser(cfg: Config | None = None) -> argparse.ArgumentParser:
     p.add_argument("-v", "--verbose", action="store_true", default=env_bool("VERBOSE", cfg.verbose))
     p.add_argument("--log-file", default=env("LOG_FILE"), metavar="PATH",
                    help="also write the log to this file (rotating, 1 MB x 3 files)")
+    p.add_argument("--no-pause", action="store_true", default=env_bool("NO_PAUSE", False),
+                   help="Windows: never wait for Enter before the console window closes")
     p.add_argument("--install-autostart", action="store_true",
                    help="Windows only: start at logon with the other options given "
                         "(e.g. --config PATH --log-file PATH), then exit")
     p.add_argument("--remove-autostart", action="store_true",
                    help="Windows only: remove the logon entry, then exit")
-    sub = p.add_subparsers(dest="cmd", required=True)
+    sub = p.add_subparsers(dest="cmd", required=True, metavar="{run,probe,scan,setup}",
+                           description="without a subcommand, run is used")
     output_default = env("OUTPUT") or cfg.output or default_output()
 
     run = sub.add_parser("run", help="register and wait for scan requests")
@@ -144,14 +204,16 @@ def build_parser(cfg: Config | None = None) -> argparse.ArgumentParser:
                      help="document types for which platen scans offer further pages "
                           "on the panel (default: document)")
 
-    run.add_argument("--web", action="store_true", default=env_bool("WEB", False),
+    run.add_argument("--web", action="store_true", default=env_bool("WEB", cfg.web_enabled),
                      help="serve the optional web page (status, log, target editor); "
-                          "the password comes from PUSHSCAN_WEB_PASSWORD or "
-                          "PUSHSCAN_WEB_PASSWORD_FILE only")
-    run.add_argument("--web-port", type=int, default=int(env("WEB_PORT", 8080)),
+                          "the password comes from PUSHSCAN_WEB_PASSWORD, "
+                          "PUSHSCAN_WEB_PASSWORD_FILE or [web] password_file")
+    run.add_argument("--web-port", type=int, default=int(env("WEB_PORT", cfg.web_port or 8080)),
                      help="port of the web page (default: 8080)")
-    run.add_argument("--web-bind", default=env("WEB_BIND", "0.0.0.0"),
+    run.add_argument("--web-bind", default=env("WEB_BIND", cfg.web_bind or "0.0.0.0"),
                      help="address of the web page (default: 0.0.0.0)")
+
+    sub.add_parser("setup", help="ask a few questions and write the config file")
 
     probe = sub.add_parser("probe", help="register, poll once and release (debug)")
     probe.add_argument("--keep", action="store_true", help="do not release the session")
@@ -165,7 +227,8 @@ def build_parser(cfg: Config | None = None) -> argparse.ArgumentParser:
 
 def parse_args(argv=None) -> tuple[argparse.Namespace, Config]:
     """Load the config file, then parse the command line on top of it."""
-    cfg = find_config(argv)
+    argv = with_default_command(list(sys.argv[1:] if argv is None else argv))
+    cfg = Config() if command_of(argv) == "setup" else find_config(argv)  # setup reads its own
     return build_parser(cfg).parse_args(argv), cfg
 
 
@@ -239,37 +302,37 @@ def web_overrides(args: argparse.Namespace, cfg: Config,
     return overrides, effective
 
 
-EXAMPLE_PASSWORD = "change-me-please"  # placeholder in docker-compose.yml
+EXAMPLE_PASSWORD = wizard.EXAMPLE_PASSWORD
 
 
-def read_web_password(check: bool = True) -> str:
-    """Password from PUSHSCAN_WEB_PASSWORD or the file PUSHSCAN_WEB_PASSWORD_FILE
-    (e.g. a Docker secret). Never from the config file or the command line.
+def read_web_password(check: bool = True, config_file: str | None = None) -> str:
+    """Password from PUSHSCAN_WEB_PASSWORD, else the file PUSHSCAN_WEB_PASSWORD_FILE
+    (e.g. a Docker secret), else the file named by [web] password_file of the
+    config (config_file). Never the password itself from the config file or
+    the command line.
     check=False (PUSHSCAN_WEB_PASSWORD_CHECK=0) skips the length and example
     password rules; an empty password is always an error. Raises ValueError."""
     password = env("WEB_PASSWORD")
-    if password is None and env("WEB_PASSWORD_FILE"):
-        path = env("WEB_PASSWORD_FILE")
+    path = env("WEB_PASSWORD_FILE") or config_file
+    if password is None and path:
         try:
             password = Path(path).read_text(encoding="utf-8").rstrip("\r\n")
         except (OSError, UnicodeDecodeError) as exc:
-            raise ValueError(f"cannot read PUSHSCAN_WEB_PASSWORD_FILE {path}: "
+            raise ValueError(f"cannot read the web password file {path}: "
                              f"{getattr(exc, 'strerror', None) or exc}") from exc
     if not password:
-        raise ValueError("the web page needs a password: set PUSHSCAN_WEB_PASSWORD "
-                         "or PUSHSCAN_WEB_PASSWORD_FILE")
+        raise ValueError("the web page needs a password: set PUSHSCAN_WEB_PASSWORD, "
+                         "PUSHSCAN_WEB_PASSWORD_FILE or password_file in [web] of the "
+                         "config file (run 'pushscan2folder setup')")
     if not check:
         return password
-    if len(password) < web.MIN_PASSWORD_LENGTH:
-        raise ValueError(f"the web password must have at least "
-                         f"{web.MIN_PASSWORD_LENGTH} characters")
-    if password == EXAMPLE_PASSWORD:
-        raise ValueError("replace the example web password from docker-compose.yml "
-                         "with your own")
+    problem = wizard.password_problem(password)
+    if problem:
+        raise ValueError(problem)
     return password
 
 
-def web_password_setup() -> str | None:
+def web_password_setup(config_file: str | None = None) -> str | None:
     """Password for the web page, or None for PUSHSCAN_WEB_AUTH=0 (no login).
     Logs a warning for each of the two opt-outs. Raises ValueError."""
     if not env_switch("WEB_AUTH"):
@@ -277,7 +340,7 @@ def web_password_setup() -> str | None:
             logging.warning("PUSHSCAN_WEB_AUTH=0: the web password is ignored")
         return None
     check = env_switch("WEB_PASSWORD_CHECK")
-    password = read_web_password(check)
+    password = read_web_password(check, config_file)
     if not check:
         logging.warning("PUSHSCAN_WEB_PASSWORD_CHECK=0: the web password rules are "
                         "off, a short or example password is accepted")
@@ -366,16 +429,130 @@ def autostart_main(argv: list[str]) -> int:
     return 0
 
 
+def should_pause(platform: str, process_count: int | None, stdin_isatty: bool,
+                 no_pause: bool = False, frozen: bool = False) -> bool:
+    """True if the console window may close before the user can read the output:
+    Windows, a console that belongs to this program alone (opened by a double
+    click), an interactive stdin to wait on, and no opt-out. The one-file exe
+    runs as a bootloader process plus the program itself, so two processes
+    count as alone there."""
+    if no_pause or platform != "win32" or not stdin_isatty or process_count is None:
+        return False
+    return process_count <= (2 if frozen else 1)
+
+
+def console_process_count() -> int | None:
+    """Number of processes attached to this console (Windows), None if unknown."""
+    if not is_windows():
+        return None
+    try:
+        import ctypes
+        buffer = (ctypes.c_uint * 4)()
+        count = ctypes.windll.kernel32.GetConsoleProcessList(buffer, len(buffer))
+        return int(count) or None
+    except Exception:
+        return None
+
+
+def pause_before_exit(raw: list[str]) -> None:
+    """Keep a console window opened just for this program readable."""
+    try:
+        no_pause = autostart.NO_PAUSE in raw or env_bool("NO_PAUSE", False)
+        if not is_windows() or no_pause:
+            return
+        if not should_pause(sys.platform, console_process_count(), sys.stdin.isatty(),
+                            frozen=bool(getattr(sys, "frozen", False))):
+            return
+        print("\nPress Enter to close this window.", flush=True)
+        input()
+    except (Exception, KeyboardInterrupt):
+        pass
+
+
+def summary_lines(args: argparse.Namespace, targets: list[Target], config_path: Path | None,
+                  web_url: str | None) -> list[str]:
+    """What the program does, shown at the start of `run`."""
+    lines = [f"pushscan2folder {__version__}", f"printer: {args.printer}",
+             f"config file: {config_path if config_path else 'none'}"]
+    lines += [f"panel name {t.name!r} -> {t.outdir}" for t in targets]
+    lines.append(f"web page: {web_url}" if web_url else "web page off")
+    if args.log_file:
+        lines.append(f"log file: {args.log_file}")
+    lines.append("Press Ctrl+C to stop.")
+    return lines
+
+
+def setup_main(args: argparse.Namespace | None) -> int:
+    """`setup`: ask, write the config file, then optionally start."""
+    path = Path(args.config) if args and args.config else default_config_path()
+    session = wizard.Setup(path, autostart_fn=autostart_main, default_name=default_name())
+    try:
+        start = session.run()
+    except (EOFError, KeyboardInterrupt):
+        print("\nSetup cancelled.")
+        return 1
+    except (ConfigError, OSError) as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
+    if not start:
+        print("Run pushscan2folder again to start.")
+        return 0
+    rest = ["--config", str(path)]
+    if args is not None:
+        rest += (["--verbose"] if args.verbose else []) + \
+                (["--log-file", args.log_file] if args.log_file else []) + \
+                ([autostart.NO_PAUSE] if args.no_pause else [])
+    return _main(rest)
+
+
+def first_start(raw: list[str]) -> bool:
+    """Started without any argument by hand (double click), with a console
+    to talk to and nothing configured yet."""
+    try:
+        interactive = sys.stdin.isatty()
+    except (AttributeError, ValueError):
+        interactive = False
+    return (not raw and interactive and not env("CONFIG") and not env("PRINTER")
+            and not default_config_path().is_file())
+
+
 def main(argv=None) -> int:
+    """Entry point. In a console window opened just for this program (Windows,
+    double click) it waits for Enter before returning, so the text stays readable."""
+    raw = list(sys.argv[1:] if argv is None else argv)
+    exit_exc = None
+    try:
+        result = _main(argv)
+    except SystemExit as exc:  # argparse errors, --help
+        result, exit_exc = exc.code, exc
+    except KeyboardInterrupt:
+        print("\nInterrupted.", file=sys.stderr)
+        result = 130
+    except Exception:
+        traceback.print_exc()
+        result = 1
+    pause_before_exit(raw)
+    if exit_exc is not None:
+        raise exit_exc
+    return result
+
+
+def _main(argv=None) -> int:
     setup_console()
     raw = list(sys.argv[1:] if argv is None else argv)
     if "--install-autostart" in raw or "--remove-autostart" in raw:
         return autostart_main(raw)
+    if first_start(raw):
+        print(f"Welcome to pushscan2folder {__version__}.\n"
+              "No configuration found, so a few questions follow (Ctrl+C to cancel).\n")
+        return setup_main(None)
     try:
         args, cfg = parse_args(argv)
     except ConfigError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2
+    if args.cmd == "setup":
+        return setup_main(args)
     if getattr(args, "multipage", "off") not in MULTIPAGE_MODES:
         print(f"error: invalid PUSHSCAN_MULTIPAGE {args.multipage!r}", file=sys.stderr)
         return 2
@@ -389,9 +566,13 @@ def main(argv=None) -> int:
         return 2
     web_enabled = args.cmd == "run" and args.web
     web_password = None
+    config_path = Path(args.config) if args.config else default_config_path()
+    web_file = cfg.web_password_file
+    if web_file and not Path(web_file).is_absolute():
+        web_file = str(config_path.parent / web_file)  # relative to the config file
     if web_enabled:
         try:
-            web_password = web_password_setup()
+            web_password = web_password_setup(web_file)
         except ValueError as exc:
             print(f"error: {exc}", file=sys.stderr)
             return 2
@@ -437,10 +618,14 @@ def main(argv=None) -> int:
         return 0
 
     install_signal_handlers(service)
-    for t in targets:
-        logging.info("target %r -> %s", t.name, t.outdir)
-    logging.info("waiting for scan requests from %s", args.printer)
+    used_config = config_path if args.config or config_path.is_file() else None
+
+    def announce(web_url=None):
+        for line in summary_lines(args, targets, used_config, web_url):
+            logging.info("%s", line)
+
     if not web_enabled:
+        announce()
         service.run()
         return 0
 
@@ -450,7 +635,7 @@ def main(argv=None) -> int:
     overrides, effective = web_overrides(args, cfg, argv)
     ctx = web.WebContext(service, log_buffer, args.printer, args.output,
                          multipage_mode=args.multipage,
-                         config_path=Path(args.config) if args.config else default_config_path(),
+                         config_path=config_path,
                          targets_from_env=bool(args.targets),
                          overrides=overrides, effective=effective)
     try:
@@ -464,9 +649,11 @@ def main(argv=None) -> int:
     if web_password is None:
         logging.warning("web page without password: anyone who can reach port %d can "
                         "change targets and settings", server.server_address[1])
-    logging.info("web page on http://%s:%d%s", args.web_bind, server.server_address[1],
-                 " (Secure cookie: use it through an HTTPS reverse proxy)"
-                 if server.secure_cookie else "")
+    local = args.web_bind in ("127.0.0.1", "localhost", "::1")
+    announce(f"http://{args.web_bind}:{server.server_address[1]} "
+             + ("(this PC only)" if local else "(reachable from the network)")
+             + (" (Secure cookie: use it through an HTTPS reverse proxy)"
+                if server.secure_cookie else ""))
     try:
         service.run()
     finally:

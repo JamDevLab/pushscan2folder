@@ -525,6 +525,13 @@ def check_raw_config(ctx: WebContext, new: Config, disk: Config) -> list[str]:
     if new.printer != disk.printer and new.printer != ctx.printer:
         errors.append('"printer" cannot be changed on the web page, only in the file '
                       "itself or by the environment.")
+    # [web] decides who can reach this page and which file holds the password:
+    # changing it from here could expose the page or point the password at a
+    # file with known content.
+    web_keys = ("web_enabled", "web_bind", "web_port", "web_password_file")
+    if any(getattr(new, k) != getattr(disk, k) for k in web_keys):
+        errors.append('The [web] table cannot be changed on the web page, only in the '
+                      "file itself or with pushscan2folder setup.")
     locked = locked_specs(disk, ctx.output)
     for spec in new.targets:
         if web_editable(spec, ctx.output):
@@ -1137,6 +1144,15 @@ def render_settings(ctx: WebContext, csrf: str, values: dict[str, str] | None = 
         note = (f' Overridden by {esc(ctx.overrides[key])}.' if key in ctx.overrides else "")
         ro.append(f'<p class="ro">{label}: <code>{esc(shown)}</code></p>'
                   f'<p class="hint">Not editable here. Change it in the config file.{note}</p>')
+    try:
+        disk = read_config(ctx)
+    except ConfigError:
+        disk = Config()
+    ro.append('<p class="ro">Web page: <code>enabled={}, bind={}, port={}, password file={}'
+              '</code></p><p class="hint">The <code>[web]</code> table of the config file is '
+              "not editable here, so the login cannot be changed from the web page.</p>".format(
+                  esc("yes" if disk.web_enabled else "no"), esc(disk.web_bind or "-"),
+                  esc(disk.web_port or "-"), esc(disk.web_password_file or "-")))
     parts.append('<h2>Fixed</h2><section>' + "".join(ro) + "</section>")
 
     def v(key):

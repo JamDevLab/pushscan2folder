@@ -16,13 +16,31 @@ Die exe wird von GitHub Actions aus dem getaggten Quellcode gebaut. Sie ist nich
 
 Weil die exe nicht signiert ist, zeigt Windows SmartScreen beim ersten Start "Der Computer wurde durch Windows geschützt". Auf "Weitere Informationen" und dann auf "Trotzdem ausführen" klicken. Wenn du die Datei im Browser geladen hast, geht es auch über Rechtsklick, Eigenschaften, Haken bei "Zulassen".
 
-PowerShell oder Eingabeaufforderung im Ordner öffnen und mit der IP-Adresse des Druckers starten:
+Doppelklick auf `pushscan2folder.exe`. Es öffnet sich ein Konsolenfenster. Gibt es noch keine Konfigurationsdatei, begrüßt dich das Programm und stellt ein paar Fragen (das ist der Befehl `setup`):
+
+- IP-Adresse oder Hostname des Druckers (wird sofort geprüft; du kannst neu eingeben oder trotzdem weitermachen),
+- der Name, der am Druckerdisplay erscheint (Standard `BENUTZER  PCNAME`),
+- der Ordner für Scans (Standard `Dokumente\Scans`),
+- ob die Weboberfläche an sein soll (Standard nein; wenn ja: Port, Bind-Adresse und ein Passwort, zweimal eingegeben),
+- ob das Programm beim Anmelden automatisch starten soll (Standard ja).
+
+Danach schreibt es `%APPDATA%\pushscan2folder\config.toml`, zeigt, wo alles liegt, und fragt "Start now?". Das Webpasswort steht nicht in `config.toml`, sondern in `web_password.txt` daneben. `%APPDATA%` gehört nur deinem Benutzerkonto.
+
+Beim nächsten Doppelklick läuft das Programm einfach los. Es zeigt eine kurze Zusammenfassung (Version, Drucker, Konfigurationsdatei, Name und Ordner, Weboberfläche, Logdatei) und "Press Ctrl+C to stop." Das Log zeigt die Anmeldung. Am Druckerdisplay erscheint unter "Scannen" und "Computer" ein Name wie `BENUTZER  PCNAME`. Auswählen und Start drücken. Mit Strg+C beenden; das Programm gibt den Namen am Drucker vorher frei.
+
+Wurde das Konsolenfenster nur für dieses Programm geöffnet, wartet es vor dem Schließen auf Enter, damit du die letzte Meldung lesen kannst. Das passiert nicht in einem Fenster, das du selbst geöffnet hast, nicht bei nicht interaktiver Eingabe und nicht beim Start über den Anmelde-Eintrag. `--no-pause` (oder `PUSHSCAN_NO_PAUSE=1`) schaltet es ab.
+
+Einstellungen später ändern: Konfigurationsdatei bearbeiten oder die Fragen erneut stellen lassen. Hat die Datei schon `[[target]]`-Einträge, bleiben deine Namen und Ordner beim Setup unverändert:
 
 ```
-.\pushscan2folder.exe --printer 192.168.1.50 run
+.\pushscan2folder.exe setup
 ```
 
-Das Log zeigt die Anmeldung. Am Druckerdisplay erscheint unter "Scannen" und "Computer" ein Name wie `BENUTZER  PCNAME`. Auswählen und Start drücken. Gescannt wird nach `Dokumente\Scans` im Benutzerordner. Mit Strg+C beenden; das Programm gibt den Namen am Drucker vorher frei.
+Die Kommandozeile geht auch ohne Fragen. Der Unterbefehl `run` ist der Standard und kann entfallen:
+
+```
+.\pushscan2folder.exe --printer 192.168.1.50
+```
 
 Alle Optionen: `.\pushscan2folder.exe --help`.
 
@@ -33,7 +51,7 @@ Das Programm baut nur ausgehende Verbindungen zum Drucker auf. Für das Scannen 
 Anders ist es bei der optionalen Webseite. Mit `--web` lauscht das Programm auf einem Port (Standard 8080) und bindet an alle Adressen, wenn du nichts anderes angibst. Windows fragt dann einmal, ob das Programm in privaten oder öffentlichen Netzwerken erlaubt sein soll. Damit die Seite nur auf diesem PC erreichbar ist:
 
 ```
-.\pushscan2folder.exe --printer 192.168.1.50 run --web --web-bind 127.0.0.1
+.\pushscan2folder.exe --printer 192.168.1.50 --web --web-bind 127.0.0.1
 ```
 
 Dann ist nichts für andere Geräte erreichbar und es ist keine Firewall-Regel nötig. Im Browser http://127.0.0.1:8080 öffnen. Die Webseite braucht ein Passwort, das vor dem Start gesetzt wird, zum Beispiel:
@@ -48,9 +66,10 @@ Für den Autostart legst du das Passwort in eine Datei und setzt `PUSHSCAN_WEB_P
 
 | Was | Ort |
 | --- | --- |
-| Konfigurationsdatei (optional) | `%APPDATA%\pushscan2folder\config.toml` |
+| Konfigurationsdatei (vom Setup geschrieben) | `%APPDATA%\pushscan2folder\config.toml` |
+| Webpasswort (wenn die Weboberfläche an ist) | `%APPDATA%\pushscan2folder\web_password.txt` |
 | Scans | `Dokumente\Scans` im Benutzerordner (`C:\Users\NAME\Documents\Scans`), je Ziel ein Unterordner |
-| Logdatei | nur mit `--log-file PFAD` |
+| Logdatei | mit `--log-file PFAD`; das Setup nimmt für den Autostart `%LOCALAPPDATA%\pushscan2folder\pushscan2folder.log` |
 
 Das Programm sucht die Konfigurationsdatei selbst. Mit `--config PFAD` nimmst du eine andere. Wenn dein Dokumente-Ordner verschoben ist (zum Beispiel durch OneDrive), setze `output` in der Konfigurationsdatei auf den echten Pfad, denn der Standard ist `Documents` unterhalb des Benutzerordners.
 
@@ -78,9 +97,11 @@ name = "Paperless"
 output = "paperless/inbox"    # unterhalb des Ausgabeordners
 ```
 
-Danach genügt `.\pushscan2folder.exe run`. Die übrigen Schlüssel stehen in `config.example.toml`.
+Danach genügt `.\pushscan2folder.exe`. Die übrigen Schlüssel stehen in `config.example.toml`.
 
 ## Beim Anmelden starten
+
+Die Fragen des Setups bieten das an und führen den folgenden Befehl für dich aus. Von Hand:
 
 ```
 .\pushscan2folder.exe --config "%APPDATA%\pushscan2folder\config.toml" --log-file "%APPDATA%\pushscan2folder\pushscan2folder.log" --install-autostart
@@ -88,7 +109,7 @@ Danach genügt `.\pushscan2folder.exe run`. Die übrigen Schlüssel stehen in `c
 
 (In PowerShell `$env:APPDATA` statt `%APPDATA%` schreiben.)
 
-Das legt den Eintrag `pushscan2folder` in der Run-Liste deines Benutzers an (`HKCU\Software\Microsoft\Windows\CurrentVersion\Run`). Dafür sind keine Administratorrechte nötig. Bei jeder Anmeldung startet das Programm minimiert in einem Konsolenfenster, mit genau den Optionen, die du neben `--install-autostart` angegeben hast. Pfade werden absolut gespeichert. Eine Aufgabe in der Aufgabenplanung mit Anmelde-Trigger bräuchte auf den meisten Systemen Administratorrechte, deshalb wird die Run-Liste benutzt.
+Das legt den Eintrag `pushscan2folder` in der Run-Liste deines Benutzers an (`HKCU\Software\Microsoft\Windows\CurrentVersion\Run`). Dafür sind keine Administratorrechte nötig. Bei jeder Anmeldung startet das Programm minimiert in einem Konsolenfenster, mit genau den Optionen, die du neben `--install-autostart` angegeben hast, plus `--no-pause`, damit das Fenster nie auf Enter wartet. Pfade werden absolut gespeichert. Eine Aufgabe in der Aufgabenplanung mit Anmelde-Trigger bräuchte auf den meisten Systemen Administratorrechte, deshalb wird die Run-Liste benutzt.
 
 Nutze `--log-file`, sonst gibt es von einem beim Anmelden gestarteten Programm kein sichtbares Log. Die Datei rotiert bei 1 MB und behält 3 alte Dateien.
 
@@ -120,7 +141,7 @@ Wer die exe nicht nutzen will, installiert Python 3.11 oder neuer von python.org
 ```
 cd pushscan2folder
 $env:PYTHONPATH = "src"
-python -m pushscan2folder --printer 192.168.1.50 run
+python -m pushscan2folder --printer 192.168.1.50
 ```
 
 Es gelten dieselben Optionen. Mit `python -m pushscan2folder --install-autostart ...` richtest du den Autostart für die Python-Variante ein. Tests: `python -m unittest discover -s tests`.
@@ -137,7 +158,7 @@ Nicht paketiert und nicht auf echter Hardware getestet; die Unit-Tests laufen in
 
 ```
 cd pushscan2folder
-PYTHONPATH=src python3 -m pushscan2folder --printer 192.168.1.50 run
+PYTHONPATH=src python3 -m pushscan2folder --printer 192.168.1.50
 ```
 
 Die Konfiguration liegt in `~/.config/pushscan2folder/config.toml` (oder `$XDG_CONFIG_HOME`), Scans gehen nach `~/Documents/Scans`, wenn du kein `output` setzt. `--install-autostart` gibt es nur für Windows; unter macOS nimmst du für einen Hintergrunddienst einen launchd-Agent. Rückmeldungen von Mac-Nutzern sind willkommen.

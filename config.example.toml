@@ -29,6 +29,16 @@ trim_top = 0               # mm
 trim_right = 0             # mm; TR8550: about 3 (to be verified)
 trim_bottom = 0            # mm; TR8550: about 2 (to be verified)
 
+# Optional web page (status, log, target editor). The password is NOT stored
+# here: put it in a file of its own (`pushscan2folder setup` does this) and
+# name the file. The web page shows this table but cannot change it.
+# Precedence: --web / --web-port / --web-bind and PUSHSCAN_WEB* win over it.
+# [web]
+# enabled = true
+# bind = "127.0.0.1"         # only this PC; 0.0.0.0 = reachable from the network
+# port = 8080
+# password_file = "web_password.txt"   # relative to this config file
+
 # One [[target]] per entry on the printer panel (name: max 31 chars, unique).
 
 # All defaults: scans go to /scans/Scans

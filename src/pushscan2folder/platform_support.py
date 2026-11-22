@@ -30,6 +30,16 @@ def default_config_path() -> Path:
     return Path(base) / "pushscan2folder" / "config.toml"
 
 
+def default_log_path() -> Path:
+    """Log file of the autostart entry: %LOCALAPPDATA%\\pushscan2folder\\pushscan2folder.log
+    on Windows, otherwise below ~/.local/state (XDG_STATE_HOME)."""
+    if is_windows():
+        base = os.environ.get("LOCALAPPDATA") or str(Path.home() / "AppData" / "Local")
+    else:
+        base = os.environ.get("XDG_STATE_HOME") or str(Path.home() / ".local" / "state")
+    return Path(base) / "pushscan2folder" / "pushscan2folder.log"
+
+
 def default_output() -> Path:
     """Where scans go without any setting. ./scans on Linux (a container maps
     /scans through its config); Documents/Scans of the user on Windows and macOS."""

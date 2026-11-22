@@ -1093,6 +1093,11 @@ class RawConfigTests(WebTestBase):
         (self.dir / "scans" / "evil").symlink_to(self.dir)   # safe_dirname("evil")
         self.assertRejected(self.START + '\n[[target]]\nname = "evil"\n', 'Target "evil"')
 
+    def test_web_table_cannot_be_changed(self):
+        for extra in ('\n[web]\nenabled = true\n', '\n[web]\nbind = "0.0.0.0"\n',
+                      '\n[web]\npassword_file = "known.txt"\n'):
+            self.assertRejected(self.START + extra, "The [web] table cannot be changed")
+
     def test_unchanged_locked_target_is_accepted(self):
         text = self.START.replace('output = "inbox"', 'output = "inbox2"') + "# edit\n"
         self.assertEqual(self.save(text)[0], 303)

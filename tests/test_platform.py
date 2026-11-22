@@ -187,7 +187,7 @@ class AutostartTests(unittest.TestCase):
     def test_source_command_uses_module(self):
         with self.frozen(False):
             value = autostart.run_value(["run", "--printer", "1.2.3.4"])
-        self.assertIn('"-m" "pushscan2folder" "run" "--printer" "1.2.3.4"', value)
+        self.assertIn('"-m" "pushscan2folder" "--no-pause" "run" "--printer" "1.2.3.4"', value)
         self.assertEqual(value.count('"run"'), 1)
 
     def test_paths_become_absolute(self):

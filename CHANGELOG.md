@@ -7,6 +7,17 @@ All notable changes are documented here. The format follows
 
 ### Added
 
+- `run` is the default subcommand: `pushscan2folder --printer X` just runs.
+- `run` logs a startup summary (version, printer, config file, panel names and
+  folders, web page, log file) and "'NAME' is now on the printer panel under
+  Scan to PC".
+- `pushscan2folder setup`: interactive questions (printer with a reachability
+  check, panel name, folder, web page, Windows autostart) that write the config
+  file. It starts by itself on a double click without a config file.
+- `[web]` config table (`enabled`, `bind`, `port`, `password_file`). The
+  password stays out of `config.toml`; setup stores it in `web_password.txt`.
+- Windows: a console opened only for the program waits for Enter before it
+  closes. `--no-pause` / `PUSHSCAN_NO_PAUSE` turns it off; autostart sets it.
 - Windows support: default config in `%APPDATA%\pushscan2folder`, scans in
   `Documents\Scans`, a single-file `pushscan2folder.exe` built by GitHub
   Actions and attached to each release, `--install-autostart` /

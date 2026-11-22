@@ -289,7 +289,8 @@ class PushScanService:
 
     def register(self, target: Target) -> None:
         target.session = self.chmp.register(target.name).session
-        log.info("registered %r, session 0x%x", target.name, target.session)
+        log.info("%r is now on the printer panel under Scan to PC", target.name)
+        log.debug("session of %r: 0x%x", target.name, target.session)
 
     def release(self) -> None:
         for target in self.targets:

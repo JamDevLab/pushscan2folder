@@ -44,12 +44,20 @@ PYTHONPATH=src python3 -m pushscan2folder --printer 192.168.1.50 run
 | `PUSHSCAN_WEB_BIND` / `--web-bind` | Adresse, Standard `0.0.0.0` (mit `127.0.0.1` bleibt sie lokal) |
 | `PUSHSCAN_WEB_PASSWORD` | Passwort, mindestens 8 Zeichen |
 | `PUSHSCAN_WEB_PASSWORD_FILE` | Datei mit dem Passwort (z. B. ein Docker-Secret); wird genutzt, wenn die Variable darüber nicht gesetzt ist |
+| `[web] password_file` | Schlüssel der Konfigurationsdatei, wie oben; wird genutzt, wenn beide Variablen fehlen. Relative Pfade gelten relativ zur Konfigurationsdatei |
 | `PUSHSCAN_WEB_SECURE_COOKIE=1` | nur hinter einem HTTPS-Reverse-Proxy: `Secure`-Cookie siehe [HTTPS](#https-hinter-einem-reverse-proxy) |
 | `PUSHSCAN_WEB_PASSWORD_CHECK=0` | Passwortregeln überspringen siehe [Passwort-Optionen](#passwort-optionen) |
 | `PUSHSCAN_WEB_AUTH=0` | gar keine Anmeldung siehe [Passwort-Optionen](#passwort-optionen) |
 
+Die Konfigurationsdatei kann eine Tabelle `[web]` mit `enabled`, `bind`, `port`
+und `password_file` enthalten (siehe [Konfiguration](configuration.de.md));
+`pushscan2folder setup` schreibt sie und legt das Passwort in `web_password.txt`
+neben der Konfigurationsdatei ab. Kommandozeile und Umgebung haben Vorrang vor der
+Tabelle. Die Einstellungsseite zeigt die Tabelle nur an: Die Anmeldung lässt sich
+nicht über die Weboberfläche ändern.
+
 Ohne gültiges Passwort startet das Programm nicht (Exit-Code 2). Es liest das
-Passwort nie aus der Konfigurationsdatei und schreibt oder zeigt es nie.
+Passwort selbst nie aus der Konfigurationsdatei und schreibt oder zeigt es nie.
 
 ## Passwort-Optionen
 
@@ -146,6 +154,11 @@ Ein Ziel mit einem Ordner außerhalb des Ausgabeordners (zum Beispiel
 `output = "/consume"`) lässt sich nur in der Konfigurationsdatei ändern. Die
 Weboberfläche zeigt es schreibgeschützt an und behält es beim Speichern bei;
 löschen kannst du es dort trotzdem.
+
+Der Rohtext-Editor lehnt außerdem Änderungen an `output`, `printer` und am
+Abschnitt `[web]` ab. `[web]` legt fest, wer die Seite erreicht und wo das
+Passwort liegt; das lässt sich nur in der Datei selbst oder mit
+`pushscan2folder setup` ändern.
 
 ## Sicherheitsmodell
 

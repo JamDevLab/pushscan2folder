@@ -18,6 +18,9 @@ VALUE_NAME = "pushscan2folder"
 # does not run in the current directory.
 PATH_OPTIONS = ("--config", "--log-file", "--output")
 COMMANDS = ("run", "probe", "scan")
+# Marks a start from the logon entry. `cmd /c start` opens a console of its
+# own, which must never wait for Enter when the program ends.
+NO_PAUSE = "--no-pause"
 
 
 def program_command() -> list[str]:
@@ -55,7 +58,7 @@ def _quote(token: str) -> str:
 def run_value(args: list[str]) -> str:
     """The value of the Run entry. Every token is quoted, so spaces and shell
     characters in paths are harmless; `start` gets an empty-looking title and /min."""
-    tokens = program_command() + absolute_args(args)
+    tokens = program_command() + ([] if NO_PAUSE in args else [NO_PAUSE]) + absolute_args(args)
     if not any(a in COMMANDS for a in args):
         tokens.append("run")
     return 'cmd.exe /c start "pushscan2folder" /min ' + " ".join(_quote(t) for t in tokens)

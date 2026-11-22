@@ -18,6 +18,11 @@ Back to the [README](../README.md).
 
 ## Subcommands
 
+Without a subcommand, `run` is used, so `pushscan2folder --printer 192.168.1.50`
+works like `pushscan2folder --printer 192.168.1.50 run`. Global options
+(`--config`, `--printer`, `--name`, `--log-file`, `--verbose`) go before the
+subcommand; run options such as `--output` may be given without it.
+
 Run the service:
 
 ```sh
@@ -26,7 +31,28 @@ PYTHONPATH=src python3 -m pushscan2folder --printer 192.168.1.50 run --output ./
 
 Then choose the host on the printer panel (scan to PC) and start the scan.
 
-Other subcommands:
+At the start `run` logs a short summary: version, printer, config file,
+each panel name with its folder, the web page address (or "web page off") and
+the log file. The printer accepting a name is logged as "'NAME' is now on the
+printer panel under Scan to PC", each saved scan as "saved PATH".
+
+The other subcommands:
+
+```sh
+# Ask a few questions (printer, panel name, folder, web page, on Windows
+# autostart) and write the config file. Run it again to change the file.
+PYTHONPATH=src python3 -m pushscan2folder setup
+```
+
+The password of the web page is never written to `config.toml`: setup stores it
+in `web_password.txt` next to the config file (mode 0600 where supported) and
+names that file in `[web] password_file`. If the file already has `[[target]]`
+entries, setup asks only for printer, web page and autostart and leaves the
+targets alone. Setup also starts by itself when the program is started
+without any argument in a console and no config file exists yet; non-interactive
+starts (Docker, services) never ask anything.
+
+`probe` and `scan` are for debugging:
 
 ```sh
 # Register, poll once, print the raw answers and release (debugging).
@@ -60,10 +86,11 @@ environment wins over the [configuration file](#configuration-file). More in
 | `--targets`    | `PUSHSCAN_TARGETS`    | -                   | run           | Several panel entries, each with its own folder and optional preset, see [Multiple targets](#multiple-targets). Replaces `--name` for `run` |
 | `--ignore-panel` | `PUSHSCAN_IGNORE_PANEL` | off             | run           | Ignore the panel settings and always use the four options above (`--format`, `--color`, `--resolution`, `--source`). Env var: `1`, `true` or `yes`. Also disables multi-page scans |
 | `--multipage`  | `PUSHSCAN_MULTIPAGE`  | `document`          | run           | `document`, `auto`, `both` or `off`, see [Multi-page scans](#multi-page-scans-from-the-platen) |
+| `--no-pause`   | `PUSHSCAN_NO_PAUSE`   | off                 | all           | Windows: never wait for Enter before a console window opened for this program closes. The autostart entry sets it |
 | `--web`        | `PUSHSCAN_WEB`        | off                 | run           | Serve the [web page](web.md). Env var: `1`, `true` or `yes` |
 | `--web-port`   | `PUSHSCAN_WEB_PORT`   | `8080`              | run           | Port of the web page |
 | `--web-bind`   | `PUSHSCAN_WEB_BIND`   | `0.0.0.0`           | run           | Address of the web page |
-| -              | `PUSHSCAN_WEB_PASSWORD` / `PUSHSCAN_WEB_PASSWORD_FILE` | (required with `--web`) | run | Web password (min. 8 characters), or a file containing it. Env only, never the config file |
+| -              | `PUSHSCAN_WEB_PASSWORD` / `PUSHSCAN_WEB_PASSWORD_FILE` | (required with `--web`) | run | Web password (min. 8 characters), or a file containing it. Env, or `[web] password_file` of the config file. Never the password itself in the config file |
 | `--keep`       | -                  | off                 | probe         | Do not release the session |
 
 Notes:
@@ -100,6 +127,10 @@ the file and the key, so typos are caught.
 | `[defaults]` `source` | `auto`, `platen`, `adf` | `--source` |
 | `[defaults]` `size` | `a4`, `letter`, `legal`, `10x15`, `13x18` | scan area without panel data |
 | `[defaults]` `trim_left`, `trim_top`, `trim_right`, `trim_bottom` | number, mm, 0 to 50 | `--trim` |
+| `[web]` `enabled` | `true` / `false` | `--web` |
+| `[web]` `bind` | address, default `0.0.0.0` | `--web-bind` |
+| `[web]` `port` | 1 to 65535, default 8080 | `--web-port` |
+| `[web]` `password_file` | file holding the password; relative to the config file. The password itself is never a key | `PUSHSCAN_WEB_PASSWORD_FILE` |
 | `[[target]]` `name` | required, max 31 chars, unique | `NAME` |
 | `[[target]]` `output` | folder; default `<output>/<name>` | `NAME=DIR` |
 | `[[target]]` `document_multipage` | `true` / `false` | `mp:` for document type *Document* |

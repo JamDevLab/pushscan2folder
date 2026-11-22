@@ -18,6 +18,11 @@ Zurück zur [README](../README.de.md).
 
 ## Unterbefehle
 
+Ohne Unterbefehl wird `run` genommen: `pushscan2folder --printer 192.168.1.50`
+entspricht `pushscan2folder --printer 192.168.1.50 run`. Globale Optionen
+(`--config`, `--printer`, `--name`, `--log-file`, `--verbose`) stehen vor dem
+Unterbefehl; Optionen von `run` wie `--output` gehen auch ohne ihn.
+
 Dienst starten:
 
 ```sh
@@ -26,7 +31,29 @@ PYTHONPATH=src python3 -m pushscan2folder --printer 192.168.1.50 run --output ./
 
 Wähle dann den Host am Bedienfeld des Druckers (Scannen an PC) und starte den Scan.
 
-Weitere Unterbefehle:
+Beim Start schreibt `run` eine kurze Zusammenfassung ins Log: Version, Drucker,
+Konfigurationsdatei, jeden Namen mit seinem Ordner, die Adresse der Weboberfläche
+(oder "web page off") und die Logdatei. Dass der Drucker einen Namen angenommen hat,
+steht als "'NAME' is now on the printer panel under Scan to PC" im Log, jeder
+gespeicherte Scan als "saved PFAD".
+
+Der Unterbefehl `setup`:
+
+```sh
+# Stellt ein paar Fragen (Drucker, Name, Ordner, Weboberfläche, unter Windows
+# Autostart) und schreibt die Konfigurationsdatei. Erneut starten zum Ändern.
+PYTHONPATH=src python3 -m pushscan2folder setup
+```
+
+Das Passwort der Weboberfläche kommt nie in `config.toml`: Das Setup legt es in
+`web_password.txt` neben der Konfigurationsdatei ab (Modus 0600, wo möglich) und
+trägt die Datei in `[web] password_file` ein. Hat die Datei schon
+`[[target]]`-Einträge, fragt das Setup nur nach Drucker, Weboberfläche und
+Autostart und lässt die Ziele unverändert. Das Setup startet auch von selbst, wenn
+das Programm ohne Argument in einer Konsole gestartet wird und es noch keine
+Konfigurationsdatei gibt; nicht interaktive Starts (Docker, Dienste) fragen nie.
+
+Weitere Unterbefehle zur Fehlersuche:
 
 ```sh
 # Register, poll once, print the raw answers and release (debugging).
@@ -60,10 +87,11 @@ Mehr unter [Vorrang](#vorrang).
 | `--targets`    | `PUSHSCAN_TARGETS`    | -                   | run           | Mehrere Einträge auf dem Bedienfeld, jeder mit eigenem Ordner und optionaler Voreinstellung, siehe [Mehrere Ziele](#mehrere-ziele). Ersetzt `--name` für `run` |
 | `--ignore-panel` | `PUSHSCAN_IGNORE_PANEL` | aus             | run           | Ignoriert die Einstellungen vom Bedienfeld und nutzt immer die vier Optionen oben (`--format`, `--color`, `--resolution`, `--source`). Umgebungsvariable: `1`, `true` oder `yes`. Deaktiviert auch mehrseitige Scans |
 | `--multipage`  | `PUSHSCAN_MULTIPAGE`  | `document`          | run           | `document`, `auto`, `both` oder `off`, siehe [Mehrseitige Scans](#mehrseitige-scans-vom-vorlagenglas) |
+| `--no-pause`   | `PUSHSCAN_NO_PAUSE`   | aus                 | alle          | Windows: nicht auf Enter warten, bevor sich ein nur für dieses Programm geöffnetes Konsolenfenster schließt. Der Autostart-Eintrag setzt es |
 | `--web`        | `PUSHSCAN_WEB`        | aus                 | run           | Stellt die [Weboberfläche](web.de.md) bereit. Umgebungsvariable: `1`, `true` oder `yes` |
 | `--web-port`   | `PUSHSCAN_WEB_PORT`   | `8080`              | run           | Port der Weboberfläche |
 | `--web-bind`   | `PUSHSCAN_WEB_BIND`   | `0.0.0.0`           | run           | Adresse der Weboberfläche |
-| -              | `PUSHSCAN_WEB_PASSWORD` / `PUSHSCAN_WEB_PASSWORD_FILE` | (erforderlich mit `--web`) | run | Passwort der Weboberfläche (mind. 8 Zeichen) oder eine Datei, die es enthält. Nur per Umgebung, nie in der Konfigurationsdatei |
+| -              | `PUSHSCAN_WEB_PASSWORD` / `PUSHSCAN_WEB_PASSWORD_FILE` | (erforderlich mit `--web`) | run | Passwort der Weboberfläche (mind. 8 Zeichen) oder eine Datei, die es enthält. Per Umgebung oder `[web] password_file` der Konfigurationsdatei. Das Passwort selbst nie in der Konfigurationsdatei |
 | `--keep`       | -                  | aus                 | probe         | Gibt die Sitzung nicht frei |
 
 Hinweise:
@@ -102,6 +130,10 @@ Meldung abgelehnt, die Datei und Schlüssel nennt, damit Tippfehler auffallen.
 | `[defaults]` `source` | `auto`, `platen`, `adf` | `--source` |
 | `[defaults]` `size` | `a4`, `letter`, `legal`, `10x15`, `13x18` | Scanbereich ohne Daten vom Bedienfeld |
 | `[defaults]` `trim_left`, `trim_top`, `trim_right`, `trim_bottom` | Zahl, mm, 0 bis 50 | `--trim` |
+| `[web]` `enabled` | `true` / `false` | `--web` |
+| `[web]` `bind` | Adresse, Standard `0.0.0.0` | `--web-bind` |
+| `[web]` `port` | 1 bis 65535, Standard 8080 | `--web-port` |
+| `[web]` `password_file` | Datei mit dem Passwort; relativ zur Konfigurationsdatei. Das Passwort selbst ist nie ein Schlüssel | `PUSHSCAN_WEB_PASSWORD_FILE` |
 | `[[target]]` `name` | erforderlich, max. 31 Zeichen, eindeutig | `NAME` |
 | `[[target]]` `output` | Ordner; Standard `<output>/<name>` | `NAME=DIR` |
 | `[[target]]` `document_multipage` | `true` / `false` | `mp:` für den Dokumenttyp *Dokument* |

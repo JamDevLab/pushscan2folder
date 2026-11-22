@@ -53,6 +53,10 @@ class Config:
     trim_top: float | None = None
     trim_right: float | None = None
     trim_bottom: float | None = None
+    web_enabled: bool | None = None
+    web_bind: str | None = None
+    web_port: int | None = None
+    web_password_file: str | None = None
     targets: list[TargetSpec] = field(default_factory=list)
 
     def trim(self) -> Trim:
@@ -141,6 +145,14 @@ class _Reader:
             raise self._bad(key, f"a number of mm from 0 to {TRIM_MAX_MM:g}")
         return float(value)
 
+    def port(self, key: str) -> int | None:
+        if key not in self.table:
+            return None
+        value = self.table[key]
+        if isinstance(value, bool) or not isinstance(value, int) or not 1 <= value <= 65535:
+            raise self._bad(key, "a port number from 1 to 65535")
+        return value
+
     def table_(self, key: str) -> dict | None:
         if key not in self.table:
             return None
@@ -211,7 +223,7 @@ def load_config_text(text: str, fname: str = "config.toml") -> Config:
 def parse_config(data: dict, fname: str = "config.toml") -> Config:
     """Validate an already parsed TOML table. Raises ConfigError."""
     top = _Reader(data, fname, {"printer", "output", "interval", "verbose",
-                                "ignore_panel", "multipage", "defaults", "target"})
+                                "ignore_panel", "multipage", "defaults", "web", "target"})
     cfg = Config(printer=top.str_("printer"), interval=top.number("interval"),
                  verbose=top.bool_("verbose"), ignore_panel=top.bool_("ignore_panel"),
                  multipage=top.str_("multipage", tuple(MULTIPAGE_MODES)))
@@ -232,6 +244,14 @@ def parse_config(data: dict, fname: str = "config.toml") -> Config:
         cfg.trim_top = d.mm("trim_top")
         cfg.trim_right = d.mm("trim_right")
         cfg.trim_bottom = d.mm("trim_bottom")
+
+    web = top.table_("web")
+    if web is not None:
+        w = _Reader(web, f"{fname}: [web]", {"enabled", "bind", "port", "password_file"})
+        cfg.web_enabled = w.bool_("enabled")
+        cfg.web_bind = w.str_("bind")
+        cfg.web_port = w.port("port")
+        cfg.web_password_file = w.str_("password_file")
 
     raw_targets = data.get("target", [])
     if not isinstance(raw_targets, list):
@@ -306,6 +326,10 @@ def dump_config(cfg: Config) -> str:
                        ("trim_right", cfg.trim_right), ("trim_bottom", cfg.trim_bottom)])
     if defaults:
         blocks.append(["[defaults]"] + defaults)
+    web = _lines([("enabled", cfg.web_enabled), ("bind", cfg.web_bind),
+                  ("port", cfg.web_port), ("password_file", cfg.web_password_file)])
+    if web:
+        blocks.append(["[web]"] + web)
     for spec in cfg.targets:
         block = ["[[target]]"] + _lines([("name", spec.name), ("output", spec.output),
                                          ("document_multipage", spec.document_multipage)])
