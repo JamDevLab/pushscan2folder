@@ -11,6 +11,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from . import panel
+from .desktop import OPEN_MODES
 from .platform_support import replace_file
 from .protocol import check_name
 from .service import (MULTIPAGE_MODES, RESOLUTIONS, TRIM_MAX_MM, Target, Trim,
@@ -48,6 +49,7 @@ class Config:
     color: str | None = None
     format: str | None = None
     source: str | None = None
+    open_after_scan: str | None = None
     size: str | None = None
     trim_left: float | None = None
     trim_top: float | None = None
@@ -233,13 +235,14 @@ def parse_config(data: dict, fname: str = "config.toml") -> Config:
     defaults = top.table_("defaults")
     if defaults is not None:
         d = _Reader(defaults, f"{fname}: [defaults]",
-                    {"resolution", "color", "format", "source", "size",
+                    {"resolution", "color", "format", "source", "size", "open_after_scan",
                      "trim_left", "trim_top", "trim_right", "trim_bottom"})
         cfg.resolution = d.int_("resolution", RESOLUTIONS)
         cfg.color = d.str_("color", COLORS)
         cfg.format = d.str_("format", FORMATS)
         cfg.source = d.str_("source", SOURCES)
         cfg.size = d.str_("size", tuple(panel.REGIONS))
+        cfg.open_after_scan = d.str_("open_after_scan", OPEN_MODES)
         cfg.trim_left = d.mm("trim_left")
         cfg.trim_top = d.mm("trim_top")
         cfg.trim_right = d.mm("trim_right")
@@ -322,6 +325,7 @@ def dump_config(cfg: Config) -> str:
         blocks.append(top)
     defaults = _lines([("resolution", cfg.resolution), ("color", cfg.color),
                        ("format", cfg.format), ("source", cfg.source), ("size", cfg.size),
+                       ("open_after_scan", cfg.open_after_scan),
                        ("trim_left", cfg.trim_left), ("trim_top", cfg.trim_top),
                        ("trim_right", cfg.trim_right), ("trim_bottom", cfg.trim_bottom)])
     if defaults:

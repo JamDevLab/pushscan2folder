@@ -22,11 +22,12 @@ Double-click `pushscan2folder.exe`. A console window opens. When there is no con
 - the name that appears on the printer panel (default `USER  PCNAME`),
 - the folder for scans (default `Documents\Scans`),
 - whether to turn on the web page (default no; if yes: port, bind address and a password typed twice),
+- whether to open the folder after each scan (default yes, see [Open the folder after a scan](#open-the-folder-after-a-scan)),
 - whether to start the program automatically when you log in (default yes).
 
-Then it writes `%APPDATA%\pushscan2folder\config.toml`, shows where everything is and asks "Start now?". The web password is not stored in `config.toml` but in `web_password.txt` next to it. `%APPDATA%` belongs to your user account only.
+Then it writes `%APPDATA%\pushscan2folder\config.toml`, shows where everything is and asks "Run in the background now?" (default yes, see below). If you answer no, it asks "Start now?" and runs in the console window. The web password is not stored in `config.toml` but in `web_password.txt` next to it. `%APPDATA%` belongs to your user account only.
 
-On the next double-click the program just runs. It prints a short summary (version, printer, config file, panel name and folder, web page, log file) and "Press Ctrl+C to stop." The log shows the registration. On the printer panel, "Scan" then "Computer" lists a name like `USER  PCNAME`. Pick it and press Start. Stop the program with Ctrl+C, it releases the name on the printer before it exits.
+On the next double-click the program just runs. It prints a short summary (version, printer, config file, panel name and folder, web page, log file) and "Press Ctrl+C to stop." Closing this window stops the program; the summary says so. The log shows the registration. On the printer panel, "Scan" then "Computer" lists a name like `USER  PCNAME`. Pick it and press Start. Stop the program with Ctrl+C, it releases the name on the printer before it exits.
 
 If the console window was opened only for this program, it waits for Enter before it closes, so you can read the last message. This never happens in a window you opened yourself, when the input is not interactive, or when the program was started by the logon entry. `--no-pause` (or `PUSHSCAN_NO_PAUSE=1`) turns it off.
 
@@ -43,6 +44,32 @@ You can also use the command line without any questions. The subcommand `run` is
 ```
 
 To see all options: `.\pushscan2folder.exe --help`.
+
+## Run in the background
+
+A program started by double click lives in its console window, and closing the window ends it. To keep it running without a window:
+
+```
+.\pushscan2folder.exe start
+```
+
+`start` launches the program detached in the background with the current config and returns at once. It takes the same options as `run` (for example `--config PATH`, `--web`). The background process has no console window and keeps running after you close the window you started it from. Its log goes to `%LOCALAPPDATA%\pushscan2folder\pushscan2folder.log` unless you give `--log-file PATH`. If an instance is already running, `start` refuses and says so.
+
+```
+.\pushscan2folder.exe status
+.\pushscan2folder.exe stop
+```
+
+- `status` says whether the background instance runs, its PID and log file, and shows the last lines of the log. The exit code is 0 when it runs and 1 when it does not.
+- `stop` asks the instance to stop. It leaves its loop within a few seconds (a scan in progress finishes first) and releases its names on the printer, so they leave the panel. A detached process gets no Ctrl+C, so `stop` writes a stop request file that the instance checks about once per second. If the instance has not ended after 30 seconds, it is terminated, and the printer drops the names after about a minute.
+
+The instance keeps a lock file, a PID file and the stop request file in `%LOCALAPPDATA%\pushscan2folder\`. The lock is held by the running process and dropped by Windows when it ends, so a leftover file after a crash or reboot never blocks the next `start`.
+
+A foreground `run` is not part of this. It does not use the lock, `stop` does not stop it, and `start` does not notice it. Do not run both for the same name.
+
+## Open the folder after a scan
+
+With `open_after_scan = "folder"` in `[defaults]` (or `--open-after-scan folder`, `PUSHSCAN_OPEN_AFTER_SCAN=folder`), Explorer opens the folder with the new file selected after each scan. With `"file"` the scan itself opens in your PDF viewer. The default is `"off"`. Setup asks "Open the folder after each scan?" and writes `"folder"` for yes. A scan with several pages or files opens once. If opening fails, the log shows a warning and the scan is kept anyway. The option is also in the Settings page of the web interface. It needs a logged-in desktop user, so it is meant for a PC, not for a server.
 
 ## Firewall
 
@@ -69,7 +96,8 @@ Setup stores the password in `web_password.txt` next to the config file and name
 | Config file (written by setup) | `%APPDATA%\pushscan2folder\config.toml` |
 | Web password (if the web page is on) | `%APPDATA%\pushscan2folder\web_password.txt` |
 | Scans | `Documents\Scans` in your user folder (`C:\Users\NAME\Documents\Scans`), one subfolder per target |
-| Log file | with `--log-file PATH`; setup uses `%LOCALAPPDATA%\pushscan2folder\pushscan2folder.log` for autostart |
+| Log file | `%LOCALAPPDATA%\pushscan2folder\pushscan2folder.log` for the background instance and autostart; with `--log-file PATH` anywhere else |
+| Background instance files (lock, PID, stop request) | `%LOCALAPPDATA%\pushscan2folder\` |
 
 The program looks for the config file automatically. Use `--config PATH` to use another one. If your Documents folder is moved (for example by OneDrive), set `output` in the config file to the real path, because the default is `Documents` below your user folder.
 
@@ -109,9 +137,9 @@ The setup questions offer this and run the command below for you. By hand:
 
 (In PowerShell write `$env:APPDATA` instead of `%APPDATA%`.)
 
-This adds the entry `pushscan2folder` to your per-user Run list (`HKCU\Software\Microsoft\Windows\CurrentVersion\Run`). It needs no administrator rights. At every logon the program starts minimised in a console window, with exactly the options you gave next to `--install-autostart` plus `--no-pause`, so the window never waits for Enter. Paths are stored as absolute paths. A Task Scheduler logon task would need administrator rights on most systems, which is why the Run list is used.
+This adds the entry `pushscan2folder` to your per-user Run list (`HKCU\Software\Microsoft\Windows\CurrentVersion\Run`). It needs no administrator rights. At every logon the entry runs `pushscan2folder start` with exactly the options you gave next to `--install-autostart` plus `--no-pause`. That starts the background instance (see above), so no window stays open. The console window of the short `start` call may flash for a moment. If an instance is already running, the entry does nothing. Paths are stored as absolute paths. A Task Scheduler logon task would need administrator rights on most systems, which is why the Run list is used.
 
-Keep a log with `--log-file`; a started-at-logon program has no visible console otherwise. The file rotates at 1 MB and keeps 3 old files.
+Keep a log with `--log-file`; the background instance has no visible console. Without it the log goes to the default path above. The file rotates at 1 MB and keeps 3 old files.
 
 Do not move or rename the exe afterwards. If you do, install again from the new place.
 
@@ -125,10 +153,15 @@ You can also look at it in Task Manager, tab "Startup apps", or in Settings, App
 
 ## Uninstall
 
-1. Run `pushscan2folder.exe --remove-autostart`.
-2. Delete the exe.
-3. Delete `%APPDATA%\pushscan2folder\` if you want to remove the config and the log.
-4. Your scans in `Documents\Scans` stay until you delete them.
+```
+.\pushscan2folder.exe uninstall
+```
+
+This stops the background instance (the names leave the panel), removes the autostart entry, and then lists the config folder (`%APPDATA%\pushscan2folder\`, with `config.toml` and `web_password.txt`) and the log and state folder (`%LOCALAPPDATA%\pushscan2folder\`). It asks whether to delete them, default no. Your scans are never deleted, and a folder that contains your scan folder is kept. At the end it reminds you to delete `pushscan2folder.exe` yourself, because Windows cannot delete a program while it runs.
+
+For scripts, `uninstall --yes` does not ask and keeps the config and log folders; `uninstall --yes --purge` deletes them. Folders given with `--config PATH` are not touched.
+
+On Linux and macOS the command does the same except for the autostart entry (the program file is removed the way it was installed, for example `pip uninstall pushscan2folder`). By hand on Windows: `--remove-autostart`, delete the exe, delete the two folders.
 
 ## Using it next to Canon IJ Scan Utility
 
@@ -149,7 +182,7 @@ The same command line options apply. Use `python -m pushscan2folder --install-au
 ## Limits and notes
 
 - The tool is tested by GitHub Actions on Windows (unit tests and the exe build). The author does not run it on a real Windows machine every day; please open an issue if something fails.
-- Ctrl+C and Ctrl+Break stop it cleanly. Closing the console window also stops it, but Windows gives the program only a few seconds then; if the name is not released in time, the printer drops it after about a minute.
+- Run with `start` to keep it going without a window. In a foreground window, Ctrl+C and Ctrl+Break stop it cleanly. Closing the console window also stops it, but Windows gives the program only a few seconds then; if the name is not released in time, the printer drops it after about a minute.
 - Console output replaces characters your console code page cannot show with `?`. The log file is UTF-8.
 
 ## macOS

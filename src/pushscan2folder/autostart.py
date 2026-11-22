@@ -2,8 +2,9 @@
 
 This uses the per-user Run key (HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run),
 written with reg.exe. It needs no administrator rights. A Task Scheduler
-logon trigger would need them on most systems. The program is started
-minimised through `cmd /c start /min`, so it does not cover the desktop.
+logon trigger would need them on most systems. The entry runs
+`pushscan2folder start`, which launches the background instance (no console
+window that stays) and returns.
 
 The functions here only build command lines (testable on any platform);
 main() in __main__ runs them on Windows."""
@@ -17,9 +18,8 @@ VALUE_NAME = "pushscan2folder"
 # Options whose value is a path; made absolute because the autostart entry
 # does not run in the current directory.
 PATH_OPTIONS = ("--config", "--log-file", "--output")
-COMMANDS = ("run", "probe", "scan")
-# Marks a start from the logon entry. `cmd /c start` opens a console of its
-# own, which must never wait for Enter when the program ends.
+COMMANDS = ("run", "probe", "scan", "start")
+# Marks a start from the logon entry: its console must never wait for Enter.
 NO_PAUSE = "--no-pause"
 
 
@@ -57,11 +57,11 @@ def _quote(token: str) -> str:
 
 def run_value(args: list[str]) -> str:
     """The value of the Run entry. Every token is quoted, so spaces and shell
-    characters in paths are harmless; `start` gets an empty-looking title and /min."""
+    characters in paths are harmless."""
     tokens = program_command() + ([] if NO_PAUSE in args else [NO_PAUSE]) + absolute_args(args)
     if not any(a in COMMANDS for a in args):
-        tokens.append("run")
-    return 'cmd.exe /c start "pushscan2folder" /min ' + " ".join(_quote(t) for t in tokens)
+        tokens.append("start")
+    return " ".join(_quote(t) for t in tokens)
 
 
 def install_command(args: list[str]) -> list[str]:

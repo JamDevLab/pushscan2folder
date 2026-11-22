@@ -98,7 +98,7 @@ error, so a typo cannot turn a protection off.
   "pending" until then). The per-target Auto scan options show the current
   default, for example "Default (300 dpi)", which comes from the Settings page.
 - Settings (`/settings`) edits `resolution`, `color`, `format`, `source`,
-  `size` and the four `trim_*` values of `[defaults]`, and `multipage`,
+  `size`, `open_after_scan` and the four `trim_*` values of `[defaults]`, and `multipage`,
   `ignore_panel` and `interval`, each with a short explanation. Values are
   validated with the same rules as the config file; an empty field removes the
   key. `printer` and the base `output` folder are shown read-only. If an

@@ -39,6 +39,7 @@ jobs:
       - name: Build pushscan2folder.exe
         run: >
           pyinstaller --onefile --name pushscan2folder --paths src
+          --icon packaging/pushscan2folder.ico
           --add-data "src/pushscan2folder/favicon.svg;pushscan2folder"
           --noconfirm packaging/run_pushscan2folder.py
       - name: Smoke test

@@ -36,6 +36,7 @@ from urllib.parse import parse_qs, urlsplit
 from . import SOURCE_URL, __version__, panel
 from .config import (COLORS, FORMATS, SOURCES, Config, ConfigError, TargetSpec, dump_config,
                      load_config, load_config_text, parse_config, size_name, write_config)
+from .desktop import OPEN_MODES
 from .platform_support import component_problem
 from .protocol import PANEL_CHARS, VISIBLE_NAME_CHARS, check_name
 from .service import (MULTIPAGE_MODES, RESOLUTIONS, TRIM_MAX_MM, check_targets,
@@ -434,12 +435,12 @@ def apply_targets(ctx: WebContext, rows: list[Row]) -> tuple[list[TargetSpec], l
 
 # Built-in values used when a key is not set anywhere.
 BUILTIN = {"resolution": "300", "color": "color", "format": "pdf", "source": "auto",
-           "size": "a4", "multipage": "document", "interval": "4",
+           "size": "a4", "multipage": "document", "interval": "4", "open_after_scan": "off",
            "trim_left": "0", "trim_top": "0", "trim_right": "0", "trim_bottom": "0"}
 TRIM_KEYS = ("trim_left", "trim_top", "trim_right", "trim_bottom")
 # Config keys the settings form edits (top level and [defaults]).
 SETTING_KEYS = ("interval", "ignore_panel", "multipage", "resolution", "color", "format",
-                "source", "size") + TRIM_KEYS
+                "source", "size", "open_after_scan") + TRIM_KEYS
 NUMBER_KEYS = ("interval",) + TRIM_KEYS
 
 
@@ -1188,6 +1189,11 @@ def render_settings(ctx: WebContext, csrf: str, values: dict[str, str] | None = 
         _field("Poll interval (seconds)", _text_input("interval", v("interval"), "4"),
                "interval", "How often the printer is asked for scan requests. Must be "
                "greater than 0.", ctx),
+        _field("Open after scan", sel("open_after_scan", v("open_after_scan"),
+                                      [(m, m) for m in OPEN_MODES]), "open_after_scan",
+               "off, folder (opens the folder, on Windows with the new file selected) or "
+               "file (opens the scan). Only works when the program runs on a desktop PC "
+               "with a logged-in user, not in Docker or on a server.", ctx),
         _field("Ignore panel", _check("ignore_panel", bool(v("ignore_panel")),
                                       "Always use the values above", False),
                "ignore_panel", "Off: the choices made on the printer panel (colour, size, "

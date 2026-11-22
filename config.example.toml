@@ -22,6 +22,7 @@ color = "color"            # color | gray
 format = "pdf"             # pdf | jpeg
 source = "auto"            # auto | platen | adf
 size = "a4"                # a4 | letter | legal | 10x15 | 13x18
+open_after_scan = "off"    # off | folder | file (desktop PC only: open the result)
 # Trim: cut off a border at the glass edge by scanning a smaller area
 # (platen only, not the ADF). In mm, 0 to 50; 0 means no trim.
 trim_left = 0              # mm

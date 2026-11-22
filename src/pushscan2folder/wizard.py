@@ -59,6 +59,7 @@ class Setup:
                  getpass_fn: Callable[[str], str] | None = None,
                  probe_fn: Callable[[str], tuple[bool, str]] | None = None,
                  autostart_fn: Callable[[list[str]], int] | None = None,
+                 start_fn: Callable[[list[str]], int] | None = None,
                  out: Callable[..., None] = print, default_name: str = "scan"):
         self.path = Path(config_path)
         # looked up here, not as default values, so tests can replace them
@@ -66,6 +67,8 @@ class Setup:
         self.getpass = getpass_fn or getpass.getpass
         self.probe = probe_fn or probe_printer
         self.autostart_fn, self.out, self.default_name = autostart_fn, out, default_name
+        self.start_fn = start_fn
+        self.background_started = False  # True after a successful background start
 
     # --- small prompts ---------------------------------------------------------
 
@@ -152,6 +155,29 @@ class Setup:
             self.out(f"The password file is in your user profile ({password_file}), "
                      "which other standard users cannot read.")
 
+    def ask_open_after_scan(self, cfg: Config) -> None:
+        """Windows only: open the folder after each scan."""
+        if not platform_support.is_windows():
+            return
+        if self.yes_no("Open the folder after each scan?", cfg.open_after_scan != "off"):
+            cfg.open_after_scan = "file" if cfg.open_after_scan == "file" else "folder"
+        else:
+            cfg.open_after_scan = "off"
+
+    def offer_start(self, log_path: Path) -> bool:
+        """Ask how to start now. True: run in the foreground now. On Windows the
+        background comes first (it survives closing the window)."""
+        if platform_support.is_windows() and self.start_fn is not None \
+                and self.yes_no("Run in the background now?", True):
+            if self.start_fn(["--config", str(self.path), "--log-file", str(log_path)]) == 0:
+                self.background_started = True
+                self.out("It keeps running after you close this window.")
+                self.out("To stop it later, run: pushscan2folder stop")
+                self.out(f"Log file: {log_path}")
+                return False
+            self.out("The background start failed, see the message above.")
+        return self.yes_no("Start now?", True)
+
     # --- the flow --------------------------------------------------------------
 
     def run(self) -> bool:
@@ -168,7 +194,7 @@ class Setup:
                 self.out(f"  target:  {spec.name}")
             self.out(f"  web:     {'on' if cfg.web_enabled else 'off'}")
             if not self.yes_no("Change these settings?", False):
-                return self.yes_no("Start now?", True)
+                return self.offer_start(platform_support.default_log_path())
             self.out("Comments in the file are not kept when it is saved again.")
         else:
             self.out(f"The config file will be {self.path}")
@@ -184,6 +210,7 @@ class Setup:
             cfg.output = Path(output)
             cfg.targets = [TargetSpec(name)]
         self.ask_web(cfg)
+        self.ask_open_after_scan(cfg)
         log_path = platform_support.default_log_path()
         want_autostart = (platform_support.is_windows() and self.autostart_fn is not None
                           and self.yes_no("Start automatically when you log in to Windows?",
@@ -196,7 +223,7 @@ class Setup:
             if not autostart_done:
                 self.out("Autostart could not be installed, see the message above.")
         self.summary(cfg, autostart_done, log_path)
-        return self.yes_no("Start now?", True)
+        return self.offer_start(log_path)
 
     def summary(self, cfg: Config, autostart: bool, log_path: Path) -> None:
         out = self.out

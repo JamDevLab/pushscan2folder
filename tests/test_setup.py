@@ -281,12 +281,12 @@ class SetupTests(unittest.TestCase):
 
     def test_autostart_only_on_windows(self):
         calls = []
-        answers = ["192.0.2.7", "", str(self.dir / "s"), "", "", ""]
+        answers = ["192.0.2.7", "", str(self.dir / "s"), "", "", "", ""]
         with mock.patch.object(sys, "platform", "linux"):
             self.run_setup(answers, autostart_fn=lambda a: calls.append(a) or 0)
         self.assertEqual(calls, [])
         self.path.unlink()
-        # windows: printer, name, folder, web no, autostart yes (default), start now
+        # windows: printer, name, folder, web no, open folder, autostart yes (default), start now
         with mock.patch.object(sys, "platform", "win32"), \
                 mock.patch.dict(os.environ, {"LOCALAPPDATA": str(self.dir / "local")}):
             _, io_, _ = self.run_setup(answers, autostart_fn=lambda a: calls.append(a) or 0)

@@ -179,9 +179,9 @@ class AutostartTests(unittest.TestCase):
         self.assertEqual(cmd[cmd.index("/v") + 1], "pushscan2folder")
         self.assertEqual(cmd[-1], "/f")
         value = cmd[cmd.index("/d") + 1]
-        self.assertTrue(value.startswith('cmd.exe /c start "pushscan2folder" /min '))
-        self.assertIn(r'"C:\Program Files\ps\pushscan2folder.exe" ', value)
-        self.assertTrue(value.endswith(' "run"'))   # default command appended
+        self.assertTrue(value.startswith(r'"C:\Program Files\ps\pushscan2folder.exe" '))
+        self.assertNotIn("cmd.exe", value)          # no console window of its own
+        self.assertTrue(value.endswith(' "start"'))  # background mode is the default command
         self.assertNotIn("-m", value)
 
     def test_source_command_uses_module(self):

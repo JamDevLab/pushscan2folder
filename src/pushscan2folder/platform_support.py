@@ -30,14 +30,20 @@ def default_config_path() -> Path:
     return Path(base) / "pushscan2folder" / "config.toml"
 
 
-def default_log_path() -> Path:
-    """Log file of the autostart entry: %LOCALAPPDATA%\\pushscan2folder\\pushscan2folder.log
-    on Windows, otherwise below ~/.local/state (XDG_STATE_HOME)."""
+def default_state_dir() -> Path:
+    """Per-user state (log file, background instance files):
+    %LOCALAPPDATA%\\pushscan2folder on Windows, otherwise below
+    ~/.local/state ($XDG_STATE_HOME)."""
     if is_windows():
         base = os.environ.get("LOCALAPPDATA") or str(Path.home() / "AppData" / "Local")
     else:
         base = os.environ.get("XDG_STATE_HOME") or str(Path.home() / ".local" / "state")
-    return Path(base) / "pushscan2folder" / "pushscan2folder.log"
+    return Path(base) / "pushscan2folder"
+
+
+def default_log_path() -> Path:
+    """Log file of the background instance and the autostart entry, in the state dir."""
+    return default_state_dir() / "pushscan2folder.log"
 
 
 def default_output() -> Path:

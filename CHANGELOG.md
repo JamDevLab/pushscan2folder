@@ -7,6 +7,24 @@ All notable changes are documented here. The format follows
 
 ### Added
 
+- `pushscan2folder start` runs the program detached in the background (no
+  console window on Windows, its own session elsewhere) with the same options
+  as `run`; `stop` ends it cleanly so the panel names are released (stop request
+  file checked by the poll loop, terminate after 30 s as a last resort);
+  `status` shows PID, log file and the last log lines. One instance per user,
+  guarded by a lock file in `%LOCALAPPDATA%\pushscan2folder` (Windows) or
+  `$XDG_STATE_HOME/pushscan2folder`; stale files never block a start.
+- `pushscan2folder uninstall`: stops the instance, removes the Windows autostart
+  entry and optionally deletes the config and log/state folders (default no).
+  `--yes` keeps them unless `--purge` is given. Scans are never deleted.
+- `open_after_scan` (`off`, `folder`, `file`; `--open-after-scan`,
+  `PUSHSCAN_OPEN_AFTER_SCAN`, `[defaults]`, web Settings page): opens the folder
+  (Windows: Explorer with the file selected) or the file once per saved job on a
+  desktop PC. Setup asks on Windows.
+- Setup asks "Run in the background now?" on Windows; the foreground start
+  summary points to `pushscan2folder start`.
+- Icon for `pushscan2folder.exe` (`packaging/pushscan2folder.ico`, made with
+  `packaging/make_ico.py` from `favicon.svg`).
 - `run` is the default subcommand: `pushscan2folder --printer X` just runs.
 - `run` logs a startup summary (version, printer, config file, panel names and
   folders, web page, log file) and "'NAME' is now on the printer panel under
@@ -28,6 +46,8 @@ All notable changes are documented here. The format follows
 
 ### Changed
 
+- The Windows autostart entry runs `pushscan2folder start` (background, no
+  window that stays) instead of `cmd /c start /min`. Install it again to switch.
 - The README is shorter; details moved to pages under `docs/`. It now has a
   complete compose example.
 - Folder names typed on the web page must also be valid on Windows: no

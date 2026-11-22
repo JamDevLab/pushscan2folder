@@ -105,7 +105,7 @@ Fehler, damit ein Tippfehler keinen Schutz ausschaltet.
   Die Optionen für *Automatisch* je Ziel zeigen den aktuellen Standardwert,
   etwa "Default (300 dpi)"; er stammt von der Einstellungsseite.
 - Einstellungen (`/settings`) bearbeitet `resolution`, `color`, `format`,
-  `source`, `size` und die vier `trim_*`-Werte aus `[defaults]` sowie
+  `source`, `size`, `open_after_scan` und die vier `trim_*`-Werte aus `[defaults]` sowie
   `multipage`, `ignore_panel` und `interval`, jeweils mit kurzer Erklärung. Die
   Werte werden mit denselben Regeln wie die Konfigurationsdatei geprüft; ein
   leeres Feld entfernt den Schlüssel. `printer` und der Basis-Ausgabeordner

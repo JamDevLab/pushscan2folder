@@ -52,6 +52,35 @@ targets alone. Setup also starts by itself when the program is started
 without any argument in a console and no config file exists yet; non-interactive
 starts (Docker, services) never ask anything.
 
+Run without a window (details for Windows in [windows.md](windows.md)):
+
+```sh
+# Start detached in the background with the current options and return.
+# Windows: no console window. Linux/macOS: its own session.
+PYTHONPATH=src python3 -m pushscan2folder --printer 192.168.1.50 start
+PYTHONPATH=src python3 -m pushscan2folder status   # running?, PID, log file, last log lines
+PYTHONPATH=src python3 -m pushscan2folder stop     # stops it and releases the panel names
+```
+
+`start` accepts the same options as `run` and refuses if a background instance
+is already running. The log goes to the state folder
+(`%LOCALAPPDATA%\pushscan2folder\pushscan2folder.log` on Windows,
+`$XDG_STATE_HOME/pushscan2folder/pushscan2folder.log`, default
+`~/.local/state/...`, elsewhere) unless `--log-file` is given. `stop` writes a
+stop request file that the poll loop checks once per second and terminates the
+process only if it has not ended after 30 seconds. `status` exits with 0 if the
+instance runs and 1 if not.
+
+```sh
+# Stop the instance, remove the Windows autostart entry, then ask (default no)
+# whether to delete the config folder and the log/state folder.
+PYTHONPATH=src python3 -m pushscan2folder uninstall
+# Non-interactive: keeps the config and log unless --purge is added.
+PYTHONPATH=src python3 -m pushscan2folder uninstall --yes [--purge]
+```
+
+Scans are never deleted, and a folder that contains a scan folder is kept.
+
 `probe` and `scan` are for debugging:
 
 ```sh
@@ -86,6 +115,7 @@ environment wins over the [configuration file](#configuration-file). More in
 | `--targets`    | `PUSHSCAN_TARGETS`    | -                   | run           | Several panel entries, each with its own folder and optional preset, see [Multiple targets](#multiple-targets). Replaces `--name` for `run` |
 | `--ignore-panel` | `PUSHSCAN_IGNORE_PANEL` | off             | run           | Ignore the panel settings and always use the four options above (`--format`, `--color`, `--resolution`, `--source`). Env var: `1`, `true` or `yes`. Also disables multi-page scans |
 | `--multipage`  | `PUSHSCAN_MULTIPAGE`  | `document`          | run           | `document`, `auto`, `both` or `off`, see [Multi-page scans](#multi-page-scans-from-the-platen) |
+| `--open-after-scan` | `PUSHSCAN_OPEN_AFTER_SCAN` | `off`       | run, start    | `off`, `folder` or `file`. Desktop PC only: after a job is saved, open the folder (Windows: Explorer with the new file selected) or the file, once per job. On Linux it needs `DISPLAY` or `WAYLAND_DISPLAY`. A failure only logs a warning. Docker has no desktop, keep it `off` |
 | `--no-pause`   | `PUSHSCAN_NO_PAUSE`   | off                 | all           | Windows: never wait for Enter before a console window opened for this program closes. The autostart entry sets it |
 | `--web`        | `PUSHSCAN_WEB`        | off                 | run           | Serve the [web page](web.md). Env var: `1`, `true` or `yes` |
 | `--web-port`   | `PUSHSCAN_WEB_PORT`   | `8080`              | run           | Port of the web page |
@@ -126,6 +156,7 @@ the file and the key, so typos are caught.
 | `[defaults]` `format` | `pdf`, `jpeg` | `--format` |
 | `[defaults]` `source` | `auto`, `platen`, `adf` | `--source` |
 | `[defaults]` `size` | `a4`, `letter`, `legal`, `10x15`, `13x18` | scan area without panel data |
+| `[defaults]` `open_after_scan` | `off`, `folder`, `file` | `--open-after-scan` |
 | `[defaults]` `trim_left`, `trim_top`, `trim_right`, `trim_bottom` | number, mm, 0 to 50 | `--trim` |
 | `[web]` `enabled` | `true` / `false` | `--web` |
 | `[web]` `bind` | address, default `0.0.0.0` | `--web-bind` |

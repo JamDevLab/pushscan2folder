@@ -53,6 +53,35 @@ Autostart und lässt die Ziele unverändert. Das Setup startet auch von selbst, 
 das Programm ohne Argument in einer Konsole gestartet wird und es noch keine
 Konfigurationsdatei gibt; nicht interaktive Starts (Docker, Dienste) fragen nie.
 
+Ohne Fenster laufen (Einzelheiten für Windows in [windows.de.md](windows.de.md)):
+
+```sh
+# Startet abgekoppelt im Hintergrund mit den aktuellen Optionen und kehrt zurück.
+# Windows: kein Konsolenfenster. Linux/macOS: eigene Sitzung.
+PYTHONPATH=src python3 -m pushscan2folder --printer 192.168.1.50 start
+PYTHONPATH=src python3 -m pushscan2folder status   # läuft es?, PID, Logdatei, letzte Logzeilen
+PYTHONPATH=src python3 -m pushscan2folder stop     # beendet es und gibt die Namen am Drucker frei
+```
+
+`start` nimmt dieselben Optionen wie `run` und lehnt ab, wenn schon eine
+Hintergrundinstanz läuft. Das Log geht in den Statusordner
+(`%LOCALAPPDATA%\pushscan2folder\pushscan2folder.log` unter Windows,
+sonst `$XDG_STATE_HOME/pushscan2folder/pushscan2folder.log`, Standard
+`~/.local/state/...`), sofern nicht `--log-file` angegeben ist. `stop` schreibt eine
+Stopp-Anforderungsdatei, die die Abfrageschleife einmal pro Sekunde prüft, und
+bricht den Prozess nur ab, wenn er nach 30 Sekunden nicht beendet ist. `status`
+endet mit 0, wenn die Instanz läuft, sonst mit 1.
+
+```sh
+# Beendet die Instanz, entfernt den Windows-Autostart-Eintrag und fragt dann
+# (Standard nein), ob Konfigurationsordner und Log-/Statusordner gelöscht werden.
+PYTHONPATH=src python3 -m pushscan2folder uninstall
+# Nicht interaktiv: behält Konfiguration und Log, außer mit --purge.
+PYTHONPATH=src python3 -m pushscan2folder uninstall --yes [--purge]
+```
+
+Scans werden nie gelöscht, und ein Ordner, der einen Scan-Ordner enthält, bleibt erhalten.
+
 Weitere Unterbefehle zur Fehlersuche:
 
 ```sh
@@ -87,6 +116,7 @@ Mehr unter [Vorrang](#vorrang).
 | `--targets`    | `PUSHSCAN_TARGETS`    | -                   | run           | Mehrere Einträge auf dem Bedienfeld, jeder mit eigenem Ordner und optionaler Voreinstellung, siehe [Mehrere Ziele](#mehrere-ziele). Ersetzt `--name` für `run` |
 | `--ignore-panel` | `PUSHSCAN_IGNORE_PANEL` | aus             | run           | Ignoriert die Einstellungen vom Bedienfeld und nutzt immer die vier Optionen oben (`--format`, `--color`, `--resolution`, `--source`). Umgebungsvariable: `1`, `true` oder `yes`. Deaktiviert auch mehrseitige Scans |
 | `--multipage`  | `PUSHSCAN_MULTIPAGE`  | `document`          | run           | `document`, `auto`, `both` oder `off`, siehe [Mehrseitige Scans](#mehrseitige-scans-vom-vorlagenglas) |
+| `--open-after-scan` | `PUSHSCAN_OPEN_AFTER_SCAN` | `off`       | run, start    | `off`, `folder` oder `file`. Nur für Desktop-PCs: nach dem Speichern eines Auftrags den Ordner (Windows: Explorer mit markierter neuer Datei) oder die Datei öffnen, einmal pro Auftrag. Unter Linux ist `DISPLAY` oder `WAYLAND_DISPLAY` nötig. Ein Fehler schreibt nur eine Warnung. Docker hat keinen Desktop, dort `off` lassen |
 | `--no-pause`   | `PUSHSCAN_NO_PAUSE`   | aus                 | alle          | Windows: nicht auf Enter warten, bevor sich ein nur für dieses Programm geöffnetes Konsolenfenster schließt. Der Autostart-Eintrag setzt es |
 | `--web`        | `PUSHSCAN_WEB`        | aus                 | run           | Stellt die [Weboberfläche](web.de.md) bereit. Umgebungsvariable: `1`, `true` oder `yes` |
 | `--web-port`   | `PUSHSCAN_WEB_PORT`   | `8080`              | run           | Port der Weboberfläche |
@@ -129,6 +159,7 @@ Meldung abgelehnt, die Datei und Schlüssel nennt, damit Tippfehler auffallen.
 | `[defaults]` `format` | `pdf`, `jpeg` | `--format` |
 | `[defaults]` `source` | `auto`, `platen`, `adf` | `--source` |
 | `[defaults]` `size` | `a4`, `letter`, `legal`, `10x15`, `13x18` | Scanbereich ohne Daten vom Bedienfeld |
+| `[defaults]` `open_after_scan` | `off`, `folder`, `file` | `--open-after-scan` |
 | `[defaults]` `trim_left`, `trim_top`, `trim_right`, `trim_bottom` | Zahl, mm, 0 bis 50 | `--trim` |
 | `[web]` `enabled` | `true` / `false` | `--web` |
 | `[web]` `bind` | Adresse, Standard `0.0.0.0` | `--web-bind` |

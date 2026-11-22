@@ -12,8 +12,9 @@ import time
 from dataclasses import dataclass, field, replace
 from datetime import datetime
 from pathlib import Path
+from typing import Callable
 
-from . import panel
+from . import desktop, panel
 from .client import ChmpClient
 from .escl import EXTENSIONS, FORMATS, EsclClient, ScanSettings
 from .native import NativeScanner, PageSettings
@@ -28,6 +29,8 @@ MAX_BACKOFF = 10.0
 # Keep registrations alive while a long scan runs (the printer drops them
 # after about 60 s without a poll).
 KEEPALIVE_INTERVAL = 5.0
+# How often the poll loop looks for a stop request while it waits.
+STOP_CHECK_INTERVAL = 1.0
 
 
 TRIM_MAX_MM = 50.0
@@ -223,8 +226,11 @@ class PushScanService:
                  settings: ScanSettings, interval: float = 4.0, auto_source: bool = True,
                  use_panel: bool = True, native: NativeScanner | None = None,
                  multipage: frozenset[str] = frozenset({"document"}),
-                 trim: Trim | None = None):
+                 trim: Trim | None = None, open_after_scan: str = "off"):
         self.trim = trim or Trim()
+        self.open_after_scan = open_after_scan
+        # Optional callable: True asks the loop to stop (background `stop`).
+        self.stop_check: Callable[[], bool] | None = None
         self.use_panel = use_panel
         self.native = native
         self.multipage = multipage
@@ -425,6 +431,8 @@ class PushScanService:
         self.status.record(ScanRecord(time.time(), target.name, self._method, self._pages,
                                       tuple(str(p) for p in paths),
                                       "ok" if paths else "nothing saved"))
+        if paths:
+            desktop.open_saved(self.open_after_scan, paths)  # once per job
         return paths
 
     def _scan_to(self, target: Target, event: int, interrupt: bytes) -> list[Path]:
@@ -494,8 +502,21 @@ class PushScanService:
                 # Short cap: after a printer restart the names should reappear quickly.
                 backoff = min(backoff * 2, MAX_BACKOFF)
             self.status.set_targets(self.targets)
-            self.stop_event.wait(backoff)
+            self._wait(backoff)
         self.release()
+
+    def _wait(self, seconds: float) -> None:
+        """Sleep between poll cycles, but end early on stop() or a stop request."""
+        end = time.monotonic() + seconds
+        while not self.stop_event.is_set():
+            if self.stop_check is not None and self.stop_check():
+                log.info("stop requested")
+                self.stop_event.set()
+                return
+            left = end - time.monotonic()
+            if left <= 0:
+                return
+            self.stop_event.wait(min(left, STOP_CHECK_INTERVAL))
 
     def stop(self) -> None:
         self.stop_event.set()
