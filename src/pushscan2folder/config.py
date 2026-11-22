@@ -27,6 +27,9 @@ class ConfigError(ValueError):
     """The configuration file is unreadable or invalid."""
 
 
+SAME_FOLDER = "."  # target output: the output directory itself, no subfolder
+
+
 @dataclass
 class TargetSpec:
     """A [[target]] table; turned into a Target once the output dir is known."""

@@ -7,11 +7,13 @@ from __future__ import annotations
 
 import getpass
 import os
+import shutil
 from pathlib import Path
 from typing import Callable
 
 from . import platform_support, protocol
-from .config import Config, ConfigError, TargetSpec, dump_config, load_config, write_config
+from .config import (SAME_FOLDER, Config, ConfigError, TargetSpec, dump_config, load_config,
+                     safe_dirname, write_config)
 from .escl import EsclClient
 from .web import MIN_PASSWORD_LENGTH
 
@@ -19,6 +21,12 @@ EXAMPLE_PASSWORD = "change-me-please"  # placeholder in docker-compose.yml
 DEFAULT_PORT = 8080
 DEFAULT_BIND = "127.0.0.1"
 PASSWORD_FILE_NAME = "web_password.txt"
+EXISTING_CHOICES = {"1": "use", "2": "change", "3": "new"}
+
+
+def target_folder(base: Path, spec: TargetSpec) -> Path:
+    """Where the scans of `spec` end up (as Config.build_targets does it)."""
+    return base / (spec.output if spec.output else safe_dirname(spec.name))
 
 
 def password_problem(password: str) -> str | None:
@@ -178,24 +186,58 @@ class Setup:
             self.out("The background start failed, see the message above.")
         return self.yes_no("Start now?", True)
 
+    # --- an existing config file ----------------------------------------------
+
+    def show(self, cfg: Config) -> None:
+        base = Path(cfg.output or platform_support.default_output())
+        self.out(f"Found the config file {self.path}")
+        self.out(f"  printer: {cfg.printer or 'not set'}")
+        for spec in cfg.targets:
+            self.out(f"  panel name {spec.name!r} -> {target_folder(base, spec)}")
+        self.out(f"  web:     {'on' if cfg.web_enabled else 'off'}")
+
+    def ask_existing(self) -> str:
+        """use, change or new."""
+        self.out("  1  use these settings")
+        self.out("  2  change them")
+        self.out("  3  start over with a new configuration")
+        while True:
+            answer = self.ask("Your choice", "1")
+            if answer in EXISTING_CHOICES:
+                return EXISTING_CHOICES[answer]
+            self.out("Please answer 1, 2 or 3.")
+
+    def backup(self) -> None:
+        """Keep a copy of the old file before it is replaced."""
+        backup = self.path.with_name(self.path.name + ".bak")
+        shutil.copy2(self.path, backup)
+        self.out(f"The old file is kept as {backup}")
+
     # --- the flow --------------------------------------------------------------
 
     def run(self) -> bool:
         """Ask, write the config file and return True if the user wants to
         start now. Raises ConfigError (existing file invalid) and OSError."""
         cfg = Config()
-        existing = self.path.is_file()
-        if existing:
-            cfg = load_config(self.path)  # a broken file is reported, never overwritten
-            self.out(f"Found the config file {self.path}")
-            self.out(f"  printer: {cfg.printer or 'not set'}")
-            self.out(f"  output:  {cfg.output or platform_support.default_output()}")
-            for spec in cfg.targets:
-                self.out(f"  target:  {spec.name}")
-            self.out(f"  web:     {'on' if cfg.web_enabled else 'off'}")
-            if not self.yes_no("Change these settings?", False):
-                return self.offer_start(platform_support.default_log_path())
-            self.out("Comments in the file are not kept when it is saved again.")
+        if self.path.is_file():
+            try:
+                cfg = load_config(self.path)
+            except ConfigError as exc:
+                self.out(f"The config file {self.path} has an error: {exc}")
+                if not self.yes_no("Start over with a new configuration?", False):
+                    raise  # a broken file is never overwritten without asking
+                self.backup()
+                cfg = Config()
+            else:
+                self.show(cfg)
+                choice = self.ask_existing()
+                if choice == "use":
+                    return self.offer_start(platform_support.default_log_path())
+                if choice == "new":
+                    self.backup()
+                    cfg = Config()
+                else:
+                    self.out("Comments in the file are not kept when it is saved again.")
         else:
             self.out(f"The config file will be {self.path}")
 
@@ -208,7 +250,8 @@ class Setup:
             output = self.ask("Folder for scans",
                               str(cfg.output or platform_support.default_output()))
             cfg.output = Path(output)
-            cfg.targets = [TargetSpec(name)]
+            # one target: the scans go straight into that folder, no subfolder
+            cfg.targets = [TargetSpec(name, output=SAME_FOLDER)]
         self.ask_web(cfg)
         self.ask_open_after_scan(cfg)
         log_path = platform_support.default_log_path()
@@ -231,10 +274,9 @@ class Setup:
         out("Setup done.")
         out(f"  Config file: {self.path}")
         out(f"  Printer:     {cfg.printer}")
+        base = Path(cfg.output or platform_support.default_output())
         for spec in cfg.targets:
-            folder = Path(cfg.output or platform_support.default_output())
-            folder = folder / spec.output if spec.output else folder / spec.name
-            out(f"  Scans of '{spec.name}' go to: {folder}")
+            out(f"  Scans of '{spec.name}' go to: {target_folder(base, spec)}")
         if cfg.web_enabled:
             host = "127.0.0.1" if cfg.web_bind in (None, "0.0.0.0") else cfg.web_bind
             out(f"  Web page:    http://{host}:{cfg.web_port or DEFAULT_PORT}")

@@ -367,7 +367,7 @@ class CliCommandTests(TempDirCase):
             args, _ = cli.parse_args(["--config", str(broken), command])
             self.assertEqual(args.cmd, command)
         with mock.patch("pushscan2folder.__main__.pause_before_exit"), \
-                mock.patch("pushscan2folder.__main__.first_start", return_value=False), \
+                mock.patch("pushscan2folder.__main__.greeting", return_value=None), \
                 redirect_stdout(io.StringIO()):
             self.assertEqual(cli.main(["--config", str(broken), "stop"]), 0)
 
@@ -408,7 +408,7 @@ class BackgroundRunTests(TempDirCase):
                 mock.patch.object(cli.PushScanService, "run", fake_run), \
                 mock.patch("pushscan2folder.__main__.install_signal_handlers"), \
                 mock.patch("pushscan2folder.__main__.pause_before_exit"), \
-                mock.patch("pushscan2folder.__main__.first_start", return_value=False):
+                mock.patch("pushscan2folder.__main__.greeting", return_value=None):
             code = cli.main(["--printer", "192.0.2.1", "--background", "--no-pause",
                              "--output", str(self.dir / "o")])
         self.assertEqual(code, 0)
@@ -425,7 +425,7 @@ class BackgroundRunTests(TempDirCase):
             with mock.patch.object(cli.PushScanService, "run") as run, \
                     mock.patch("pushscan2folder.__main__.install_signal_handlers"), \
                     mock.patch("pushscan2folder.__main__.pause_before_exit"), \
-                    mock.patch("pushscan2folder.__main__.first_start", return_value=False):
+                    mock.patch("pushscan2folder.__main__.greeting", return_value=None):
                 code = cli.main(["--printer", "192.0.2.1", "--background"])
         self.assertEqual(code, 2)
         run.assert_not_called()
@@ -536,7 +536,7 @@ class UninstallTests(TempDirCase):
         with clean_env(), mock.patch.dict(os.environ, env), \
                 mock.patch("subprocess.run", return_value=mock.Mock(returncode=0)) as run, \
                 mock.patch("pushscan2folder.__main__.pause_before_exit"), \
-                mock.patch("pushscan2folder.__main__.first_start", return_value=False), \
+                mock.patch("pushscan2folder.__main__.greeting", return_value=None), \
                 redirect_stdout(io.StringIO()) as out:
             code = cli.main(["uninstall", "--yes", "--purge"])
         self.assertEqual(code, 0)
@@ -677,7 +677,7 @@ class OpenAfterScanConfigTests(unittest.TestCase):
         with clean_env(), mock.patch.dict(os.environ, {"PUSHSCAN_OPEN_AFTER_SCAN": "bogus",
                                                        "PUSHSCAN_PRINTER": "192.0.2.1"}), \
                 mock.patch("pushscan2folder.__main__.pause_before_exit"), \
-                mock.patch("pushscan2folder.__main__.first_start", return_value=False), \
+                mock.patch("pushscan2folder.__main__.greeting", return_value=None), \
                 redirect_stderr(err):
             self.assertEqual(cli.main(["run"]), 2)
         self.assertIn("PUSHSCAN_OPEN_AFTER_SCAN", err.getvalue())
@@ -685,7 +685,7 @@ class OpenAfterScanConfigTests(unittest.TestCase):
     def test_env_value_is_case_insensitive(self):
         with clean_env(), mock.patch.dict(os.environ, {"PUSHSCAN_OPEN_AFTER_SCAN": "Folder"}), \
                 mock.patch("pushscan2folder.__main__.pause_before_exit"), \
-                mock.patch("pushscan2folder.__main__.first_start", return_value=False), \
+                mock.patch("pushscan2folder.__main__.greeting", return_value=None), \
                 mock.patch.object(cli.PushScanService, "run") as run, \
                 mock.patch("pushscan2folder.__main__.install_signal_handlers"):
             self.assertEqual(cli.main(["--printer", "192.0.2.1", "run"]), 0)

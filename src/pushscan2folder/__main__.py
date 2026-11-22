@@ -646,15 +646,44 @@ def uninstall_main(args: argparse.Namespace, argv: list[str],
         remove_autostart=remove_autostart_message if windows else None, **kwargs)
 
 
-def first_start(raw: list[str]) -> bool:
-    """Started without any argument by hand (double click), with a console
-    to talk to and nothing configured yet."""
+def manual_start(raw: list[str]) -> bool:
+    """Started without any argument by hand, with a console to talk to and
+    no settings from the environment."""
     try:
         interactive = sys.stdin.isatty()
     except (AttributeError, ValueError):
         interactive = False
-    return (not raw and interactive and not env("CONFIG") and not env("PRINTER")
-            and not default_config_path().is_file())
+    return not raw and interactive and not env("CONFIG") and not env("PRINTER")
+
+
+def double_click() -> bool:
+    """Windows: the console window belongs to this program alone (opened by
+    a double click or a shortcut, not typed in a command prompt)."""
+    count = console_process_count()
+    return is_windows() and count is not None and count <= 1
+
+
+def greeting(raw: list[str], instance: background.Instance | None = None) -> int | None:
+    """Without arguments: the setup questions if nothing is configured yet;
+    on a Windows double click with a config file, the choice to use it,
+    change it or start over. None: go on with a normal run."""
+    if not manual_start(raw):
+        return None
+    if not default_config_path().is_file():
+        print(f"Welcome to pushscan2folder {__version__}.\n"
+              "No configuration found, so a few questions follow (Ctrl+C to cancel).\n")
+        return setup_main(None)
+    if not double_click():
+        return None
+    instance = instance or background.Instance()
+    if instance.is_running():
+        pid = instance.read_info().pid
+        print(f"pushscan2folder {__version__} is already running in the background"
+              + (f" (PID {pid})." if pid else ".")
+              + "\nTo change the settings, stop it first: pushscan2folder stop")
+        return 0
+    print(f"pushscan2folder {__version__}\n")
+    return setup_main(None)
 
 
 def main(argv=None) -> int:
@@ -683,10 +712,9 @@ def _main(argv=None) -> int:
     raw = list(sys.argv[1:] if argv is None else argv)
     if "--install-autostart" in raw or "--remove-autostart" in raw:
         return autostart_main(raw)
-    if first_start(raw):
-        print(f"Welcome to pushscan2folder {__version__}.\n"
-              "No configuration found, so a few questions follow (Ctrl+C to cancel).\n")
-        return setup_main(None)
+    greeted = greeting(raw)
+    if greeted is not None:
+        return greeted
     try:
         args, cfg = parse_args(argv)
     except ConfigError as exc:

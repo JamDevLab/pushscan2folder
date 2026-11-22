@@ -610,9 +610,12 @@ class FolderCheckTests(unittest.TestCase):
         for folder in good:
             web.check_web_folder(folder, self.base)
 
+    def test_dot_alone_is_the_output_directory(self):
+        web.check_web_folder(".", self.base)
+
     def test_rejects_escapes(self):
         bad = ["", "/abs", "//net/share", "..", "../x", "a/../../x", "a/..", "a//b",
-               "a/", "./a", ".", "a\\b", "..\\x", "a\x00b", "a\nb", "a\tb", "a\x7fb",
+               "a/", "./a", "./", "a/.", "a\\b", "..\\x", "a\x00b", "a\nb", "a\tb", "a\x7fb",
                "x" * 300]
         if CAN_SYMLINK:
             (self.base / "link_out").symlink_to(self.outside)

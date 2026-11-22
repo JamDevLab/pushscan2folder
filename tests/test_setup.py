@@ -56,7 +56,7 @@ class DefaultCommandTests(unittest.TestCase):
 
     def test_missing_printer_is_still_the_clear_error(self):
         with mock.patch("sys.stderr", io.StringIO()) as err, \
-                mock.patch("pushscan2folder.__main__.first_start", return_value=False), \
+                mock.patch("pushscan2folder.__main__.greeting", return_value=None), \
                 mock.patch("pushscan2folder.__main__.pause_before_exit"):
             self.assertEqual(cli.main([]), 2)
         self.assertIn("--printer", err.getvalue())
@@ -202,6 +202,9 @@ class SetupTests(unittest.TestCase):
         self.assertEqual(cfg.printer, "192.0.2.7")
         self.assertEqual(cfg.output, out_dir)
         self.assertEqual([t.name for t in cfg.targets], ["USER  PC"])
+        self.assertEqual(cfg.targets[0].output, ".")  # one target: no subfolder
+        self.assertEqual(cfg.build_targets(out_dir, "off")[0].outdir, out_dir)
+        self.assertIn(f"go to: {out_dir}", io_.text)
         self.assertFalse(cfg.web_enabled)
         assert_mode(self, self.path, 0o600)
         self.assertIn("pushscan2folder setup", io_.text)
@@ -258,8 +261,8 @@ class SetupTests(unittest.TestCase):
         self.path.parent.mkdir(parents=True)
         self.path.write_text('printer = "192.0.2.1"\n\n[[target]]\nname = "Mine"\n'
                              'output = "mine"\n', encoding="utf-8")
-        # change yes, printer, web no, start no
-        start, io_, _ = self.run_setup(["y", "192.0.2.2", "n", "n"])
+        # 2 = change, printer, web no, start no
+        start, io_, _ = self.run_setup(["2", "192.0.2.2", "n", "n"])
         self.assertFalse(start)
         cfg = load_config_text(self.path.read_text())
         self.assertEqual(cfg.printer, "192.0.2.2")
@@ -271,17 +274,45 @@ class SetupTests(unittest.TestCase):
         self.path.parent.mkdir(parents=True)
         original = 'printer = "192.0.2.1"\n'
         self.path.write_text(original, encoding="utf-8")
-        start, _, probe = self.run_setup(["", ""])  # change? no, start now? yes
+        start, io_, probe = self.run_setup(["", ""])  # use them (default 1), start now? yes
         self.assertTrue(start)
         probe.assert_not_called()
         self.assertEqual(self.path.read_text(), original)
+        self.assertIn("start over", io_.text)
+        self.assertFalse(self.path.with_name("config.toml.bak").exists())
+
+    def test_existing_config_choice_is_asked_again(self):
+        self.path.parent.mkdir(parents=True)
+        self.path.write_text('printer = "192.0.2.1"\n', encoding="utf-8")
+        start, io_, _ = self.run_setup(["4", "1", "n"])
+        self.assertFalse(start)
+        self.assertIn("Please answer 1, 2 or 3.", io_.text)
+
+    def test_start_over_keeps_a_backup(self):
+        self.path.parent.mkdir(parents=True)
+        original = 'printer = "192.0.2.1"\n\n[[target]]\nname = "Old"\noutput = "old"\n'
+        self.path.write_text(original, encoding="utf-8")
+        out_dir = self.dir / "new"
+        # 3 = start over, printer, name, folder, web no, start no
+        self.run_setup(["3", "192.0.2.5", "New", str(out_dir), "n", "n"])
+        cfg = load_config_text(self.path.read_text())
+        self.assertEqual([(t.name, t.output) for t in cfg.targets], [("New", ".")])
+        self.assertEqual(cfg.output, out_dir)
+        self.assertEqual(self.path.with_name("config.toml.bak").read_text(), original)
 
     def test_invalid_existing_config_is_not_overwritten(self):
         self.path.parent.mkdir(parents=True)
         self.path.write_text("printer = 5\n", encoding="utf-8")
         with self.assertRaises(ConfigError):
-            self.run_setup([])
+            self.run_setup(["n"])  # start over? no
         self.assertEqual(self.path.read_text(), "printer = 5\n")
+
+    def test_invalid_existing_config_start_over(self):
+        self.path.parent.mkdir(parents=True)
+        self.path.write_text("printer = 5\n", encoding="utf-8")
+        self.run_setup(["y", "192.0.2.5", "", str(self.dir / "s"), "n", "n"])
+        self.assertEqual(load_config_text(self.path.read_text()).printer, "192.0.2.5")
+        self.assertEqual(self.path.with_name("config.toml.bak").read_text(), "printer = 5\n")
 
     def test_autostart_only_on_windows(self):
         calls = []
@@ -322,25 +353,68 @@ class SetupTests(unittest.TestCase):
             self.assertEqual(cli.main(["setup"]), 1)
 
 
-class FirstStartTests(unittest.TestCase):
-    def test_conditions(self):
-        with tempfile.TemporaryDirectory() as d:
-            env = {k: v for k, v in os.environ.items() if not k.startswith("PUSHSCAN_")}
-            env.update(XDG_CONFIG_HOME=d, APPDATA=d)
-            with mock.patch.dict(os.environ, env, clear=True), \
-                    mock.patch("sys.stdin") as stdin:
-                stdin.isatty.return_value = True
-                self.assertTrue(cli.first_start([]))
-                self.assertFalse(cli.first_start(["--printer", "x"]))
-                stdin.isatty.return_value = False  # Docker, service
-                self.assertFalse(cli.first_start([]))
-                stdin.isatty.return_value = True
-                with mock.patch.dict(os.environ, {"PUSHSCAN_PRINTER": "x"}):
-                    self.assertFalse(cli.first_start([]))
-                cfg = Path(d) / "pushscan2folder" / "config.toml"
-                cfg.parent.mkdir()
-                cfg.write_text('printer = "x"\n')
-                self.assertFalse(cli.first_start([]))
+class GreetingTests(unittest.TestCase):
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.dir = Path(tmp.name)
+        env = {k: v for k, v in os.environ.items() if not k.startswith("PUSHSCAN_")}
+        env.update(XDG_CONFIG_HOME=tmp.name, APPDATA=tmp.name)
+        for patcher in (mock.patch.dict(os.environ, env, clear=True), mock.patch("sys.stdin")):
+            started = patcher.start()
+            self.addCleanup(patcher.stop)
+        started.isatty.return_value = True
+        self.stdin = started
+        self.cfg = self.dir / "pushscan2folder" / "config.toml"
+        self.instance = mock.Mock()
+        self.instance.is_running.return_value = False
+
+    def greet(self, raw=(), clicked=True):
+        with mock.patch.object(cli, "setup_main", return_value=7) as setup, \
+                mock.patch.object(cli, "double_click", return_value=clicked), \
+                redirect_stdout(io.StringIO()) as out:
+            result = cli.greeting(list(raw), self.instance)
+        return result, setup.called, out.getvalue()
+
+    def test_manual_start(self):
+        self.assertTrue(cli.manual_start([]))
+        self.assertFalse(cli.manual_start(["--printer", "x"]))
+        self.stdin.isatty.return_value = False  # Docker, service
+        self.assertFalse(cli.manual_start([]))
+        self.stdin.isatty.return_value = True
+        with mock.patch.dict(os.environ, {"PUSHSCAN_PRINTER": "x"}):
+            self.assertFalse(cli.manual_start([]))
+
+    def test_no_config_asks_the_setup_questions(self):
+        result, setup, out = self.greet(clicked=False)
+        self.assertEqual((result, setup), (7, True))
+        self.assertIn("Welcome", out)
+        self.assertEqual(self.greet(["run"])[:2], (None, False))
+
+    def test_existing_config(self):
+        self.cfg.parent.mkdir()
+        self.cfg.write_text('printer = "x"\n')
+        # typed in a shell (or not Windows): just run
+        self.assertEqual(self.greet(clicked=False)[:2], (None, False))
+        # double click: use, change or start over
+        self.assertEqual(self.greet()[:2], (7, True))
+        # already running in the background: say so instead
+        self.instance.is_running.return_value = True
+        self.instance.read_info.return_value = mock.Mock(pid=42)
+        result, setup, out = self.greet()
+        self.assertEqual((result, setup), (0, False))
+        self.assertIn("PID 42", out)
+        self.assertIn("pushscan2folder stop", out)
+
+    def test_double_click_only_on_windows(self):
+        with mock.patch.object(cli, "console_process_count", return_value=1), \
+                mock.patch.object(cli, "is_windows", return_value=True):
+            self.assertTrue(cli.double_click())
+        with mock.patch.object(cli, "console_process_count", return_value=2), \
+                mock.patch.object(cli, "is_windows", return_value=True):
+            self.assertFalse(cli.double_click())
+        with mock.patch.object(cli, "console_process_count", return_value=None):
+            self.assertFalse(cli.double_click())
 
 
 class PauseTests(unittest.TestCase):

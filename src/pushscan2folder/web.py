@@ -34,7 +34,8 @@ from pathlib import Path, PurePosixPath
 from urllib.parse import parse_qs, urlsplit
 
 from . import SOURCE_URL, __version__, panel
-from .config import (COLORS, FORMATS, SOURCES, Config, ConfigError, TargetSpec, dump_config,
+from .config import (COLORS, FORMATS, SAME_FOLDER, SOURCES, Config, ConfigError, TargetSpec,
+                     dump_config,
                      load_config, load_config_text, parse_config, size_name, write_config)
 from .desktop import OPEN_MODES
 from .platform_support import component_problem
@@ -236,8 +237,8 @@ _FOLDER_BAD_CHARS = re.compile(r"[\x00-\x1f\x7f\\]")
 
 
 def check_web_folder(value: str, base: Path) -> None:
-    """A folder typed on the web page must be a plain relative path below the
-    base output directory: no absolute path, no "." or ".." component, no
+    """A folder typed on the web page must be "." (the base output directory
+    itself) or a plain relative path below it: no absolute path, no "." or ".." component, no
     empty component, no backslash, control character or any of : < > " | ? *
     (drive letters, NTFS streams, wildcards), no Windows device name (CON,
     NUL, COM1 ...) and no component ending in a dot or a space. These rules
@@ -246,6 +247,8 @@ def check_web_folder(value: str, base: Path) -> None:
     ValueError."""
     if not value:
         raise ValueError("folder is empty")
+    if value == SAME_FOLDER:
+        return  # "." alone: straight into the output directory
     if len(value) > MAX_FOLDER_CHARS:
         raise ValueError(f"folder is longer than {MAX_FOLDER_CHARS} characters")
     if _FOLDER_BAD_CHARS.search(value):
@@ -1053,7 +1056,8 @@ def render_targets(ctx: WebContext, csrf: str, rows: list[Row] | None = None,
                  + ". Only targets are edited here; the scan defaults and other settings are "
                  'on the <a href="/settings">Settings</a> page. Saving rewrites the file and '
                  "<strong>comments in it are not preserved</strong>. Folders typed here are always created below the "
-                 f"output directory <code>{esc(ctx.output)}</code>; absolute paths and "
+                 f"output directory <code>{esc(ctx.output)}</code> (<code>.</code> means the "
+                 "output directory itself); absolute paths and "
                  "<code>..</code> can only be set in the config file. Allowed name characters: "
                  f"{esc(PANEL_CHARS)} (max. 31).</p>")
     try:
