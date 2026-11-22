@@ -93,15 +93,15 @@ Ein `run` im Vordergrund nutzt das Lock nicht, `stop` beendet es nicht, und `sta
 
 ## Den Drucker finden
 
-Ist noch kein Drucker eingetragen, sucht `pushscan2folder setup` (und der erste Doppelklick) im lokalen Netz mit mDNS (Bonjour, Dienst `_uscan._tcp`) nach eSCL-Scannern. Das dauert etwa 2 Sekunden. Jeder Scanner, der antwortet, wird mit Adresse, Modell und einer Nummer aufgelistet:
+Ist noch kein Drucker eingetragen, sucht `pushscan2folder setup` (und der erste Doppelklick) im lokalen Netz mit mDNS (Bonjour, Dienst `_uscan._tcp`) nach eSCL-Scannern. Das dauert etwa 5 Sekunden. Jeder Scanner, der antwortet, wird mit Adresse, Modell und einer Nummer aufgelistet:
 
 ```
-Searching the network for scanners (eSCL, a few seconds) ...
+Searching the network for scanners (eSCL, about 5 seconds) ...
   1  192.168.1.50  Canon TR8500 series
-Number of your printer, or its IP address [1]:
+Number of your printer, its IP address, or s to search again [1]:
 ```
 
-Gib die Nummer ein, oder eine IP-Adresse, wenn dein Drucker nicht aufgeführt ist. Antwortet niemand, fragt das Setup wie bisher nach der IP-Adresse. Ein Firewall-Filter für Multicast oder ein VPN kann der Grund sein. Die IP-Adresse steht in den Netzwerkeinstellungen am Bedienfeld des Druckers. Die Windows-Firewall fragt für diese Suche eventuell einmal, ob das Programm erlaubt sein soll.
+Gib die Nummer ein, eine IP-Adresse, wenn dein Drucker nicht aufgeführt ist, oder `s`, um noch einmal zu suchen. Antwortet niemand, fragt das Setup nach der IP-Adresse; Enter sucht dort noch einmal. Die Anfrage geht über jeden Netzwerkadapter des PCs hinaus (auch WSL-, Hyper-V- oder VPN-Adapter) und wird dreimal gesendet. Ein Firewall-Filter für Multicast oder ein VPN kann der Grund sein. Die IP-Adresse steht in den Netzwerkeinstellungen am Bedienfeld des Druckers. Die Windows-Firewall fragt für diese Suche eventuell einmal, ob das Programm erlaubt sein soll.
 
 ## Ordner nach dem Scan öffnen
 

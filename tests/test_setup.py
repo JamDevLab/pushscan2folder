@@ -232,6 +232,20 @@ class SetupTests(unittest.TestCase):
         self.assertIn("No scanner answered", io_.text)
         self.assertEqual(load_config_text(self.path.read_text()).printer, "192.0.2.7")
 
+    def test_search_again(self):
+        from pushscan2folder.discovery import Scanner
+        results = [[], [Scanner("192.0.2.4", "A", "")], [Scanner("192.0.2.4", "A", ""),
+                                                         Scanner("192.0.2.5", "B", "")]]
+        calls = []
+
+        def discover():
+            calls.append(1)
+            return results[len(calls) - 1]
+        # Enter (= search again), s, then number 2; name, folder, web no, start no
+        self.run_setup(["", "S", "2", "", str(self.dir / "s"), "n", "n"], discover_fn=discover)
+        self.assertEqual(len(calls), 3)
+        self.assertEqual(load_config_text(self.path.read_text()).printer, "192.0.2.5")
+
     def test_failing_search_asks_for_the_address(self):
         def broken():
             raise RuntimeError("boom")

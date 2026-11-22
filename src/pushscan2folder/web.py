@@ -1144,8 +1144,10 @@ def _printer_html(ctx: WebContext, csrf: str, scanners: list | None) -> str:
         return "".join(out)
     hidden = f'<input type="hidden" name="csrf" value="{esc(csrf)}">'
     out.append('<form method="post" action="/printer/search" class="inline">' + hidden
-               + '<button type="submit" class="secondary">Search the network</button></form>'
-               '<p class="hint">Looks for scanners (eSCL, mDNS) for about 2 seconds. In Docker '
+               + '<button type="submit" class="secondary">'
+               + ("Search again" if scanners is not None else "Search the network")
+               + '</button></form>'
+               '<p class="hint">Looks for scanners (eSCL, mDNS) for about 5 seconds. In Docker '
                "with the default bridge network it finds nothing; set the address in the "
                "config file then.</p>")
     if scanners is None:

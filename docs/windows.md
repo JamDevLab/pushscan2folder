@@ -93,15 +93,15 @@ A foreground `run` does not use the lock, `stop` does not stop it, and `start` d
 
 ## Finding the printer
 
-If no printer is configured yet, `pushscan2folder setup` (and the first double click) searches the local network for eSCL scanners with mDNS (Bonjour, service `_uscan._tcp`). This takes about 2 seconds. Each scanner that answers is listed with its address and model and a number:
+If no printer is configured yet, `pushscan2folder setup` (and the first double click) searches the local network for eSCL scanners with mDNS (Bonjour, service `_uscan._tcp`). This takes about 5 seconds. Each scanner that answers is listed with its address and model and a number:
 
 ```
-Searching the network for scanners (eSCL, a few seconds) ...
+Searching the network for scanners (eSCL, about 5 seconds) ...
   1  192.168.1.50  Canon TR8500 series
-Number of your printer, or its IP address [1]:
+Number of your printer, its IP address, or s to search again [1]:
 ```
 
-Type the number, or type an IP address if your printer is not listed. If nothing answers, setup asks for the IP address as before. A firewall that blocks multicast, or a VPN, can be the reason. The IP address is shown in the network settings on the printer panel. Windows Firewall may ask once whether to allow the program for this search.
+Type the number, or type an IP address if your printer is not listed, or `s` to search again. If nothing answers, setup asks for the IP address; pressing Enter there searches again. The query goes out on every network adapter of the PC (also WSL, Hyper-V or VPN adapters) and is sent three times. A firewall that blocks multicast, or a VPN, can be the reason. The IP address is shown in the network settings on the printer panel. Windows Firewall may ask once whether to allow the program for this search.
 
 ## Open the folder after a scan
 

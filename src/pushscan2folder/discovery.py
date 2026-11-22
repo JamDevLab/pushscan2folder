@@ -6,6 +6,11 @@ address from an ordinary port, and every responder answers directly to that
 port. So no listening on port 5353 is needed, which Bonjour on Windows may
 already use. The address of a printer is the sender of its answer.
 
+A multicast packet leaves through one network adapter only. On a PC with
+several (WSL or Hyper-V "vEthernet", VPN, Wi-Fi and LAN) the system often
+picks one without the printer, so the query is sent on every IPv4 address
+of this computer. It is repeated a few times, as a responder may miss one.
+
 Plain stdlib; build_query and parse_response work on bytes, so they are
 tested without a network."""
 from __future__ import annotations
@@ -19,6 +24,8 @@ MDNS_ADDR = ("224.0.0.251", 5353)
 SERVICE = "_uscan._tcp.local"
 TYPE_A, TYPE_PTR, TYPE_TXT, TYPE_SRV = 1, 12, 16, 33
 MAX_PACKET = 9000
+TIMEOUT = 5.0                   # seconds to collect answers
+RESEND_AT = (0.0, 1.0, 2.5)     # seconds after the start: send the query (again)
 
 
 @dataclass(frozen=True)
@@ -110,31 +117,70 @@ def instance_label(instance: str, service: str = SERVICE) -> str:
     return instance
 
 
-def discover(timeout: float = 2.0, service: str = SERVICE,
-             sock_factory=None) -> list[Scanner]:
+def local_addresses() -> list[str]:
+    """The IPv4 addresses of this computer (no loopback), best effort."""
+    found = []
+    try:
+        infos = socket.getaddrinfo(socket.gethostname(), None, socket.AF_INET)
+    except OSError:
+        infos = []
+    for info in infos:
+        address = info[4][0]
+        if not address.startswith("127.") and address not in found:
+            found.append(address)
+    return found
+
+
+def _send(sock, query: bytes, interfaces: list[str]) -> bool:
+    """Send the query on the default adapter and on each address in
+    `interfaces`. True if at least one send worked."""
+    sent = False
+    for interface in ["0.0.0.0"] + interfaces:   # 0.0.0.0: the adapter the system picks
+        try:
+            sock.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_IF,
+                            socket.inet_aton(interface))
+            sock.sendto(query, MDNS_ADDR)
+            sent = True
+        except OSError:
+            continue
+    return sent
+
+
+def discover(timeout: float = TIMEOUT, service: str = SERVICE,
+             sock_factory=None, interfaces=None) -> list[Scanner]:
     """Ask the local network for eSCL scanners and collect the answers for
-    `timeout` seconds. Returns [] if the network does not allow it."""
+    `timeout` seconds. Returns [] if the network does not allow it.
+    `interfaces`: local IPv4 addresses to send on (default: all of them)."""
     found: dict[str, Scanner] = {}
     try:
         sock = (sock_factory or (lambda: socket.socket(socket.AF_INET, socket.SOCK_DGRAM)))()
     except OSError:
         return []
     with sock:
+        query = build_query(service)
+        interfaces = local_addresses() if interfaces is None else list(interfaces)
         try:
             sock.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_TTL, 255)
-            sock.sendto(build_query(service), MDNS_ADDR)
         except OSError:
+            pass
+        if not _send(sock, query, interfaces):
             return []
-        end = time.monotonic() + timeout
+        start = time.monotonic()
+        end = start + timeout
+        resend = [start + t for t in RESEND_AT[1:] if t < timeout]
         while True:
-            left = end - time.monotonic()
+            now = time.monotonic()
+            left = end - now
             if left <= 0:
                 break
-            sock.settimeout(left)
+            if resend and now >= resend[0]:
+                resend.pop(0)
+                _send(sock, query, interfaces)
+            sock.settimeout(min([left] + [r - now for r in resend[:1]]) or 0.01)
             try:
                 data, (address, _port) = sock.recvfrom(MAX_PACKET)
             except socket.timeout:
-                break
+                continue
             except OSError:
                 break
             try:

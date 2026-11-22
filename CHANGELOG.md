@@ -40,9 +40,10 @@ All notable changes are documented here. The format follows
   [Docker](docs/docker.md#healthcheck).
 - Printer search in setup: if no printer is configured yet, `pushscan2folder
   setup` (and the first double click on Windows) looks for eSCL scanners in the
-  local network with mDNS (Bonjour, `_uscan._tcp`, about 2 seconds, standard
-  library only) and lists them to pick by number. If nothing answers, it asks
-  for the IP address as before.
+  local network with mDNS (Bonjour, `_uscan._tcp`, about 5 seconds, standard
+  library only) and lists them to pick by number; `s` searches again. The query is sent three
+  times on every network adapter. If nothing answers, it asks for the IP
+  address.
 - Dependabot for GitHub Actions and the Docker base image (monthly).
 
 ### Fixed

@@ -123,7 +123,7 @@ Fehler, damit ein Tippfehler keinen Schutz ausschaltet.
   übernimmt sie innerhalb eines Abfragezyklus, siehe
   [Datei im laufenden Betrieb ändern](configuration.de.md#datei-im-laufenden-betrieb-ändern).
   Nur die `[web]`-Optionen brauchen einen Neustart.
-  Die Druckersuche führt dieselbe mDNS-Suche wie das Setup aus (etwa 2
+  Die Druckersuche führt dieselbe mDNS-Suche wie das Setup aus (etwa 5
   Sekunden) und listet Adresse und Modell jedes gefundenen Scanners, jeweils mit
   einem Knopf "Use". Der verwendete Drucker ist mit "in use" markiert. "Use"
   schreibt `printer` in die Konfigurationsdatei und lässt alles andere

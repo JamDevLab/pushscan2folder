@@ -49,7 +49,7 @@ PYTHONPATH=src python3 -m pushscan2folder setup
 
 Ist noch kein Drucker eingetragen, sucht das Setup zuerst im lokalen Netz mit
 mDNS (Bonjour, Dienst `_uscan._tcp`) nach eSCL-Scannern. Die Suche dauert etwa
-2 Sekunden. Sie listet Adresse und Modell jedes gefundenen Scanners mit einer
+5 Sekunden. Sie listet Adresse und Modell jedes gefundenen Scanners mit einer
 Nummer auf, und du gibst diese Nummer oder eine IP-Adresse ein. Antwortet
 niemand, fragt das Setup wie bisher nach der IP-Adresse. Ein Firewall-Filter für
 Multicast oder ein VPN kann der Grund sein. Die IP-Adresse steht in den

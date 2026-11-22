@@ -114,7 +114,7 @@ error, so a typo cannot turn a protection off.
   within a poll cycle, see
   [Changing the file while running](configuration.md#changing-the-file-while-running).
   Only the `[web]` options need a restart.
-  The printer search runs the same mDNS search as setup (about 2 seconds) and
+  The printer search runs the same mDNS search as setup (about 5 seconds) and
   lists the address and model of each scanner found, each with a "Use" button.
   The printer in use is marked "in use". "Use" writes `printer` into the config
   file and keeps everything else; the new printer is used from the next poll

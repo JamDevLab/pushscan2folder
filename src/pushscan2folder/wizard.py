@@ -115,25 +115,30 @@ class Setup:
     # --- questions -------------------------------------------------------------
 
     def pick_scanner(self) -> str | None:
-        """Search the network and let the user pick a scanner by number (or
-        type an address). None: nothing found or nothing picked."""
-        self.out("Searching the network for scanners (eSCL, a few seconds) ...")
-        try:
-            found = self.discover_fn()
-        except Exception as exc:  # the search is only a help
-            self.out(f"The search failed: {exc}")
-            return None
-        if not found:
-            self.out("No scanner answered. Enter the IP address of the printer, it is "
-                     "shown in the network settings on the printer panel.")
-            return None
-        for number, scanner in enumerate(found, 1):
-            label = scanner.model or scanner.name
-            self.out(f"  {number}  {scanner.address}  {label}")
-        answer = self.ask("Number of your printer, or its IP address", "1")
-        if answer.isdigit() and 1 <= int(answer) <= len(found):
-            return found[int(answer) - 1].address
-        return answer or None
+        """Search the network and let the user pick a scanner by number, type
+        an address, or search again ("s"). None: no address given."""
+        while True:
+            self.out("Searching the network for scanners (eSCL, about 5 seconds) ...")
+            try:
+                found = self.discover_fn()
+            except Exception as exc:  # the search is only a help
+                self.out(f"The search failed: {exc}")
+                return None
+            if found:
+                for number, scanner in enumerate(found, 1):
+                    label = scanner.model or scanner.name
+                    self.out(f"  {number}  {scanner.address}  {label}")
+                answer = self.ask("Number of your printer, its IP address, or s to search "
+                                  "again", "1")
+            else:
+                self.out("No scanner answered. The IP address of the printer is shown in "
+                         "the network settings on the printer panel.")
+                answer = self.ask("Printer IP address, or s to search again", "s")
+            if answer.strip().lower() == "s":
+                continue
+            if found and answer.isdigit() and 1 <= int(answer) <= len(found):
+                return found[int(answer) - 1].address
+            return answer or None
 
     def ask_printer(self, current: str | None) -> str:
         host = self.pick_scanner() if not current and self.discover_fn is not None else None

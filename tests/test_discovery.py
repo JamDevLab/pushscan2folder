@@ -1,6 +1,7 @@
 import socket
 import struct
 import unittest
+from unittest import mock
 
 from pushscan2folder import discovery
 from pushscan2folder.discovery import Scanner, build_query, parse_response
@@ -97,6 +98,39 @@ class DiscoverTests(unittest.TestCase):
         self.assertEqual(found, [Scanner("192.168.1.7", "Other", ""),
                                  Scanner("192.168.1.50", "Canon TR8500 series",
                                          "Canon TR8500 series")])
+
+    def test_sent_on_every_adapter_and_repeated(self):
+        class Sock(FakeSocket):
+            def __init__(self):
+                super().__init__([])
+                self.interface = None
+
+            def setsockopt(self, level, option, value):
+                if option == socket.IP_MULTICAST_IF:
+                    if value == socket.inet_aton("10.9.9.9"):
+                        raise OSError("no such adapter")
+                    self.interface = socket.inet_ntoa(value)
+
+            def sendto(self, data, addr):
+                self.sent.append((self.interface, addr))
+
+        sock = Sock()
+        with mock.patch.object(discovery, "RESEND_AT", (0.0, 0.05)):
+            discovery.discover(timeout=0.2, sock_factory=lambda: sock,
+                               interfaces=["192.168.1.2", "10.9.9.9", "172.20.0.1"])
+        # default adapter plus two working ones, twice; the broken one is skipped
+        self.assertEqual([i for i, _ in sock.sent],
+                         ["0.0.0.0", "192.168.1.2", "172.20.0.1"] * 2)
+        self.assertTrue(all(a == discovery.MDNS_ADDR for _, a in sock.sent))
+
+    def test_local_addresses_skip_loopback(self):
+        infos = [(socket.AF_INET, 2, 17, "", ("127.0.1.1", 0)),
+                 (socket.AF_INET, 2, 17, "", ("192.168.1.2", 0)),
+                 (socket.AF_INET, 1, 6, "", ("192.168.1.2", 0))]
+        with mock.patch.object(discovery.socket, "getaddrinfo", return_value=infos):
+            self.assertEqual(discovery.local_addresses(), ["192.168.1.2"])
+        with mock.patch.object(discovery.socket, "getaddrinfo", side_effect=OSError):
+            self.assertEqual(discovery.local_addresses(), [])
 
     def test_network_errors_give_an_empty_list(self):
         def broken():
