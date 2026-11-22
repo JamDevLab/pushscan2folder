@@ -17,7 +17,7 @@
 
 This project is an independent implementation made for interoperability
 (compare Section 69e UrhG and Art. 6 of EU Directive 2009/24/EC). This is not
-legal advice. To keep the project safe:
+legal advice. To keep the project clear of Canon code:
 
 - Never commit Canon binaries, installers, DLLs, disassembly, decompiled code
   or memory addresses taken from Canon software. Do not paste them into

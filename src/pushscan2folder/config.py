@@ -11,6 +11,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from . import panel
+from .desktop import OPEN_MODES
+from .platform_support import replace_file
 from .protocol import check_name
 from .service import (MULTIPAGE_MODES, RESOLUTIONS, TRIM_MAX_MM, Target, Trim,
                       safe_dirname)
@@ -23,6 +25,9 @@ SOURCES = ("auto", "platen", "adf")
 
 class ConfigError(ValueError):
     """The configuration file is unreadable or invalid."""
+
+
+SAME_FOLDER = "."  # target output: the output directory itself, no subfolder
 
 
 @dataclass
@@ -47,11 +52,16 @@ class Config:
     color: str | None = None
     format: str | None = None
     source: str | None = None
+    open_after_scan: str | None = None
     size: str | None = None
     trim_left: float | None = None
     trim_top: float | None = None
     trim_right: float | None = None
     trim_bottom: float | None = None
+    web_enabled: bool | None = None
+    web_bind: str | None = None
+    web_port: int | None = None
+    web_password_file: str | None = None
     targets: list[TargetSpec] = field(default_factory=list)
 
     def trim(self) -> Trim:
@@ -140,6 +150,14 @@ class _Reader:
             raise self._bad(key, f"a number of mm from 0 to {TRIM_MAX_MM:g}")
         return float(value)
 
+    def port(self, key: str) -> int | None:
+        if key not in self.table:
+            return None
+        value = self.table[key]
+        if isinstance(value, bool) or not isinstance(value, int) or not 1 <= value <= 65535:
+            raise self._bad(key, "a port number from 1 to 65535")
+        return value
+
     def table_(self, key: str) -> dict | None:
         if key not in self.table:
             return None
@@ -210,7 +228,7 @@ def load_config_text(text: str, fname: str = "config.toml") -> Config:
 def parse_config(data: dict, fname: str = "config.toml") -> Config:
     """Validate an already parsed TOML table. Raises ConfigError."""
     top = _Reader(data, fname, {"printer", "output", "interval", "verbose",
-                                "ignore_panel", "multipage", "defaults", "target"})
+                                "ignore_panel", "multipage", "defaults", "web", "target"})
     cfg = Config(printer=top.str_("printer"), interval=top.number("interval"),
                  verbose=top.bool_("verbose"), ignore_panel=top.bool_("ignore_panel"),
                  multipage=top.str_("multipage", tuple(MULTIPAGE_MODES)))
@@ -220,17 +238,26 @@ def parse_config(data: dict, fname: str = "config.toml") -> Config:
     defaults = top.table_("defaults")
     if defaults is not None:
         d = _Reader(defaults, f"{fname}: [defaults]",
-                    {"resolution", "color", "format", "source", "size",
+                    {"resolution", "color", "format", "source", "size", "open_after_scan",
                      "trim_left", "trim_top", "trim_right", "trim_bottom"})
         cfg.resolution = d.int_("resolution", RESOLUTIONS)
         cfg.color = d.str_("color", COLORS)
         cfg.format = d.str_("format", FORMATS)
         cfg.source = d.str_("source", SOURCES)
         cfg.size = d.str_("size", tuple(panel.REGIONS))
+        cfg.open_after_scan = d.str_("open_after_scan", OPEN_MODES)
         cfg.trim_left = d.mm("trim_left")
         cfg.trim_top = d.mm("trim_top")
         cfg.trim_right = d.mm("trim_right")
         cfg.trim_bottom = d.mm("trim_bottom")
+
+    web = top.table_("web")
+    if web is not None:
+        w = _Reader(web, f"{fname}: [web]", {"enabled", "bind", "port", "password_file"})
+        cfg.web_enabled = w.bool_("enabled")
+        cfg.web_bind = w.str_("bind")
+        cfg.web_port = w.port("port")
+        cfg.web_password_file = w.str_("password_file")
 
     raw_targets = data.get("target", [])
     if not isinstance(raw_targets, list):
@@ -301,10 +328,15 @@ def dump_config(cfg: Config) -> str:
         blocks.append(top)
     defaults = _lines([("resolution", cfg.resolution), ("color", cfg.color),
                        ("format", cfg.format), ("source", cfg.source), ("size", cfg.size),
+                       ("open_after_scan", cfg.open_after_scan),
                        ("trim_left", cfg.trim_left), ("trim_top", cfg.trim_top),
                        ("trim_right", cfg.trim_right), ("trim_bottom", cfg.trim_bottom)])
     if defaults:
         blocks.append(["[defaults]"] + defaults)
+    web = _lines([("enabled", cfg.web_enabled), ("bind", cfg.web_bind),
+                  ("port", cfg.web_port), ("password_file", cfg.web_password_file)])
+    if web:
+        blocks.append(["[web]"] + web)
     for spec in cfg.targets:
         block = ["[[target]]"] + _lines([("name", spec.name), ("output", spec.output),
                                          ("document_multipage", spec.document_multipage)])
@@ -334,7 +366,8 @@ def write_config(path: Path, text: str) -> None:
     """Write `text` to `path`: atomically (temp file + os.replace) when
     possible, otherwise in place. Creates the parent directory. Keeps the
     permissions of an existing file; a new file is private (0600), as the
-    web page may create it. Raises OSError."""
+    web page may create it. On Windows chmod only toggles the read-only flag,
+    so the file is protected by the user's profile folder instead. Raises OSError."""
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     existed = path.exists()
@@ -348,7 +381,7 @@ def write_config(path: Path, text: str) -> None:
             fh.flush()
             os.fsync(fh.fileno())
         os.chmod(tmp, mode)
-        os.replace(tmp, path)
+        replace_file(tmp, path)
         tmp = None
     except OSError as exc:
         if not existed or exc.errno not in _INPLACE_ERRNOS:

@@ -1,0 +1,23 @@
+# pushscan2folder for development: builds the image from this clone instead
+# of pulling the published one, and logs more.
+# Start:  docker compose -f docker-compose.dev.yml up -d --build
+# Logs:   docker compose -f docker-compose.dev.yml logs -f
+# Uses the same ./scans and ./config folders as docker-compose.yml, so stop
+# one before starting the other: both would register the same panel names.
+services:
+  pushscan2folder:
+    build: .
+    image: pushscan2folder:dev
+    restart: "no"
+    user: "1000:1000"                    # owner of ./scans and ./config (id -u, id -g)
+    environment:
+      PUSHSCAN_PRINTER: 192.168.1.50     # printer IP or host name
+      PUSHSCAN_CONFIG: /config/config.toml
+      PUSHSCAN_VERBOSE: "1"              # debug log
+      # PUSHSCAN_WEB: "1"                # web page
+      # PUSHSCAN_WEB_PASSWORD: change-me-please   # your own, at least 8 characters
+    volumes:
+      - ./scans:/scans
+      - ./config:/config
+    # ports:
+    #   - "8080:8080"                    # web page

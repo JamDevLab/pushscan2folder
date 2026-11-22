@@ -34,8 +34,11 @@ from pathlib import Path, PurePosixPath
 from urllib.parse import parse_qs, urlsplit
 
 from . import SOURCE_URL, __version__, panel
-from .config import (COLORS, FORMATS, SOURCES, Config, ConfigError, TargetSpec, dump_config,
+from .config import (COLORS, FORMATS, SAME_FOLDER, SOURCES, Config, ConfigError, TargetSpec,
+                     dump_config,
                      load_config, load_config_text, parse_config, size_name, write_config)
+from .desktop import OPEN_MODES
+from .platform_support import component_problem
 from .protocol import PANEL_CHARS, VISIBLE_NAME_CHARS, check_name
 from .service import (MULTIPAGE_MODES, RESOLUTIONS, TRIM_MAX_MM, check_targets,
                       safe_dirname)
@@ -59,7 +62,15 @@ ARIA_CURRENT = ' aria-current="page"'
 MAX_FOLDER_CHARS = 255
 COOKIE = "p2f_session"
 SECURE_COOKIE = "__Host-p2f_session"  # needs Secure, Path=/ and no Domain
-FAVICON = (Path(__file__).with_name("favicon.svg")).read_bytes()
+def _read_resource(name: str) -> bytes:
+    """Data file next to this module; also found in a PyInstaller bundle."""
+    path = Path(__file__).with_name(name)
+    if not path.is_file() and getattr(sys, "_MEIPASS", None):
+        path = Path(sys._MEIPASS) / "pushscan2folder" / name
+    return path.read_bytes()
+
+
+FAVICON = _read_resource("favicon.svg")
 
 SECURITY_HEADERS = {
     "Content-Security-Policy": "default-src 'none'; script-src 'self'; connect-src 'self'; "
@@ -226,13 +237,18 @@ _FOLDER_BAD_CHARS = re.compile(r"[\x00-\x1f\x7f\\]")
 
 
 def check_web_folder(value: str, base: Path) -> None:
-    """A folder typed on the web page must be a plain relative path below the
-    base output directory: no absolute path, no "." or ".." component, no
-    empty component, no backslash or control character, and (symlinks
-    resolved) it must end up strictly inside the resolved base. Raises
+    """A folder typed on the web page must be "." (the base output directory
+    itself) or a plain relative path below it: no absolute path, no "." or ".." component, no
+    empty component, no backslash, control character or any of : < > " | ? *
+    (drive letters, NTFS streams, wildcards), no Windows device name (CON,
+    NUL, COM1 ...) and no component ending in a dot or a space. These rules
+    are the same on every platform. Finally (symlinks resolved, UNC paths
+    included) it must end up strictly inside the resolved base. Raises
     ValueError."""
     if not value:
         raise ValueError("folder is empty")
+    if value == SAME_FOLDER:
+        return  # "." alone: straight into the output directory
     if len(value) > MAX_FOLDER_CHARS:
         raise ValueError(f"folder is longer than {MAX_FOLDER_CHARS} characters")
     if _FOLDER_BAD_CHARS.search(value):
@@ -243,6 +259,10 @@ def check_web_folder(value: str, base: Path) -> None:
     parts = value.split("/")
     if any(part in ("", ".", "..") for part in parts):
         raise ValueError('folder must not contain empty, "." or ".." parts')
+    for part in parts:
+        problem = component_problem(part)
+        if problem:
+            raise ValueError(f"folder part {part!r}: {problem}")
     root = Path(base).resolve(strict=False)
     resolved = (root / value).resolve(strict=False)
     if resolved == root or not resolved.is_relative_to(root):
@@ -418,12 +438,12 @@ def apply_targets(ctx: WebContext, rows: list[Row]) -> tuple[list[TargetSpec], l
 
 # Built-in values used when a key is not set anywhere.
 BUILTIN = {"resolution": "300", "color": "color", "format": "pdf", "source": "auto",
-           "size": "a4", "multipage": "document", "interval": "4",
+           "size": "a4", "multipage": "document", "interval": "4", "open_after_scan": "off",
            "trim_left": "0", "trim_top": "0", "trim_right": "0", "trim_bottom": "0"}
 TRIM_KEYS = ("trim_left", "trim_top", "trim_right", "trim_bottom")
 # Config keys the settings form edits (top level and [defaults]).
 SETTING_KEYS = ("interval", "ignore_panel", "multipage", "resolution", "color", "format",
-                "source", "size") + TRIM_KEYS
+                "source", "size", "open_after_scan") + TRIM_KEYS
 NUMBER_KEYS = ("interval",) + TRIM_KEYS
 
 
@@ -509,6 +529,13 @@ def check_raw_config(ctx: WebContext, new: Config, disk: Config) -> list[str]:
     if new.printer != disk.printer and new.printer != ctx.printer:
         errors.append('"printer" cannot be changed on the web page, only in the file '
                       "itself or by the environment.")
+    # [web] decides who can reach this page and which file holds the password:
+    # changing it from here could expose the page or point the password at a
+    # file with known content.
+    web_keys = ("web_enabled", "web_bind", "web_port", "web_password_file")
+    if any(getattr(new, k) != getattr(disk, k) for k in web_keys):
+        errors.append('The [web] table cannot be changed on the web page, only in the '
+                      "file itself or with pushscan2folder setup.")
     locked = locked_specs(disk, ctx.output)
     for spec in new.targets:
         if web_editable(spec, ctx.output):
@@ -1029,7 +1056,8 @@ def render_targets(ctx: WebContext, csrf: str, rows: list[Row] | None = None,
                  + ". Only targets are edited here; the scan defaults and other settings are "
                  'on the <a href="/settings">Settings</a> page. Saving rewrites the file and '
                  "<strong>comments in it are not preserved</strong>. Folders typed here are always created below the "
-                 f"output directory <code>{esc(ctx.output)}</code>; absolute paths and "
+                 f"output directory <code>{esc(ctx.output)}</code> (<code>.</code> means the "
+                 "output directory itself); absolute paths and "
                  "<code>..</code> can only be set in the config file. Allowed name characters: "
                  f"{esc(PANEL_CHARS)} (max. 31).</p>")
     try:
@@ -1121,6 +1149,15 @@ def render_settings(ctx: WebContext, csrf: str, values: dict[str, str] | None = 
         note = (f' Overridden by {esc(ctx.overrides[key])}.' if key in ctx.overrides else "")
         ro.append(f'<p class="ro">{label}: <code>{esc(shown)}</code></p>'
                   f'<p class="hint">Not editable here. Change it in the config file.{note}</p>')
+    try:
+        disk = read_config(ctx)
+    except ConfigError:
+        disk = Config()
+    ro.append('<p class="ro">Web page: <code>enabled={}, bind={}, port={}, password file={}'
+              '</code></p><p class="hint">The <code>[web]</code> table of the config file is '
+              "not editable here, so the login cannot be changed from the web page.</p>".format(
+                  esc("yes" if disk.web_enabled else "no"), esc(disk.web_bind or "-"),
+                  esc(disk.web_port or "-"), esc(disk.web_password_file or "-")))
     parts.append('<h2>Fixed</h2><section>' + "".join(ro) + "</section>")
 
     def v(key):
@@ -1156,6 +1193,11 @@ def render_settings(ctx: WebContext, csrf: str, values: dict[str, str] | None = 
         _field("Poll interval (seconds)", _text_input("interval", v("interval"), "4"),
                "interval", "How often the printer is asked for scan requests. Must be "
                "greater than 0.", ctx),
+        _field("Open after scan", sel("open_after_scan", v("open_after_scan"),
+                                      [(m, m) for m in OPEN_MODES]), "open_after_scan",
+               "off, folder (opens the folder, on Windows with the new file selected) or "
+               "file (opens the scan). Only works when the program runs on a desktop PC "
+               "with a logged-in user, not in Docker or on a server.", ctx),
         _field("Ignore panel", _check("ignore_panel", bool(v("ignore_panel")),
                                       "Always use the values above", False),
                "ignore_panel", "Off: the choices made on the printer panel (colour, size, "

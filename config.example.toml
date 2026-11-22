@@ -1,7 +1,8 @@
 # Example configuration for pushscan2folder.
 #
 # Default location: ~/.config/pushscan2folder/config.toml
-# (or $XDG_CONFIG_HOME/pushscan2folder/config.toml), or pass --config PATH /
+# (or $XDG_CONFIG_HOME/pushscan2folder/config.toml; on Windows
+# %APPDATA%\pushscan2folder\config.toml), or pass --config PATH /
 # set PUSHSCAN_CONFIG. Precedence: command line > PUSHSCAN_* env vars > this file >
 # built-in defaults. Every key is optional.
 # Docker (docker-compose.yml): this file is ./config/config.toml, and
@@ -21,12 +22,23 @@ color = "color"            # color | gray
 format = "pdf"             # pdf | jpeg
 source = "auto"            # auto | platen | adf
 size = "a4"                # a4 | letter | legal | 10x15 | 13x18
+open_after_scan = "off"    # off | folder | file (desktop PC only: open the result)
 # Trim: cut off a border at the glass edge by scanning a smaller area
 # (platen only, not the ADF). In mm, 0 to 50; 0 means no trim.
 trim_left = 0              # mm
 trim_top = 0               # mm
 trim_right = 0             # mm; TR8550: about 3 (to be verified)
 trim_bottom = 0            # mm; TR8550: about 2 (to be verified)
+
+# Optional web page (status, log, target editor). The password is NOT stored
+# here: put it in a file of its own (`pushscan2folder setup` does this) and
+# name the file. The web page shows this table but cannot change it.
+# Precedence: --web / --web-port / --web-bind and PUSHSCAN_WEB* win over it.
+# [web]
+# enabled = true
+# bind = "127.0.0.1"         # only this PC; 0.0.0.0 = reachable from the network
+# port = 8080
+# password_file = "web_password.txt"   # relative to this config file
 
 # One [[target]] per entry on the printer panel (name: max 31 chars, unique).
 

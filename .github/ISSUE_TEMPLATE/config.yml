@@ -1,0 +1,5 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Documentation
+    url: https://github.com/JamDevLab/pushscan2folder#readme
+    about: Setup, configuration and troubleshooting are described in the README and the docs folder.

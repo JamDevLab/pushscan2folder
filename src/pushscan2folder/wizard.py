@@ -1,0 +1,300 @@
+"""Interactive setup (`pushscan2folder setup`): asks a few questions in the
+console and writes the config file.
+
+All input and output goes through arguments (input_fn, getpass_fn, probe_fn,
+out), so the flow can be tested without a console or a network."""
+from __future__ import annotations
+
+import getpass
+import os
+import shutil
+from pathlib import Path
+from typing import Callable
+
+from . import platform_support, protocol
+from .config import (SAME_FOLDER, Config, ConfigError, TargetSpec, dump_config, load_config,
+                     safe_dirname, write_config)
+from .escl import EsclClient
+from .web import MIN_PASSWORD_LENGTH
+
+EXAMPLE_PASSWORD = "change-me-please"  # placeholder in docker-compose.yml
+DEFAULT_PORT = 8080
+DEFAULT_BIND = "127.0.0.1"
+PASSWORD_FILE_NAME = "web_password.txt"
+EXISTING_CHOICES = {"1": "use", "2": "change", "3": "new"}
+
+
+def target_folder(base: Path, spec: TargetSpec) -> Path:
+    """Where the scans of `spec` end up (as Config.build_targets does it)."""
+    return base / (spec.output if spec.output else safe_dirname(spec.name))
+
+
+def password_problem(password: str) -> str | None:
+    """Why `password` is not accepted for the web page, or None."""
+    if len(password) < MIN_PASSWORD_LENGTH:
+        return f"the web password must have at least {MIN_PASSWORD_LENGTH} characters"
+    if password == EXAMPLE_PASSWORD:
+        return "replace the example web password with your own"
+    return None
+
+
+def probe_printer(host: str, timeout: float = 5.0) -> tuple[bool, str]:
+    """Ask the printer for its eSCL status with a short timeout.
+    Returns (reachable, text for the user)."""
+    try:
+        status = EsclClient(host, timeout=timeout).status()
+    except Exception as exc:  # any network or protocol error means "not reachable"
+        return False, f"no answer from {host}: {exc}"
+    state = status.get("state") or "unknown"
+    return True, f"printer answered, state: {state}"
+
+
+def write_password_file(path: Path, password: str) -> None:
+    """Store the web password in its own file, private (0600) where the
+    platform supports it. Raises OSError."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8") as fh:
+        fh.write(password + "\n")
+    try:
+        os.chmod(path, 0o600)  # also for a file that existed before
+    except OSError:
+        pass
+
+
+class Setup:
+    def __init__(self, config_path: Path, *, input_fn: Callable[[str], str] | None = None,
+                 getpass_fn: Callable[[str], str] | None = None,
+                 probe_fn: Callable[[str], tuple[bool, str]] | None = None,
+                 autostart_fn: Callable[[list[str]], int] | None = None,
+                 start_fn: Callable[[list[str]], int] | None = None,
+                 out: Callable[..., None] = print, default_name: str = "scan"):
+        self.path = Path(config_path)
+        # looked up here, not as default values, so tests can replace them
+        self.input = input_fn or input
+        self.getpass = getpass_fn or getpass.getpass
+        self.probe = probe_fn or probe_printer
+        self.autostart_fn, self.out, self.default_name = autostart_fn, out, default_name
+        self.start_fn = start_fn
+        self.background_started = False  # True after a successful background start
+
+    # --- small prompts ---------------------------------------------------------
+
+    def ask(self, question: str, default: str | None = None) -> str:
+        suffix = f" [{default}]" if default else ""
+        answer = self.input(f"{question}{suffix}: ").strip()
+        return answer or (default or "")
+
+    def yes_no(self, question: str, default: bool) -> bool:
+        hint = "Y/n" if default else "y/N"
+        while True:
+            answer = self.input(f"{question} [{hint}]: ").strip().lower()
+            if not answer:
+                return default
+            if answer in ("y", "yes", "j", "ja"):
+                return True
+            if answer in ("n", "no", "nein"):
+                return False
+            self.out("Please answer y or n.")
+
+    # --- questions -------------------------------------------------------------
+
+    def ask_printer(self, current: str | None) -> str:
+        while True:
+            host = self.ask("Printer IP address or host name", current)
+            if not host:
+                self.out("The printer is required.")
+                continue
+            self.out(f"Checking {host} ...")
+            ok, text = self.probe(host)
+            self.out(("OK: " if ok else "Problem: ") + text)
+            if ok:
+                return host
+            if self.yes_no("Use this address anyway?", False):
+                return host
+
+    def ask_name(self, current: str) -> str:
+        self.out("The panel name is what you pick on the printer under Scan to PC.")
+        while True:
+            name = self.ask("Panel name", current)
+            try:
+                protocol.check_name(name)
+                return name
+            except ValueError as exc:
+                self.out(f"Invalid name: {exc}")
+
+    def ask_password(self) -> str:
+        self.out(f"The web password needs at least {MIN_PASSWORD_LENGTH} characters. "
+                 "It is stored in a separate file, not in config.toml.")
+        while True:
+            first = self.getpass("Web password: ")
+            problem = password_problem(first)
+            if problem:
+                self.out(f"Error: {problem}")
+                continue
+            if self.getpass("Repeat the password: ") != first:
+                self.out("The two entries differ, try again.")
+                continue
+            return first
+
+    def ask_web(self, cfg: Config) -> None:
+        if not self.yes_no("Enable the web page (status, log, target editor)?",
+                           bool(cfg.web_enabled)):
+            cfg.web_enabled = False
+            return
+        cfg.web_enabled = True
+        while True:
+            port = self.ask("Web port", str(cfg.web_port or DEFAULT_PORT))
+            if port.isdigit() and 1 <= int(port) <= 65535:
+                cfg.web_port = int(port)
+                break
+            self.out("Enter a port number from 1 to 65535.")
+        self.out("Bind address: 127.0.0.1 means only this PC can open the page. "
+                 "0.0.0.0 makes it reachable from your whole network.")
+        cfg.web_bind = self.ask("Bind address", cfg.web_bind or DEFAULT_BIND)
+        existing = Path(cfg.web_password_file) if cfg.web_password_file else None
+        if existing is not None and existing.is_file() \
+                and self.yes_no("Keep the existing web password?", True):
+            return
+        password_file = self.path.with_name(PASSWORD_FILE_NAME)
+        write_password_file(password_file, self.ask_password())
+        cfg.web_password_file = str(password_file)
+        if platform_support.is_windows():
+            self.out(f"The password file is in your user profile ({password_file}), "
+                     "which other standard users cannot read.")
+
+    def ask_open_after_scan(self, cfg: Config) -> None:
+        """Windows only: open the folder after each scan."""
+        if not platform_support.is_windows():
+            return
+        if self.yes_no("Open the folder after each scan?", cfg.open_after_scan != "off"):
+            cfg.open_after_scan = "file" if cfg.open_after_scan == "file" else "folder"
+        else:
+            cfg.open_after_scan = "off"
+
+    def offer_start(self, log_path: Path) -> bool:
+        """Ask how to start now. True: run in the foreground now. On Windows the
+        background comes first (it survives closing the window)."""
+        if platform_support.is_windows() and self.start_fn is not None \
+                and self.yes_no("Run in the background now?", True):
+            if self.start_fn(["--config", str(self.path), "--log-file", str(log_path)]) == 0:
+                self.background_started = True
+                self.out("It keeps running after you close this window.")
+                self.out("To stop it later, run: pushscan2folder stop")
+                self.out(f"Log file: {log_path}")
+                return False
+            self.out("The background start failed, see the message above.")
+        return self.yes_no("Start now?", True)
+
+    # --- an existing config file ----------------------------------------------
+
+    def show(self, cfg: Config) -> None:
+        base = Path(cfg.output or platform_support.default_output())
+        self.out(f"Found the config file {self.path}")
+        self.out(f"  printer: {cfg.printer or 'not set'}")
+        for spec in cfg.targets:
+            self.out(f"  panel name {spec.name!r} -> {target_folder(base, spec)}")
+        self.out(f"  web:     {'on' if cfg.web_enabled else 'off'}")
+
+    def ask_existing(self) -> str:
+        """use, change or new."""
+        self.out("  1  use these settings")
+        self.out("  2  change them")
+        self.out("  3  start over with a new configuration")
+        while True:
+            answer = self.ask("Your choice", "1")
+            if answer in EXISTING_CHOICES:
+                return EXISTING_CHOICES[answer]
+            self.out("Please answer 1, 2 or 3.")
+
+    def ask_same_folder(self, cfg: Config) -> None:
+        """One target that saves into a subfolder of its name (older setups):
+        offer to save straight into the output folder instead."""
+        if len(cfg.targets) != 1 or cfg.targets[0].output:
+            return
+        spec = cfg.targets[0]
+        base = Path(cfg.output or platform_support.default_output())
+        if self.yes_no(f"Save the scans straight into {base} instead of "
+                       f"{target_folder(base, spec)}?", True):
+            spec.output = SAME_FOLDER
+
+    def backup(self) -> None:
+        """Keep a copy of the old file before it is replaced."""
+        backup = self.path.with_name(self.path.name + ".bak")
+        shutil.copy2(self.path, backup)
+        self.out(f"The old file is kept as {backup}")
+
+    # --- the flow --------------------------------------------------------------
+
+    def run(self) -> bool:
+        """Ask, write the config file and return True if the user wants to
+        start now. Raises ConfigError (existing file invalid) and OSError."""
+        cfg = Config()
+        if self.path.is_file():
+            try:
+                cfg = load_config(self.path)
+            except ConfigError as exc:
+                self.out(f"The config file {self.path} has an error: {exc}")
+                if not self.yes_no("Start over with a new configuration?", False):
+                    raise  # a broken file is never overwritten without asking
+                self.backup()
+                cfg = Config()
+            else:
+                self.show(cfg)
+                choice = self.ask_existing()
+                if choice == "use":
+                    return self.offer_start(platform_support.default_log_path())
+                if choice == "new":
+                    self.backup()
+                    cfg = Config()
+                else:
+                    self.out("Comments in the file are not kept when it is saved again.")
+        else:
+            self.out(f"The config file will be {self.path}")
+
+        cfg.printer = self.ask_printer(cfg.printer)
+        if cfg.targets:
+            self.ask_same_folder(cfg)
+            self.out("Your panel names and folders (the [[target]] entries) stay as they are. "
+                     "Edit the config file to change them.")
+        else:
+            name = self.ask_name(self.default_name)
+            output = self.ask("Folder for scans",
+                              str(cfg.output or platform_support.default_output()))
+            cfg.output = Path(output)
+            # one target: the scans go straight into that folder, no subfolder
+            cfg.targets = [TargetSpec(name, output=SAME_FOLDER)]
+        self.ask_web(cfg)
+        self.ask_open_after_scan(cfg)
+        log_path = platform_support.default_log_path()
+        want_autostart = (platform_support.is_windows() and self.autostart_fn is not None
+                          and self.yes_no("Start automatically when you log in to Windows?",
+                                          True))
+        write_config(self.path, dump_config(cfg))  # before autostart, which reads it
+        autostart_done = False
+        if want_autostart:
+            code = self.autostart_fn(["--config", str(self.path), "--log-file", str(log_path)])
+            autostart_done = code == 0
+            if not autostart_done:
+                self.out("Autostart could not be installed, see the message above.")
+        self.summary(cfg, autostart_done, log_path)
+        return self.offer_start(log_path)
+
+    def summary(self, cfg: Config, autostart: bool, log_path: Path) -> None:
+        out = self.out
+        out("")
+        out("Setup done.")
+        out(f"  Config file: {self.path}")
+        out(f"  Printer:     {cfg.printer}")
+        base = Path(cfg.output or platform_support.default_output())
+        for spec in cfg.targets:
+            out(f"  Scans of '{spec.name}' go to: {target_folder(base, spec)}")
+        if cfg.web_enabled:
+            host = "127.0.0.1" if cfg.web_bind in (None, "0.0.0.0") else cfg.web_bind
+            out(f"  Web page:    http://{host}:{cfg.web_port or DEFAULT_PORT}")
+        else:
+            out("  Web page:    off")
+        if autostart:
+            out(f"  Autostart:   on, log file {log_path}")
+        out("To change something later, edit the config file or run "
+            "'pushscan2folder setup' again.")

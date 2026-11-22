@@ -1,0 +1,117 @@
+name: release
+
+# Builds the Windows installer (Inno Setup around the PyInstaller folder
+# with pushscan2folder.exe and _internal) and attaches it to the GitHub
+# release of the tag. Pushes to other branches than main and manual runs
+# only build and keep the exe as a workflow artifact (for testing).
+on:
+  push:
+    tags: ["v*"]
+    branches-ignore: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  windows-exe:
+    runs-on: windows-latest
+    env:
+      PYTHONPATH: src
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Run tests
+        run: python -m unittest discover -s tests
+      - name: Check the tag matches the version
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          $version = python -c "import pushscan2folder; print(pushscan2folder.__version__)"
+          if ("v$version" -ne $env:TAG) {
+            Write-Error "tag $env:TAG does not match version $version in src/pushscan2folder/__init__.py"
+            exit 1
+          }
+      - name: Install PyInstaller with a self-built bootloader
+        # The prebuilt bootloaders ship with a lot of malware too, so virus
+        # scanners distrust them; compiling our own avoids most false alarms.
+        run: |
+          python -m pip download --no-binary :all: --no-deps pyinstaller==6.22.3 -d pyi-src
+          tar -xzf pyi-src/pyinstaller-6.22.3.tar.gz -C pyi-src
+          Push-Location pyi-src/pyinstaller-6.22.3/bootloader
+          Remove-Item -Recurse -Force ../PyInstaller/bootloader/Windows-64bit-intel
+          python ./waf all --target-arch=64bit
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+          Pop-Location
+          if (-not (Test-Path pyi-src/pyinstaller-6.22.3/PyInstaller/bootloader/Windows-64bit-intel/run.exe)) {
+            Write-Error "bootloader was not built"
+            exit 1
+          }
+          python -m pip install ./pyi-src/pyinstaller-6.22.3
+      - name: Build the pushscan2folder folder
+        # A folder build (--onedir) unpacks nothing at start, which also
+        # avoids false alarms of one-file exes.
+        run: >
+          pyinstaller --onedir --name pushscan2folder --paths src
+          --icon packaging/pushscan2folder.ico
+          --add-data "src/pushscan2folder/favicon.svg;pushscan2folder"
+          --noconfirm packaging/run_pushscan2folder.py
+      - name: Smoke test
+        run: |
+          dist\pushscan2folder\pushscan2folder.exe --version
+          dist\pushscan2folder\pushscan2folder.exe --help
+      - name: Build the installer
+        run: |
+          $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path $iscc)) {
+            choco install innosetup -y --no-progress
+            if ($LASTEXITCODE -ne 0) { exit 1 }
+          }
+          $version = (& dist\pushscan2folder\pushscan2folder.exe --version).Split(" ")[-1]
+          & $iscc "/DAppVersion=$version" packaging\pushscan2folder.iss
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+      - name: Test the installer (install, run, uninstall)
+        run: |
+          $setup = (Get-ChildItem dist/*-setup.exe).FullName
+          Start-Process $setup -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART" -Wait
+          $app = "$env:LOCALAPPDATA\Programs\pushscan2folder"
+          & "$app\pushscan2folder.exe" --version
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+          if (-not (Test-Path "$app\unins000.exe")) { Write-Error "no uninstaller"; exit 1 }
+          # the form the installer's code uses: --no-pause before the subcommand
+          & "$app\pushscan2folder.exe" --no-pause status
+          if ($LASTEXITCODE -ne 1) { Write-Error "status should report not running"; exit 1 }
+          Start-Process "$app\unins000.exe" -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES" -Wait
+          # the uninstaller finishes in a copy of itself, so wait for the files to go
+          for ($i = 0; $i -lt 30 -and (Test-Path "$app\pushscan2folder.exe"); $i++) { Start-Sleep 1 }
+          if (Test-Path "$app\pushscan2folder.exe") { Write-Error "uninstall left the exe"; exit 1 }
+          # status left exit code 1 behind, which would fail the step
+          exit 0
+      - name: Checksum
+        working-directory: dist
+        run: |
+          $setup = (Get-ChildItem *-setup.exe).Name
+          $hash = (Get-FileHash $setup -Algorithm SHA256).Hash.ToLower()
+          "$hash  $setup" | Out-File -Encoding ascii SHA256SUMS.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pushscan2folder-windows
+          path: |
+            dist/*-setup.exe
+            dist/SHA256SUMS.txt
+      - name: Attach to the GitHub release
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          gh release view $env:TAG --repo ${{ github.repository }} *> $null
+          if ($LASTEXITCODE -ne 0) {
+            gh release create $env:TAG --repo ${{ github.repository }} --title $env:TAG --generate-notes
+            if ($LASTEXITCODE -ne 0) { exit 1 }
+          }
+          gh release upload $env:TAG (Get-ChildItem dist/*-setup.exe).FullName dist/SHA256SUMS.txt --clobber --repo ${{ github.repository }}
+          if ($LASTEXITCODE -ne 0) { exit 1 }

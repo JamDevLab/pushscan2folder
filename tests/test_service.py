@@ -274,8 +274,9 @@ class TargetParsingTests(unittest.TestCase):
         base = Path("/scans")
         t = parse_targets(" scan1 , paperless=consume ,archiv=/data/archiv,Mein Ordner", base)
         self.assertEqual([x.name for x in t], ["scan1", "paperless", "archiv", "Mein Ordner"])
-        self.assertEqual([str(x.outdir) for x in t],
-                         ["/scans/scan1", "/scans/consume", "/data/archiv", "/scans/Mein_Ordner"])
+        self.assertEqual([x.outdir for x in t],
+                         [Path(p) for p in ("/scans/scan1", "/scans/consume", "/data/archiv",
+                                            "/scans/Mein_Ordner")])
 
     def test_invalid(self):
         for spec in ("", " , ", "a,a", "=dir", "x" * 32):
@@ -286,8 +287,8 @@ class TargetParsingTests(unittest.TestCase):
         t = parse_targets("scan1, paperless=/consume@300dpi, archiv@600dpi+JPEG+10x15+mp:both,"
                           "Mein Ordner@mp:off", Path("/scans"))
         self.assertEqual([x.name for x in t], ["scan1", "paperless", "archiv", "Mein Ordner"])
-        self.assertEqual(str(t[1].outdir), "/consume")
-        self.assertEqual(str(t[2].outdir), "/scans/archiv")
+        self.assertEqual(t[1].outdir, Path("/consume"))
+        self.assertEqual(t[2].outdir, Path("/scans/archiv"))
         self.assertEqual(t[0].preset, {})
         self.assertIsNone(t[0].multipage)
         self.assertEqual(t[1].preset, {"resolution": 300})
@@ -322,6 +323,12 @@ class TargetParsingTests(unittest.TestCase):
     def test_safe_dirname(self):
         self.assertEqual(safe_dirname("../etc"), "etc")
         self.assertEqual(safe_dirname("  "), "scan")
+        # valid Windows names on every platform
+        for name, expected in (("CON", "_CON"), ("aux", "_aux"), ("Nul", "_Nul"),
+                               ("com1", "_com1"), ("LPT9", "_LPT9"), ("con.txt", "_con.txt"),
+                               ("a.", "a"), ("a. .", "a"), ("COM1 ", "_COM1"),
+                               ("console", "console"), ("a:b*c", "a_b_c")):
+            self.assertEqual(safe_dirname(name), expected, name)
 
 
 class PresetPrecedenceTests(unittest.TestCase):

@@ -9,6 +9,7 @@ from pushscan2folder import __main__ as cli
 from pushscan2folder import panel
 from pushscan2folder.config import (Config, ConfigError, dump_config, load_config,
                                     load_config_text)
+from pushscan2folder.platform_support import default_config_path, default_output
 from pushscan2folder.service import Trim
 
 EXAMPLE = Path(__file__).resolve().parent.parent / "config.example.toml"
@@ -64,6 +65,7 @@ class ConfigTestBase(unittest.TestCase):
         for key in [k for k in os.environ if k.startswith("PUSHSCAN_")]:
             del os.environ[key]
         os.environ["XDG_CONFIG_HOME"] = str(self.dir / "xdg")
+        os.environ["APPDATA"] = str(self.dir / "appdata")   # Windows equivalent
 
     def write(self, text, name="config.toml"):
         path = self.dir / name
@@ -285,11 +287,12 @@ class PrecedenceTests(ConfigTestBase):
     def test_builtin_defaults_without_config(self):
         args, cfg = cli.parse_args(["run"])
         self.assertEqual((args.output, args.interval, args.resolution, args.multipage),
-                         (Path("./scans"), 4.0, 300, "document"))
+                         (default_output(), 4.0, 300, "document"))
         self.assertEqual(cfg.targets, [])
 
     def test_default_location_and_missing_explicit(self):
-        xdg = self.dir / "xdg" / "pushscan2folder"
+        xdg = default_config_path().parent   # under xdg/ or appdata/ (Windows)
+        self.assertTrue(xdg.is_relative_to(self.dir))
         xdg.mkdir(parents=True)
         (xdg / "config.toml").write_text('printer = "10.0.0.9"', encoding="utf-8")
         args, _ = cli.parse_args(["run"])

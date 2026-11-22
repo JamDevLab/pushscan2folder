@@ -1,11 +1,14 @@
 # pushscan2folder: scan from the printer panel into a folder.
-# Setup:  mkdir -p scans config && cp config.example.toml config/config.toml
-# Start:  docker compose up -d --build     Logs: docker compose logs -f
+# Setup:  mkdir -p scans config, then put a config.toml into config/
+#         (see config.example.toml)
+# Start:  docker compose up -d     Update: docker compose pull && docker compose up -d
+# Logs:   docker compose logs -f
 # Targets and scan settings live in config/config.toml. To edit them in the
 # browser at http://<host>:8080, uncomment the web lines below.
+# To build the image from a clone of the repository: docker-compose.dev.yml.
 services:
   pushscan2folder:
-    build: .
+    image: ghcr.io/jamdevlab/pushscan2folder:latest   # or a fixed version, e.g. :0.2.0
     restart: unless-stopped
     user: "1000:1000"                    # owner of ./scans and ./config (id -u, id -g)
     environment:
