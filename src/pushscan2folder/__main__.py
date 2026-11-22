@@ -505,12 +505,27 @@ def read_web_password(check: bool = True, config_file: str | None = None) -> str
     return password
 
 
-def web_password_setup(config_file: str | None = None) -> str | None:
-    """Password for the web page, or None for PUSHSCAN_WEB_AUTH=0 (no login).
-    Logs a warning for each of the two opt-outs. Raises ValueError."""
+def web_password_path(cfg: Config, config_path: Path) -> str | None:
+    """The [web] password_file; a relative path is relative to the config file."""
+    path = cfg.web_password_file
+    if path and not Path(path).is_absolute():
+        return str(config_path.parent / path)
+    return path
+
+
+def web_password_setup(config_file: str | None = None,
+                       bind: str | None = None) -> str | None:
+    """Password for the web page, or None for no login: PUSHSCAN_WEB_AUTH=0, or
+    no password configured while the page listens only on this PC (loopback
+    bind). A configured password is always used. Logs a warning for each of
+    the two opt-outs. Raises ValueError."""
     if not env_switch("WEB_AUTH"):
         if env("WEB_PASSWORD") or env("WEB_PASSWORD_FILE"):
             logging.warning("PUSHSCAN_WEB_AUTH=0: the web password is ignored")
+        return None
+    if not (env("WEB_PASSWORD") or env("WEB_PASSWORD_FILE") or config_file) \
+            and web.is_loopback(bind):
+        logging.info("web page only on this PC (%s), no login needed", bind)
         return None
     check = env_switch("WEB_PASSWORD_CHECK")
     password = read_web_password(check, config_file)
@@ -716,8 +731,15 @@ def start_main(raw: list[str], hints: bool = True, popen=subprocess.Popen,
                instance: background.Instance | None = None) -> int:
     """`start`: launch the background instance with the given options, return."""
     try:
-        args, _ = parse_args(replace_command(raw, "run"))
+        args, cfg = parse_args(replace_command(raw, "run"))
         check_run_options(args)   # the same checks as the background process
+        if args.web:
+            config_path = Path(args.config) if args.config else default_config_path()
+            logging.disable(logging.CRITICAL)   # the background process logs these
+            try:
+                web_password_setup(web_password_path(cfg, config_path), args.web_bind)
+            finally:
+                logging.disable(logging.NOTSET)
     except (ConfigError, ValueError) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2
@@ -1075,12 +1097,10 @@ def _main(argv=None) -> int:
     web_enabled = args.cmd == "run" and args.web
     web_password = None
     config_path = Path(args.config) if args.config else default_config_path()
-    web_file = cfg.web_password_file
-    if web_file and not Path(web_file).is_absolute():
-        web_file = str(config_path.parent / web_file)  # relative to the config file
+    web_file = web_password_path(cfg, config_path)
     if web_enabled:
         try:
-            web_password = web_password_setup(web_file)
+            web_password = web_password_setup(web_file, args.web_bind)
         except ValueError as exc:
             print(f"error: {exc}", file=sys.stderr)
             return 2
@@ -1185,10 +1205,10 @@ def _main(argv=None) -> int:
         print(f"error: web page on {args.web_bind}:{args.web_port}: {exc.strerror or exc}",
               file=sys.stderr)
         return 2
-    if web_password is None:
+    if web_password is None and not web.is_loopback(args.web_bind):
         logging.warning("web page without password: anyone who can reach port %d can "
                         "change targets and settings", server.server_address[1])
-    local = args.web_bind in ("127.0.0.1", "localhost", "::1")
+    local = web.is_loopback(args.web_bind)
     announce(f"http://{args.web_bind}:{server.server_address[1]} "
              + ("(this PC only)" if local else "(reachable from the network)")
              + (" (Secure cookie: use it through an HTTPS reverse proxy)"

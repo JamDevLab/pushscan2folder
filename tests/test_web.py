@@ -1,6 +1,7 @@
 """Web page: auth, CSRF, headers, target editor and config writing (127.0.0.1 only)."""
 import errno
 import html
+import io
 import re
 import http.client
 import logging
@@ -232,7 +233,7 @@ class SecurityTests(WebTestBase):
 
 
 class NoAuthTests(unittest.TestCase):
-    """PUSHSCAN_WEB_AUTH=0: no login, everything else stays."""
+    """PUSHSCAN_WEB_AUTH=0 on a network bind: no login, everything else stays."""
 
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
@@ -244,7 +245,7 @@ class NoAuthTests(unittest.TestCase):
         write_config(self.config_path, dump_config(Config(targets=[TargetSpec("a")])))
         self.ctx = web.WebContext(self.service, LogBuffer(), "192.0.2.1", self.dir / "scans",
                                   config_path=self.config_path)
-        self.server, self.thread = web.start_server(self.ctx, None, "127.0.0.1", 0)
+        self.server, self.thread = web.start_server(self.ctx, None, "0.0.0.0", 0)
         self.addCleanup(web.stop_server, self.server, self.thread)
         self.client = Client(self.server.server_address[1])
 
@@ -291,7 +292,7 @@ class NoAuthTests(unittest.TestCase):
         self.assertEqual(status, 303)
 
     def test_csrf_differs_per_process(self):
-        other = web.start_server(self.ctx, None, "127.0.0.1", 0)
+        other = web.start_server(self.ctx, None, "0.0.0.0", 0)
         self.addCleanup(web.stop_server, *other)
         self.assertNotEqual(Client(other[0].server_address[1]).csrf(), self.client.csrf())
 
@@ -321,6 +322,96 @@ class NoAuthTests(unittest.TestCase):
         data = client.request("GET", "/")[2]
         self.assertIn("Log out", data)
         self.assertNotIn("No password set", data)
+
+
+class LoopbackNoLoginTests(unittest.TestCase):
+    """No password on a loopback bind: no login, a calm note, all checks stay."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.dir = Path(self.tmp.name)
+        self.service = FakeService()
+        self.service.status.set_targets([Target("a", self.dir / "scans" / "a")])
+        self.config_path = self.dir / "cfg" / "config.toml"
+        write_config(self.config_path, dump_config(Config(targets=[TargetSpec("a")])))
+        self.ctx = web.WebContext(self.service, LogBuffer(), "192.0.2.1", self.dir / "scans",
+                                  config_path=self.config_path)
+        with mock.patch.dict(os.environ, {}, clear=True):
+            password = cli.web_password_setup(None, "127.0.0.1")
+        self.assertIsNone(password)
+        self.server, self.thread = web.start_server(self.ctx, password, "127.0.0.1", 0)
+        self.addCleanup(web.stop_server, self.server, self.thread)
+        self.client = Client(self.server.server_address[1])
+
+    def test_page_without_session(self):
+        status, _, data = self.client.request("GET", "/")
+        self.assertEqual(status, 200)
+        self.assertIn("only reachable from this PC", data)
+        self.assertNotIn("No password set", data)
+        self.assertNotIn("Log out", data)
+
+    def test_host_header_still_checked(self):
+        self.assertEqual(self.client.request("GET", "/", headers={"Host": "evil.example.com"})[0],
+                         403)
+
+    def test_only_loopback_host_names(self):
+        for host in ("nas", "pc.local", "192.168.1.5:8737", "evil.example.com"):
+            status = self.client.request("GET", "/", headers={"Host": host})[0]
+            self.assertEqual(status, 403, host)
+        for host in ("localhost:8737", "127.0.0.1:8737", "[::1]:8737", "LOCALHOST"):
+            status = self.client.request("GET", "/", headers={"Host": host})[0]
+            self.assertEqual(status, 200, host)
+
+    def test_post_needs_csrf_token(self):
+        self.assertEqual(self.client.request("POST", "/targets", {"rows": "0"})[0], 403)
+        self.assertEqual(self.client.request("POST", "/targets",
+                                             {"csrf": "wrong", "rows": "0"})[0], 403)
+        self.assertEqual(self.service.requested, [])
+
+    def test_loopback_addresses(self):
+        for address in ("127.0.0.1", "127.0.0.2", "::1", "localhost", "LOCALHOST"):
+            self.assertTrue(web.is_loopback(address), address)
+            with mock.patch.dict(os.environ, {}, clear=True):
+                self.assertIsNone(cli.web_password_setup(None, address), address)
+        for address in ("0.0.0.0", "::", "192.168.1.5", "example.com", "", None):
+            self.assertFalse(web.is_loopback(address), address)
+
+    def test_other_bind_without_password_is_an_error(self):
+        with mock.patch.dict(os.environ, {}, clear=True):
+            for address in ("0.0.0.0", "192.168.1.5", None):
+                with self.assertRaises(ValueError, msg=address):
+                    cli.web_password_setup(None, address)
+
+    def test_password_file_on_loopback_needs_login(self):
+        pw = self.dir / "pw.txt"
+        pw.write_text("a-long-password\n")
+        with mock.patch.dict(os.environ, {}, clear=True):
+            password = cli.web_password_setup(str(pw), "127.0.0.1")
+        self.assertEqual(password, "a-long-password")
+        server, thread = web.start_server(self.ctx, password, "127.0.0.1", 0)
+        self.addCleanup(web.stop_server, server, thread)
+        client = Client(server.server_address[1])
+        status, resp, _ = client.request("GET", "/")
+        self.assertEqual((status, resp.getheader("Location")), (303, "/login"))
+
+    def test_env_password_on_loopback_is_used(self):
+        with mock.patch.dict(os.environ, {"PUSHSCAN_WEB_PASSWORD": "a-long-password"},
+                             clear=True):
+            self.assertEqual(cli.web_password_setup(None, "127.0.0.1"), "a-long-password")
+
+
+class StartChecksWebTests(unittest.TestCase):
+    def test_start_refuses_network_bind_without_password(self):
+        keep = {k: v for k, v in os.environ.items() if not k.startswith("PUSHSCAN_")}
+        popen = mock.Mock()
+        with mock.patch.dict(os.environ, keep, clear=True), \
+                mock.patch("sys.stderr", new_callable=io.StringIO) as err:
+            code = cli.start_main(["--printer", "192.0.2.1", "start", "--web", "--web-bind", "0.0.0.0"],
+                                  popen=popen)
+        self.assertEqual(code, 2)
+        self.assertIn("needs a password", err.getvalue())
+        popen.assert_not_called()
 
 
 class NavTests(WebTestBase):
@@ -1559,6 +1650,8 @@ class MainTests(unittest.TestCase):
 
     def test_password_missing_or_short(self):
         self.assertEqual(self.run_main(["--printer", "192.0.2.1", "run", "--web"]), 2)
+        self.assertEqual(self.run_main(["--printer", "192.0.2.1", "run", "--web",
+                                        "--web-bind", "192.168.1.5"]), 2)
         self.assertEqual(self.run_main(["--printer", "192.0.2.1", "run"],
                                        PUSHSCAN_WEB="1", PUSHSCAN_WEB_PASSWORD="short"), 2)
 
@@ -1613,7 +1706,7 @@ class MainTests(unittest.TestCase):
                 self.assertLogs(level="WARNING") as logs:
             code = self.run_main(
                 ["--printer", "192.0.2.1", "--config", str(Path(d) / "c.toml"),
-                 "run", "--web", "--web-port", "0", "--web-bind", "127.0.0.1"],
+                 "run", "--web", "--web-port", "0", "--web-bind", "0.0.0.0"],
                 PUSHSCAN_WEB_AUTH="0", PUSHSCAN_NAME="me")
         self.assertEqual(code, 0)
         self.assertTrue(any("web page without password" in m for m in logs.output))

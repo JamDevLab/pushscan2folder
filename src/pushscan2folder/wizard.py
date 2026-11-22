@@ -17,7 +17,7 @@ from .config import (SAME_FOLDER, Config, ConfigError, TargetSpec, dump_config, 
                      safe_dirname, write_config)
 from .escl import EsclClient
 from .terminal import link
-from .web import MIN_PASSWORD_LENGTH
+from .web import MIN_PASSWORD_LENGTH, is_loopback
 
 EXAMPLE_PASSWORD = "change-me-please"  # placeholder in docker-compose.yml
 DEFAULT_PORT = 8737
@@ -195,10 +195,16 @@ class Setup:
                 cfg.web_port = int(port)
                 break
             self.out("Enter a port number from 1 to 65535.")
+        old_bind = cfg.web_bind if cfg.web_bind and not is_loopback(cfg.web_bind) else None
+        if not self.yes_no("Should other devices (phone, tablet) reach the web page?",
+                           old_bind is not None):
+            # Only this PC: no password needed. An old password file stays (login stays).
+            cfg.web_bind = DEFAULT_BIND
+            return
         self.out("Bind address: 127.0.0.1 means only this PC can open the page. "
                  "0.0.0.0 makes it reachable from your whole network.")
         while True:
-            bind = self.ask("Bind address", cfg.web_bind or DEFAULT_BIND)
+            bind = self.ask("Bind address", old_bind or "0.0.0.0")
             problem = bind_problem(bind)
             if problem is None:
                 cfg.web_bind = bind

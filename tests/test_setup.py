@@ -270,14 +270,14 @@ class SetupTests(unittest.TestCase):
     def test_web_password_goes_to_its_own_file(self):
         secret = "correct horse battery"
         start, io_, _ = self.run_setup(
-            ["192.0.2.7", "Scan", str(self.dir / "s"), "y", "", "", ""],
+            ["192.0.2.7", "Scan", str(self.dir / "s"), "y", "", "y", "", "", ""],
             passwords=["short", secret, "other-password", secret, secret])
         text = self.path.read_text(encoding="utf-8")
         self.assertNotIn(secret, text)
         self.assertNotIn("short", text)
         cfg = load_config_text(text)
         self.assertTrue(cfg.web_enabled)
-        self.assertEqual((cfg.web_port, cfg.web_bind), (8737, "127.0.0.1"))
+        self.assertEqual((cfg.web_port, cfg.web_bind), (8737, "0.0.0.0"))
         pw_file = self.path.with_name("web_password.txt")
         self.assertEqual(cfg.web_password_file, str(pw_file))
         self.assertEqual(pw_file.read_text(encoding="utf-8").strip(), secret)
@@ -286,6 +286,17 @@ class SetupTests(unittest.TestCase):
         self.assertIn("differ", io_.text)       # mismatch refused
         self.assertIn("0.0.0.0", io_.text)      # LAN explanation
         self.assertNotIn(secret, io_.text)
+
+    def test_web_on_this_pc_needs_no_password(self):
+        # web yes, port default, other devices default (no), start now (default)
+        start, io_, _ = self.run_setup(["192.0.2.7", "Scan", str(self.dir / "s"), "y", "", "", ""])
+        cfg = load_config_text(self.path.read_text(encoding="utf-8"))
+        self.assertTrue(cfg.web_enabled)
+        self.assertEqual(cfg.web_bind, "127.0.0.1")
+        self.assertIsNone(cfg.web_password_file)
+        self.assertFalse(self.path.with_name("web_password.txt").exists())
+        self.assertIn("Should other devices", "".join(io_.questions))
+        self.assertNotIn("Web password", "".join(io_.questions))
 
     def test_bind_address_is_checked(self):
         self.assertIsNone(wizard.bind_problem("127.0.0.1"))
@@ -303,8 +314,8 @@ class SetupTests(unittest.TestCase):
     def test_invalid_port_and_name_are_asked_again(self):
         bad_name = "x" * 40
         start, io_, _ = self.run_setup(
-            ["192.0.2.7", bad_name, "Scan", str(self.dir / "s"), "y", "99999", "9000", "",
-             "", ""], passwords=["long-enough-pw", "long-enough-pw"])
+            ["192.0.2.7", bad_name, "Scan", str(self.dir / "s"), "y", "99999", "9000", "y",
+             "", "", ""], passwords=["long-enough-pw", "long-enough-pw"])
         cfg = load_config_text(self.path.read_text())
         self.assertEqual(cfg.web_port, 9000)
         self.assertEqual(cfg.targets[0].name, "Scan")

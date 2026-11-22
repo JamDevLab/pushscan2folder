@@ -8,7 +8,8 @@ CSRF tokens on every POST form, Origin check and strict response headers.
 Target folders set here must stay inside the base output directory; the
 raw editor enforces the same and cannot change "output" or "printer". Meant
 for a trusted LAN only. With PUSHSCAN_WEB_AUTH=0 there is no login at all (password
-None): the CSRF token is then one per process and the page says so in the nav.
+None, also the default on a loopback bind without a password): the CSRF token is
+then one per process and the page says so in the nav.
 
 Thread safety: request threads only use ServiceStatus.snapshot(),
 LogBuffer.lines(), service.request_targets() and file I/O. They never touch
@@ -101,7 +102,8 @@ class WebContext:
     overrides: config key -> what overrides its file value (environment
     variable or command line option), shown on the settings page.
     effective: config key -> the value in use (display text).
-    auth: False when the web page runs without a login (PUSHSCAN_WEB_AUTH=0).
+    auth: False when the web page runs without a login (PUSHSCAN_WEB_AUTH=0, or
+    no password on a loopback bind). local_only: the bind address is loopback.
     discover_fn: searches the network for scanners (discovery.discover); None
     hides the search. found: the result of the last search. Only an address
     from it can be set as the printer, so the page cannot point the service
@@ -117,6 +119,7 @@ class WebContext:
     overrides: dict = field(default_factory=dict)
     effective: dict = field(default_factory=dict)
     auth: bool = True
+    local_only: bool = False         # listens on a loopback address only
     discover_fn: object = None       # () -> list[discovery.Scanner]
     found: list = field(default_factory=list)
     printer_pending: str | None = None   # set from the page, not yet read back
@@ -867,6 +870,9 @@ def _nav(ctx: WebContext, csrf: str, active: str = "") -> str:
         end = ('<form method="post" action="/logout">'
                f'<input type="hidden" name="csrf" value="{esc(csrf)}">'
                '<button type="submit">Log out</button></form>')
+    elif ctx.local_only:
+        end = ('<span class="pill nopw" title="The page listens on this PC only">'
+               'No login: this page is only reachable from this PC.</span>')
     else:
         end = ('<span class="pill warn nopw" title="Anyone who can reach this port can change '
                'targets and settings">No password set</span>')
@@ -1385,22 +1391,40 @@ def render_config(ctx: WebContext, csrf: str, text: str | None = None,
 LOCAL_SUFFIXES = (".local", ".lan", ".home", ".home.arpa", ".internal", ".fritz.box")
 
 
-def local_host(host: str | None) -> bool:
-    """True for an IP address, localhost, a name without dots or a local suffix."""
-    if not host:
-        return False
+def _host_name(host: str) -> str:
+    """The name or address of a Host header, without port and brackets."""
     host = host.strip().lower()
     if host.startswith("["):                       # [IPv6]:port
         host = host[1:].split("]", 1)[0]
     elif host.count(":") == 1:
         host = host.split(":", 1)[0]
-    host = host.rstrip(".")
+    return host.rstrip(".")
+
+
+def local_host(host: str | None) -> bool:
+    """True for an IP address, localhost, a name without dots or a local suffix."""
+    if not host:
+        return False
+    host = _host_name(host)
     try:
         ipaddress.ip_address(host)
         return True
     except ValueError:
         pass
     return host == "localhost" or "." not in host or host.endswith(LOCAL_SUFFIXES)
+
+
+def is_loopback(address: str | None) -> bool:
+    """True for "localhost" and for a loopback IP address (127.x.x.x, ::1)."""
+    if not address:
+        return False
+    address = address.strip().lower()
+    if address == "localhost":
+        return True
+    try:
+        return ipaddress.ip_address(address).is_loopback
+    except ValueError:
+        return False
 
 
 # --- HTTP ------------------------------------------------------------------------
@@ -1420,6 +1444,7 @@ class WebServer(ThreadingHTTPServer):
         # password None: no login. Every client then shares one CSRF token that
         # exists only in this process; the Origin checks stay as they are.
         ctx.auth = password is not None
+        ctx.local_only = is_loopback(address[0])
         self.password_digest = _digest(password) if password is not None else None
         self.open_csrf = secrets.token_urlsafe(32)
         self.sessions = Sessions()
@@ -1628,7 +1653,15 @@ class Handler(BaseHTTPRequestHandler):
 
     def _host_ok(self) -> bool:
         """Without a login only local host names are served (DNS rebinding)."""
-        if self.server.ctx.auth or local_host(self.headers.get("Host")):
+        ctx, host = self.server.ctx, self.headers.get("Host")
+        if ctx.auth:
+            return True
+        if ctx.local_only:
+            # No login because only this PC can connect: then only the
+            # loopback names, so no other name can be pointed at 127.0.0.1.
+            if host and is_loopback(_host_name(host)):
+                return True
+        elif local_host(host):
             return True
         self._text_error(403, "Without a password the web page answers only to an IP "
                               "address or a local host name", close=True)
