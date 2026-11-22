@@ -128,7 +128,7 @@ class WebTableTests(unittest.TestCase):
 
     def test_builtin_when_not_in_file(self):
         args, _ = cli.parse_args(["--config", self.config_file('printer = "192.0.2.1"\n'), "run"])
-        self.assertEqual((args.web, args.web_port, args.web_bind), (False, 8737, "0.0.0.0"))
+        self.assertEqual((args.web, args.web_port, args.web_bind), (False, 8737, "127.0.0.1"))
 
     def test_dump_keeps_web_table(self):
         cfg = load_config_text(WEB_TOML)

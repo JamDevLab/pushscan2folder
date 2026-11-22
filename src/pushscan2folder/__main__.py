@@ -242,8 +242,9 @@ def build_parser(cfg: Config | None = None) -> argparse.ArgumentParser:
                               "PUSHSCAN_WEB_PASSWORD_FILE or [web] password_file")
         opts.add_argument("--web-port", type=int, default=int(env("WEB_PORT", cfg.web_port or 8737)),
                          help="port of the web page (default: 8737)")
-        opts.add_argument("--web-bind", default=env("WEB_BIND", cfg.web_bind or "0.0.0.0"),
-                         help="address of the web page (default: 0.0.0.0)")
+        opts.add_argument("--web-bind", default=env("WEB_BIND", cfg.web_bind),
+                         help="address of the web page (default: 0.0.0.0 with a "
+                              "password, else 127.0.0.1: this PC only, no login)")
 
     run = sub.add_parser("run", help="register and wait for scan requests")
     add_run_options(run)
@@ -283,7 +284,18 @@ def parse_args(argv=None) -> tuple[argparse.Namespace, Config]:
     argv = with_default_command(list(sys.argv[1:] if argv is None else argv))
     # setup reads its own config; stop, status and uninstall must work with a broken one
     cfg = Config() if command_of(argv) in NO_CONFIG_COMMANDS else find_config(argv)
-    return build_parser(cfg).parse_args(argv), cfg
+    args = build_parser(cfg).parse_args(argv)
+    if hasattr(args, "web_bind") and not args.web_bind:
+        args.web_bind = default_web_bind(cfg)
+    return args, cfg
+
+
+def default_web_bind(cfg: Config) -> str:
+    """No bind address given: the whole network when a password is set, else
+    only this PC, so the page works without a login."""
+    if env("WEB_PASSWORD") or env("WEB_PASSWORD_FILE") or cfg.web_password_file:
+        return "0.0.0.0"
+    return "127.0.0.1"
 
 
 def fallback_settings(args: argparse.Namespace, cfg: Config) -> ScanSettings:

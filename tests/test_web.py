@@ -413,6 +413,18 @@ class StartChecksWebTests(unittest.TestCase):
         self.assertIn("needs a password", err.getvalue())
         popen.assert_not_called()
 
+    def test_bind_defaults_to_this_pc_without_password(self):
+        keep = {k: v for k, v in os.environ.items() if not k.startswith("PUSHSCAN_")}
+        with mock.patch.dict(os.environ, keep, clear=True):
+            args, _ = cli.parse_args(["--printer", "192.0.2.1", "run", "--web"])
+            self.assertEqual(args.web_bind, "127.0.0.1")
+            with mock.patch.dict(os.environ, {"PUSHSCAN_WEB_PASSWORD": "x" * 12}):
+                args, _ = cli.parse_args(["--printer", "192.0.2.1", "run", "--web"])
+            self.assertEqual(args.web_bind, "0.0.0.0")
+            args, _ = cli.parse_args(["--printer", "192.0.2.1", "run", "--web",
+                                      "--web-bind", "0.0.0.0"])
+            self.assertEqual(args.web_bind, "0.0.0.0")
+
 
 class NavTests(WebTestBase):
     def test_config_tab_is_its_own_tab(self):
@@ -1643,13 +1655,15 @@ class ConfigWriteTests(unittest.TestCase):
 class MainTests(unittest.TestCase):
     def run_main(self, argv, **env):
         keep = {k: v for k, v in os.environ.items() if not k.startswith("PUSHSCAN_")}
+        keep["PUSHSCAN_WEB_PORT"] = "0"   # never the real port if a server starts
         keep.update(env)
         with mock.patch.dict(os.environ, keep, clear=True), \
                 mock.patch("sys.stderr"):
             return cli.main(argv)
 
     def test_password_missing_or_short(self):
-        self.assertEqual(self.run_main(["--printer", "192.0.2.1", "run", "--web"]), 2)
+        self.assertEqual(self.run_main(["--printer", "192.0.2.1", "run", "--web",
+                                        "--web-bind", "0.0.0.0"]), 2)
         self.assertEqual(self.run_main(["--printer", "192.0.2.1", "run", "--web",
                                         "--web-bind", "192.168.1.5"]), 2)
         self.assertEqual(self.run_main(["--printer", "192.0.2.1", "run"],
