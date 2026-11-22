@@ -322,8 +322,10 @@ A small web page for local use (LAN, NAS) with the current status, recent
 scans, the log, an editor for the targets, a settings form and a raw editor
 for the config file. It is off by default and needs no extra packages. It
 works without JavaScript. One small script (`/app.js`, served by the program
-itself, no inline scripts) only warns about unsaved changes on the edit pages
-and lets the Tab key insert two spaces in the raw editor.
+itself, no inline scripts) updates the status and log pages in place without
+a visible reload, warns about unsaved changes on the edit pages and lets the
+Tab key insert two spaces in the raw editor. Without JavaScript the status and
+log pages simply reload every 10 s.
 
 ```sh
 PUSHSCAN_WEB=1 PUSHSCAN_WEB_PASSWORD='a long password' \

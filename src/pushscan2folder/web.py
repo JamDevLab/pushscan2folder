@@ -62,7 +62,7 @@ SECURE_COOKIE = "__Host-p2f_session"  # needs Secure, Path=/ and no Domain
 FAVICON = (Path(__file__).with_name("favicon.svg")).read_bytes()
 
 SECURITY_HEADERS = {
-    "Content-Security-Policy": "default-src 'none'; script-src 'self'; "
+    "Content-Security-Policy": "default-src 'none'; script-src 'self'; connect-src 'self'; "
                               "style-src 'self'; img-src 'self'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'",
     "X-Content-Type-Options": "nosniff",
     # "same-origin": with "no-referrer" browsers send Origin: null on form posts
@@ -729,6 +729,31 @@ APP_JS = """\
     });
   }
 
+  // Status and log: fetch the page every few seconds and replace only the
+  // content when it changed, so nothing flickers. A logged-out session
+  // (redirect to the login page) reloads the whole page instead.
+  function autoRefresh(main) {
+    var seconds = parseInt(main.getAttribute("data-refresh"), 10) || 10;
+    setInterval(function () {
+      if (document.hidden) { return; }
+      fetch(window.location.href, { credentials: "same-origin", cache: "no-store" })
+        .then(function (resp) {
+          if (!resp.ok || resp.redirected) { window.location.reload(); return null; }
+          return resp.text();
+        })
+        .then(function (text) {
+          if (text === null) { return; }
+          var doc = new DOMParser().parseFromString(text, "text/html");
+          var fresh = doc.querySelector("main");
+          if (fresh && fresh.innerHTML !== main.innerHTML) {
+            main.innerHTML = fresh.innerHTML;
+          }
+        })
+        .catch(function () { /* offline for a moment: try again next time */ });
+    }, seconds * 1000);
+  }
+
+  document.querySelectorAll("main[data-refresh]").forEach(autoRefresh);
   document.querySelectorAll("form[data-warn-unsaved]").forEach(watch);
   document.querySelectorAll("textarea[data-tab-indent]").forEach(tabIndent);
 })();
@@ -741,16 +766,20 @@ FOOTER = (f'<footer>pushscan2folder {esc(__version__)} &middot; '
 
 def _page(title: str, body: str, *, nav: str = "", refresh: bool = False,
           script: bool = False, body_class: str = "") -> bytes:
-    script_tag = '<script src="/app.js" defer></script>' if script else ""
+    # Status and log update themselves: app.js swaps in the new content without
+    # reloading the page; without JavaScript the browser reloads every 10 s.
+    script_tag = '<script src="/app.js" defer></script>' if script or refresh else ""
     cls = f' class="{body_class}"' if body_class else ""
-    meta = '<meta http-equiv="refresh" content="10">' if refresh else ""
+    meta = ('<noscript><meta http-equiv="refresh" content="10"></noscript>'
+            if refresh else "")
+    main = '<main data-refresh="10">' if refresh else "<main>"
     return (f'<!doctype html><html lang="en"><head><meta charset="utf-8">'
             f'<meta name="viewport" content="width=device-width, initial-scale=1">{meta}'
             f'<title>{esc(title)} - pushscan2folder</title>'
             f'<link rel="icon" href="/favicon.svg" type="image/svg+xml">'
             f'<link rel="stylesheet" href="/style.css">{script_tag}</head>'
             f'<body{cls}>{nav}'
-            f"<main>{body}</main>{FOOTER}</body></html>").encode()
+            f"{main}{body}</main>{FOOTER}</body></html>").encode()
 
 
 def _nav(ctx: WebContext, csrf: str, active: str = "") -> str:

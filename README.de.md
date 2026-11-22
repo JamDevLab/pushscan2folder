@@ -342,9 +342,10 @@ Status, letzten Scans, dem Log, einem Editor für die Ziele, einem
 Einstellungsformular und einem Rohtext-Editor für die Konfigurationsdatei. Sie
 ist standardmäßig aus und braucht keine zusätzlichen Pakete. Sie funktioniert
 ohne JavaScript. Ein kleines Skript (`/app.js`, vom Programm selbst
-ausgeliefert, keine Inline-Skripte) warnt auf den Bearbeitungsseiten nur vor
-ungespeicherten Änderungen und fügt im Rohtext-Editor mit der Tab-Taste zwei
-Leerzeichen ein.
+ausgeliefert, keine Inline-Skripte) aktualisiert Status und Log ohne
+sichtbares Neuladen, warnt auf den Bearbeitungsseiten vor ungespeicherten
+Änderungen und fügt im Rohtext-Editor mit der Tab-Taste zwei Leerzeichen ein.
+Ohne JavaScript laden Status und Log einfach alle 10 s neu.
 
 ```sh
 PUSHSCAN_WEB=1 PUSHSCAN_WEB_PASSWORD='a long password' \

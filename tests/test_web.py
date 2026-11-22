@@ -179,10 +179,10 @@ class SecurityTests(WebTestBase):
             self.assertFalse(re.search(r"<script(?![^>]*\ssrc=)", page), path)
             self.assertIsNone(re.search(r"<[^>]+\son[a-z]+\s*=", page), path)
             self.assertIsNone(re.search(r"javascript:", page), path)
-        self.assertIn('<script src="/app.js" defer></script>',
-                      self.client.request("GET", "/targets")[2])
-        for path in ("/", "/log"):
-            self.assertNotIn("<script", self.client.request("GET", path)[2].lower())
+        for path in ("/", "/log", "/targets"):
+            self.assertIn('<script src="/app.js" defer></script>',
+                          self.client.request("GET", path)[2], path)
+        self.assertNotIn("<script", self.client.request("GET", "/login")[2].lower())
 
     def test_app_js_and_csp(self):
         status, resp, data = self.client.request("GET", "/app.js")   # public
@@ -349,7 +349,12 @@ class PagesTests(WebTestBase):
         self.assertIn("a&lt;img&gt;.pdf", data)
         self.assertIn("x&amp;y", data)
         self.assertIn("pending", data)
-        self.assertIn('http-equiv="refresh"', data)
+        # quiet update by app.js, plain reload only without JavaScript
+        self.assertIn('<noscript><meta http-equiv="refresh" content="10"></noscript>', data)
+        self.assertIn('<main data-refresh="10">', data)
+        self.assertIn('<script src="/app.js" defer></script>', data)
+        self.assertIn("connect-src 'self'", web.SECURITY_HEADERS["Content-Security-Policy"])
+        self.assertIn("main[data-refresh]", web.APP_JS)
 
     def test_status_long_name_note(self):
         self.service.status.set_targets([Target("n" * 30, Path("/s/n"))])

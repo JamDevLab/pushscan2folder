@@ -43,7 +43,9 @@ First release, tested with a Canon PIXMA TR8550 (TR8500 series).
   target folders outside the output directory, stale-file check). Password from
   `PUSHSCAN_WEB_PASSWORD` or `PUSHSCAN_WEB_PASSWORD_FILE`, login lockout,
   CSRF protection, strict headers. It works without JavaScript; one small
-  script warns about unsaved changes on the edit pages. Targets can be reordered, the panel lists them in that order. Folders set on the web page
+  script updates status and log in place and warns about unsaved changes
+  on the edit pages. Targets can be reordered, the panel lists them in that
+  order. Folders set on the web page
   stay inside the output directory. Opt-in `PUSHSCAN_WEB_SECURE_COOKIE=1`
   for use behind an HTTPS reverse proxy.
 - Opt-in `PUSHSCAN_WEB_PASSWORD_CHECK=0` skips the web password rules (minimum
