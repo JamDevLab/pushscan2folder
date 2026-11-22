@@ -177,6 +177,10 @@ class SetupTests(unittest.TestCase):
         self.addCleanup(self.tmp.cleanup)
         self.dir = Path(self.tmp.name)
         self.path = self.dir / "cfg" / "config.toml"
+        # Windows asks more questions; tests that want them patch "win32" themselves.
+        patcher = mock.patch.object(sys, "platform", "linux")
+        patcher.start()
+        self.addCleanup(patcher.stop)
 
     def run_setup(self, answers, passwords=(), probe=None, autostart_fn=None):
         io_ = ScriptedIO(answers, passwords)

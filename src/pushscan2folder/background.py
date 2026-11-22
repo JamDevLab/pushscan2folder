@@ -159,7 +159,7 @@ def terminate(pid: int) -> None:
         subprocess.run(["taskkill", "/PID", str(pid), "/T", "/F"],
                        capture_output=True, check=False)
     else:
-        os.kill(pid, signal.SIGKILL)
+        os.kill(pid, getattr(signal, "SIGKILL", signal.SIGTERM))   # no SIGKILL on Windows
 
 
 def stop_instance(inst: Instance, timeout: float = STOP_TIMEOUT, poll: float = 0.5,
