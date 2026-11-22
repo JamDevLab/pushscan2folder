@@ -351,6 +351,120 @@ def web_overrides(args: argparse.Namespace, cfg: Config,
     return overrides, effective
 
 
+def check_run_options(args: argparse.Namespace) -> None:
+    """Check the option values the parser does not check itself. Normalizes
+    open_after_scan. Raises ValueError with the message for the user."""
+    if getattr(args, "multipage", "off") not in MULTIPAGE_MODES:
+        raise ValueError(f"invalid PUSHSCAN_MULTIPAGE {args.multipage!r}")
+    open_mode = str(getattr(args, "open_after_scan", "off")).strip().lower()
+    if open_mode not in desktop.OPEN_MODES:
+        raise ValueError(f"invalid PUSHSCAN_OPEN_AFTER_SCAN {args.open_after_scan!r}: use "
+                         f"{', '.join(desktop.OPEN_MODES)}")
+    args.open_after_scan = open_mode
+    try:
+        check_filename(getattr(args, "filename", DEFAULT_FILENAME))
+    except ValueError as exc:
+        raise ValueError(f"--filename/PUSHSCAN_FILENAME: {exc}") from None
+
+
+def service_options(args: argparse.Namespace, cfg: Config) -> dict:
+    """The PushScanService options from the parsed command line and config
+    (at startup and when the config file changes)."""
+    return dict(settings=fallback_settings(args, cfg),
+                interval=getattr(args, "interval", 4.0),
+                auto_source=(args.source == "auto"),
+                use_panel=not getattr(args, "ignore_panel", True),
+                multipage=MULTIPAGE_MODES.get(getattr(args, "multipage", "off"), frozenset()),
+                trim=getattr(args, "trim", None) or Trim(),
+                open_after_scan=getattr(args, "open_after_scan", "off"),
+                filename=getattr(args, "filename", DEFAULT_FILENAME))
+
+
+# Options that a changed config file cannot change in a running service.
+NOT_RELOADED = (("web", "web page on or off"), ("web_bind", "web bind address"),
+                ("web_port", "web port"), ("log_file", "log file"),
+                ("verbose", "debug log"), ("heartbeat_file", "heartbeat file"))
+
+
+def printer_clients(printer: str):
+    return ChmpClient(printer), EsclClient(printer), NativeScanner(printer)
+
+
+class ConfigWatcher:
+    """Apply a changed config file to the running service, without a restart.
+
+    check() runs in the poll loop before each cycle (never during a scan). It
+    compares the modification time and size of the file. A changed file is
+    read like at startup (command line and environment still win). If it is
+    not valid, the running settings stay and the error is logged once. Scan
+    options, targets and the printer change right away; the web page options,
+    the log file and the heartbeat file need a restart."""
+
+    def __init__(self, path: Path, argv: list[str], args: argparse.Namespace, cfg: Config,
+                 service: PushScanService, ctx=None, clients=printer_clients):
+        self.path = Path(path)
+        self.argv = list(argv)
+        self.started = args           # what the restart-only options are compared with
+        self.started_cfg = cfg
+        self.args = args
+        self.service = service
+        self.ctx = ctx
+        self.clients = clients
+        self.last = self._stamp()
+
+    def _stamp(self):
+        try:
+            st = self.path.stat()
+        except OSError:
+            return None
+        return st.st_mtime_ns, st.st_size
+
+    def check(self) -> bool:
+        """True if a changed file was applied."""
+        stamp = self._stamp()
+        if stamp is None or stamp == self.last:   # a deleted file changes nothing
+            return False
+        self.last = stamp
+        try:
+            args, cfg = parse_args(self.argv)
+            check_run_options(args)
+            if not args.printer:
+                raise ValueError("no printer is set")
+            name = args.name or default_name()
+            protocol.check_name(name)
+            targets = resolve_targets(args, cfg, name)
+        except (ConfigError, ValueError) as exc:
+            logging.error("%s changed but cannot be used, the running settings stay: %s",
+                          self.path, exc)
+            return False
+        except SystemExit:   # argparse rejected a value (it printed why)
+            logging.error("%s changed but cannot be used, the running settings stay",
+                          self.path)
+            return False
+        for warning in check_targets(targets):
+            logging.warning(warning)
+        service = self.service
+        service.update_options(**service_options(args, cfg))
+        if args.printer != self.args.printer:
+            logging.info("printer changed to %s", args.printer)
+            service.change_printer(*self.clients(args.printer))
+        service.request_targets(targets)
+        if self.ctx is not None:
+            ctx = self.ctx
+            ctx.printer, ctx.output, ctx.multipage_mode = args.printer, args.output, args.multipage
+            ctx.targets_from_env = bool(args.targets)
+            ctx.overrides, ctx.effective = web_overrides(args, cfg, self.argv)
+        self.args = args
+        logging.info("%s changed, the new settings are in use", self.path)
+        restart = [label for key, label in NOT_RELOADED
+                   if getattr(args, key, None) != getattr(self.started, key, None)]
+        if cfg.web_password_file != self.started_cfg.web_password_file:
+            restart.append("web password file")
+        if restart:
+            logging.warning("restart pushscan2folder to apply: %s", ", ".join(restart))
+        return True
+
+
 EXAMPLE_PASSWORD = wizard.EXAMPLE_PASSWORD
 
 
@@ -778,20 +892,10 @@ def _main(argv=None) -> int:
         return uninstall_main(args, raw)
     if args.cmd == "health":
         return health_main(args)
-    if getattr(args, "multipage", "off") not in MULTIPAGE_MODES:
-        print(f"error: invalid PUSHSCAN_MULTIPAGE {args.multipage!r}", file=sys.stderr)
-        return 2
-    open_mode = str(getattr(args, "open_after_scan", "off")).strip().lower()
-    if open_mode not in desktop.OPEN_MODES:
-        print(f"error: invalid PUSHSCAN_OPEN_AFTER_SCAN {args.open_after_scan!r}: use "
-              f"{', '.join(desktop.OPEN_MODES)}", file=sys.stderr)
-        return 2
-    args.open_after_scan = open_mode
-    filename = getattr(args, "filename", DEFAULT_FILENAME)
     try:
-        check_filename(filename)
+        check_run_options(args)
     except ValueError as exc:
-        print(f"error: --filename/PUSHSCAN_FILENAME: {exc}", file=sys.stderr)
+        print(f"error: {exc}", file=sys.stderr)
         return 2
     try:
         setup_logging(args.verbose, args.log_file)
@@ -832,8 +936,6 @@ def _main(argv=None) -> int:
             print(f"release:  status=0x{x.status:x}")
         return 0
 
-    settings = fallback_settings(args, cfg)
-    source = args.source
     try:
         targets = resolve_targets(args, cfg, name)
         for warning in check_targets(targets):
@@ -841,15 +943,8 @@ def _main(argv=None) -> int:
     except ValueError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2
-    service = PushScanService(chmp, escl, targets, settings,
-                              interval=getattr(args, "interval", 4.0),
-                              auto_source=(source == "auto"),
-                              use_panel=not getattr(args, "ignore_panel", True),
-                              native=NativeScanner(args.printer),
-                              multipage=MULTIPAGE_MODES.get(getattr(args, "multipage", "off"),
-                                                            frozenset()),
-                              trim=getattr(args, "trim", None),
-                              open_after_scan=open_mode, filename=filename)
+    service = PushScanService(chmp, escl, targets, native=NativeScanner(args.printer),
+                              **service_options(args, cfg))
     if args.cmd == "scan":
         for path in service.scan_to(targets[0]):
             print(path)
@@ -863,6 +958,8 @@ def _main(argv=None) -> int:
     if args.background:
         service.stop_check = inst.stop_requested  # `pushscan2folder stop`
         service.busy_hook = inst.set_busy          # `stop` waits for a running scan
+    watcher = ConfigWatcher(config_path, raw, args, cfg, service)
+    service.before_step = watcher.check            # apply a changed config file
     try:
         interactive = sys.stdin.isatty()
     except (AttributeError, ValueError):
@@ -911,6 +1008,7 @@ def _main(argv=None) -> int:
                          config_path=config_path,
                          targets_from_env=bool(args.targets),
                          overrides=overrides, effective=effective)
+    watcher.ctx = ctx
     try:
         server, thread = web.start_server(ctx, web_password, args.web_bind, args.web_port,
                                           secure_cookie=env_bool("WEB_SECURE_COOKIE", False))

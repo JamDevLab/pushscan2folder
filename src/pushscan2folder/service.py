@@ -284,6 +284,9 @@ class PushScanService:
         # Optional callable, called with True when a scan starts and False when
         # it ends (the background instance marks itself busy for `stop`).
         self.busy_hook: Callable[[bool], None] | None = None
+        # Optional callable run by the poll loop before each cycle, never during
+        # a scan (the config file watcher uses it to apply a changed file).
+        self.before_step: Callable[[], None] | None = None
         self.use_panel = use_panel
         self.native = native
         self.multipage = multipage
@@ -345,6 +348,26 @@ class PushScanService:
         self.status.set_targets(self.targets)
         self.status.set_pending(False)
         log.info("targets updated: %s", ", ".join(new_names) or "none")
+
+    OPTIONS = ("settings", "interval", "auto_source", "use_panel", "multipage", "trim",
+               "open_after_scan", "filename")
+
+    def update_options(self, **options) -> None:
+        """Change scan options (names in OPTIONS). Call it from the poll loop
+        (before_step), so a running scan never sees a mix of old and new."""
+        for key, value in options.items():
+            if key not in self.OPTIONS:
+                raise TypeError(f"unknown option {key!r}")
+            setattr(self, key, value)
+
+    def change_printer(self, chmp: ChmpClient, escl: EsclClient,
+                       native: NativeScanner | None) -> None:
+        """Switch to another printer (from the poll loop). The names on the old
+        one are released (best effort, it may be gone); step() registers them
+        on the new one."""
+        self.release()
+        self.chmp, self.escl, self.native = chmp, escl, native
+        self._last_keepalive = 0.0
 
     def register(self, target: Target) -> None:
         target.session = self.chmp.register(target.name).session
@@ -549,6 +572,11 @@ class PushScanService:
     def run(self) -> None:
         backoff = self.interval
         while not self.stop_event.is_set():
+            if self.before_step is not None:
+                try:
+                    self.before_step()
+                except Exception as exc:   # never let it end the service
+                    log.warning("could not apply the changed config: %s", exc)
             try:
                 self.step()
                 backoff = self.interval

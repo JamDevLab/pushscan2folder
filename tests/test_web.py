@@ -887,12 +887,12 @@ class SettingsTests(WebTestBase):
         self.assertEqual((cfg.multipage, cfg.interval, cfg.ignore_panel), ("both", 2.5, True))
         self.assertEqual((cfg.printer, cfg.verbose), ("10.0.0.9", True))
         self.assertEqual([(t.name, t.output) for t in cfg.targets], [("a", "/consume")])
-        self.assertEqual(self.service.requested, [])      # settings apply after a restart
+        self.assertEqual(self.service.requested, [])      # the config watcher applies them
         page = self.client.request("GET", "/settings?saved=1")[2]
-        self.assertIn("take effect after a restart", page)
+        self.assertIn("used from the next poll cycle", page)
         self.assertIn('<option value="600" selected>', page)
         self.assertIn('id="f-ignore_panel" value="1" checked', page)
-        self.assertNotIn("take effect after a restart",
+        self.assertNotIn("used from the next poll cycle",
                          self.client.request("GET", "/settings")[2].split("Source:")[0])
 
     def test_filename_setting(self):

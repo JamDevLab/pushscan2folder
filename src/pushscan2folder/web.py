@@ -503,7 +503,8 @@ def apply_settings(ctx: WebContext, values: dict[str, str]) -> list[str]:
     """Validate and write the settings into the config file as it is on disk
     now (everything else, targets included, is kept). Returns errors;
     nothing is written then. Raises ConfigError/OSError. The running service
-    is not changed: the new values take effect after a restart."""
+    is not changed here: it reads the changed file before its next poll cycle
+    (ConfigWatcher)."""
     new, errors = check_settings(values)
     if errors:
         return errors
@@ -561,7 +562,8 @@ def apply_raw_config(ctx: WebContext, text: str, base_hash: str) -> tuple[list[s
     (errors, current_text): current_text is set instead of errors when the
     file changed on disk since the form was shown. Nothing is written on an
     error. Targets are handed to the service (not with PUSHSCAN_TARGETS or
-    without targets in the file); everything else needs a restart. Raises
+    without targets in the file); the service reads the rest of the changed
+    file before its next poll cycle, except [web], which needs a restart. Raises
     OSError/UnicodeDecodeError."""
     disk_text = read_config_text(ctx)
     if text_hash(disk_text) != base_hash:
@@ -1146,7 +1148,7 @@ def render_settings(ctx: WebContext, csrf: str, values: dict[str, str] | None = 
     parts.append(f'<p class="muted">Source: config file <code>{esc(ctx.config_path)}</code>'
                  + ("" if exists else " (does not exist yet; saving creates it)")
                  + ". Saving rewrites the file and comments in it are not preserved. "
-                 "Changes take effect after a restart. Empty fields are removed from the "
+                 "Changes take effect within a few seconds. Empty fields are removed from the "
                  'file, so the built-in value applies. <a href="/config">Edit config.toml '
                  "directly</a> keeps comments.</p>")
 
@@ -1260,8 +1262,8 @@ def render_config(ctx: WebContext, csrf: str, text: str | None = None,
                  '<p class="muted">Rules for the web page: "output" and "printer" cannot be '
                  "changed here. A target folder must be a relative path inside the output "
                  f"directory <code>{esc(ctx.output)}</code>; a target with an absolute path or "
-                 '".." can only stay as it is in the file. Target changes apply within a poll '
-                 "cycle, all other changes after a restart. The size limit is "
+                 '".." can only stay as it is in the file. Changes apply within a poll '
+                 "cycle, except the [web] table, which needs a restart. The size limit is "
                  f"{MAX_BODY // 1024} KB. Press Escape, then Tab, to leave the text field "
                  "with the keyboard.</p>")
     dirty_attr = ' data-dirty="1"' if dirty else ""
@@ -1463,11 +1465,11 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(200, render_targets(ctx, csrf))
         saved = "1" in parse_qs(urlsplit(self.path).query).get("saved", [])
         if path == "/settings":
-            notes = ["Saved. The new values take effect after a restart."] if saved else []
+            notes = ["Saved. The new values are used from the next poll cycle."] if saved else []
             return self._send(200, render_settings(ctx, csrf, notes=notes))
         if path == "/config":
-            notes = (["Saved. Target changes are applied within a poll cycle, all other "
-                      "changes take effect after a restart."] if saved else [])
+            notes = (["Saved. The changes are used from the next poll cycle; changes to "
+                      "[web] need a restart."] if saved else [])
             return self._send(200, render_config(ctx, csrf, notes=notes))
         self._text_error(404, "Not found")
 
@@ -1608,7 +1610,7 @@ class Handler(BaseHTTPRequestHandler):
             with self.server.save_lock:
                 errors = apply_settings(ctx, values)
             if not errors:
-                log.info("settings saved from the web page (take effect after a restart)")
+                log.info("settings saved from the web page")
                 return self._redirect("/settings?saved=1")
         except ConfigError as exc:
             errors = [str(exc)]
