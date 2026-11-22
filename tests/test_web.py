@@ -1098,7 +1098,7 @@ class RawConfigTests(WebTestBase):
         self.assertEqual(self.save(text)[0], 303)
         self.assertIn('output = "/consume"', self.config_path.read_text())
         self.assertEqual([t.outdir for t in self.service.requested[0]],
-                         [self.dir / "scans" / "inbox2", Path(os.path.abspath("/consume"))])
+                         [self.dir / "scans" / "inbox2", self.dir / "scans" / "/consume"])   # Windows: drive of the base
 
     def test_locked_target_changes_rejected(self):
         self.assertRejected(self.START.replace("/consume", "/etc"), 'Target "paperless"')
