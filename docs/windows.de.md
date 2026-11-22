@@ -10,7 +10,7 @@ Linux und Docker stehen in der README. macOS steht am Ende dieser Seite.
 2. Zur Kontrolle in PowerShell `Get-FileHash pushscan2folder-VERSION-windows-setup.exe` ausführen und mit `SHA256SUMS.txt` vergleichen.
 3. Den Installer starten. Er fragt nach seiner Sprache (Englisch oder Deutsch). Er installiert nur für deinen Benutzer, braucht keine Administratorrechte und legt das Programm in `%LOCALAPPDATA%\Programs\pushscan2folder` ab.
 
-Der Installer legt im Startmenü einen Ordner "pushscan2folder" mit einem Eintrag "pushscan2folder" an. Es ist dasselbe Programm für alles: Gibt es eine Konfigurationsdatei, zeigt es ein kleines Menü, um es im Hintergrund zu starten, zu beenden, den Status anzuzeigen oder die Einstellungen zu ändern (siehe unten).
+Der Installer legt im Startmenü einen Ordner "pushscan2folder" mit einem Eintrag "pushscan2folder" an. Es ist dasselbe Programm für alles: Gibt es eine Konfigurationsdatei, zeigt es ein kleines Menü, um es im Hintergrund zu starten, zu beenden, den Status anzuzeigen, die Weboberfläche oder die Konfigurationsdatei zu öffnen, die Einstellungen zu ändern, die Hilfeseite zu öffnen oder es zu deinstallieren (siehe unten).
 
 Ein Desktop-Symbol ist optional und standardmäßig nicht angehakt. Am Ende bietet der Installer "Set up and start pushscan2folder" an. Das öffnet das Konsolenfenster mit den Setup-Fragen (siehe unten).
 
@@ -42,7 +42,11 @@ Beim nächsten Start per Doppelklick oder aus dem Startmenü findet das Programm
 - Start in the background (nur wenn es nicht läuft; dann der Standard),
 - Stop (nur wenn es läuft),
 - Status (Standard, wenn es läuft; danach kommt das Menü wieder),
+- Open the web page (nur wenn es läuft und die Weboberfläche in der Konfigurationsdatei eingeschaltet ist; öffnet sie im Browser, danach kommt das Menü wieder),
+- Open the config file (im Programm, das Windows für `.toml`-Dateien kennt, sonst im Editor; das Programm übernimmt Änderungen nach wenigen Sekunden; das Menü kommt wieder),
 - Change the settings (läuft es, muss es vorher beendet werden, und das Menü bietet das an),
+- Help (GitHub) (öffnet die Projektseite im Browser; das Menü kommt wieder),
+- Uninstall (fragt vorher nach; entfernt die Ordner mit Einstellungen und Logs, aber nie deine Scans, und bietet danach an, den Windows-Deinstaller zu starten, der das Programm selbst entfernt; das Programm schließt sich sofort, damit der Deinstaller es löschen kann),
 - Quit.
 
 Das Menü ist auf Englisch. "Change the settings" zeigt die aktuellen Einstellungen (den Drucker, jeden Namen mit seinem Ordner und ob die Weboberfläche an ist) und fragt:

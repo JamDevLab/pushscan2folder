@@ -10,7 +10,7 @@ Linux and Docker are described in the README. macOS is covered at the end of thi
 2. To check the download, run `Get-FileHash pushscan2folder-VERSION-windows-setup.exe` in PowerShell and compare it with `SHA256SUMS.txt`.
 3. Run the installer. It asks for its language (English or German). It installs for your user only, needs no administrator rights, and puts the program into `%LOCALAPPDATA%\Programs\pushscan2folder`.
 
-The installer creates a Start menu folder "pushscan2folder" with one entry, "pushscan2folder". It is the same program for everything: once a config file exists, it shows a small menu to start it in the background, stop it, show the status or change the settings (see below).
+The installer creates a Start menu folder "pushscan2folder" with one entry, "pushscan2folder". It is the same program for everything: once a config file exists, it shows a small menu to start it in the background, stop it, show the status, open the web page or the config file, change the settings, open the help page or uninstall it (see below).
 
 A desktop icon is optional and unchecked by default. At the end the installer offers "Set up and start pushscan2folder". It opens the console window with the setup questions (see below).
 
@@ -42,7 +42,11 @@ The next time you start it by double click or from the Start menu, the program f
 - Start in the background (only when it is not running; the default then),
 - Stop (only when it is running),
 - Status (the default when it runs; the menu comes back afterwards),
+- Open the web page (only when it runs and the web page is enabled in the config file; opens it in your browser, then the menu comes back),
+- Open the config file (in the program Windows has for `.toml` files, else in Notepad; the program uses changes within a few seconds; the menu comes back),
 - Change the settings (when it runs, it must be stopped first and the menu offers to do that),
+- Help (GitHub) (opens the project page in your browser; the menu comes back),
+- Uninstall (asks first; removes the settings and log folders but never your scans, then offers to start the Windows uninstaller, which removes the program itself; the program closes at once so the uninstaller can delete it),
 - Quit.
 
 "Change the settings" shows the current settings (the printer, each panel name with its folder, and whether the web page is on) and asks:
