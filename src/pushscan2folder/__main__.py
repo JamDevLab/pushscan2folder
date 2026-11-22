@@ -14,7 +14,8 @@ import time
 import traceback
 from pathlib import Path
 
-from . import __version__, autostart, background, desktop, panel, protocol, uninstall, web, wizard
+from . import (__version__, autostart, background, desktop, discovery, panel, protocol,
+               uninstall, web, wizard)
 from .client import ChmpClient
 from .config import Config, ConfigError, load_config
 from .escl import EsclClient, ScanSettings
@@ -540,7 +541,8 @@ def setup_main(args: argparse.Namespace | None) -> int:
     """`setup`: ask, write the config file, then optionally start."""
     path = Path(args.config) if args and args.config else default_config_path()
     session = wizard.Setup(path, autostart_fn=install_autostart, default_name=default_name(),
-                           start_fn=lambda a: start_main(a, hints=False))
+                           start_fn=lambda a: start_main(a, hints=False),
+                           discover_fn=discovery.discover)
     try:
         start = session.run()
     except (EOFError, KeyboardInterrupt):

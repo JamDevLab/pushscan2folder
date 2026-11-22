@@ -182,12 +182,12 @@ class SetupTests(unittest.TestCase):
         patcher.start()
         self.addCleanup(patcher.stop)
 
-    def run_setup(self, answers, passwords=(), probe=None, autostart_fn=None):
+    def run_setup(self, answers, passwords=(), probe=None, autostart_fn=None, discover_fn=None):
         io_ = ScriptedIO(answers, passwords)
         probe = probe or mock.Mock(return_value=(True, "printer answered, state: Idle"))
         session = wizard.Setup(self.path, input_fn=io_.input, getpass_fn=io_.getpass,
                                probe_fn=probe, autostart_fn=autostart_fn, out=io_.out,
-                               default_name="USER  PC")
+                               default_name="USER  PC", discover_fn=discover_fn)
         return session.run(), io_, probe
 
     def test_new_config_without_web(self):
@@ -208,6 +208,36 @@ class SetupTests(unittest.TestCase):
         self.assertFalse(cfg.web_enabled)
         assert_mode(self, self.path, 0o600)
         self.assertIn("pushscan2folder setup", io_.text)
+
+    def test_found_scanner_picked_by_number(self):
+        from pushscan2folder.discovery import Scanner
+        found = [Scanner("192.0.2.4", "A", ""), Scanner("192.0.2.5", "B", "Canon TR8500 series")]
+        # 2 = second scanner, name, folder, web no, start no
+        start, io_, probe = self.run_setup(["2", "", str(self.dir / "s"), "n", "n"],
+                                           discover_fn=lambda: found)
+        probe.assert_called_once_with("192.0.2.5")
+        self.assertIn("192.0.2.5  Canon TR8500 series", io_.text)
+        self.assertEqual(load_config_text(self.path.read_text()).printer, "192.0.2.5")
+
+    def test_found_scanner_or_typed_address(self):
+        from pushscan2folder.discovery import Scanner
+        found = [Scanner("192.0.2.4", "A", "")]
+        self.run_setup(["192.0.2.9", "", str(self.dir / "s"), "n", "n"],
+                       discover_fn=lambda: found)
+        self.assertEqual(load_config_text(self.path.read_text()).printer, "192.0.2.9")
+
+    def test_nothing_found_asks_for_the_address(self):
+        start, io_, _ = self.run_setup(["192.0.2.7", "", str(self.dir / "s"), "n", "n"],
+                                       discover_fn=lambda: [])
+        self.assertIn("No scanner answered", io_.text)
+        self.assertEqual(load_config_text(self.path.read_text()).printer, "192.0.2.7")
+
+    def test_failing_search_asks_for_the_address(self):
+        def broken():
+            raise RuntimeError("boom")
+        _, io_, _ = self.run_setup(["192.0.2.7", "", str(self.dir / "s"), "n", "n"],
+                                   discover_fn=broken)
+        self.assertIn("search failed", io_.text)
 
     def test_unreachable_printer_can_be_entered_again(self):
         probe = mock.Mock(side_effect=[(False, "no answer"), (True, "ok")])
@@ -360,6 +390,7 @@ class SetupTests(unittest.TestCase):
                 mock.patch.object(sys, "platform", "linux"), \
                 mock.patch("pushscan2folder.wizard.probe_printer",
                            return_value=(True, "ok")), \
+                mock.patch("pushscan2folder.discovery.discover", return_value=[]), \
                 mock.patch.dict(os.environ, {k: v for k, v in os.environ.items()
                                              if not k.startswith("PUSHSCAN_")}, clear=True), \
                 redirect_stdout(io.StringIO()):
@@ -369,6 +400,7 @@ class SetupTests(unittest.TestCase):
 
     def test_cancel_with_ctrl_d(self):
         with mock.patch("builtins.input", side_effect=EOFError), \
+                mock.patch("pushscan2folder.discovery.discover", return_value=[]), \
                 mock.patch.dict(os.environ, {"XDG_CONFIG_HOME": str(self.dir),
                                              "APPDATA": str(self.dir)}), \
                 redirect_stdout(io.StringIO()):
