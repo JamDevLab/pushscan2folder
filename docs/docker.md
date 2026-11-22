@@ -35,7 +35,6 @@ off by default):
 services:
   pushscan2folder:
     image: ghcr.io/jamdevlab/pushscan2folder:latest   # or a fixed version, e.g. :0.2.0
-    # build: .                           # instead of image: build it from a clone
     restart: unless-stopped
     user: "1000:1000"                    # owner of ./scans and ./config (id -u, id -g)
     environment:
@@ -68,11 +67,15 @@ docker run -d --name pushscan2folder --restart unless-stopped \
 
 ## Build it yourself
 
-Clone the repository. For Compose, replace `image:` with `build: .` in
-`docker-compose.yml` (or keep both lines), then:
+Clone the repository and use `docker-compose.dev.yml`. It builds the image
+from the clone, turns on the debug log and does not restart by itself. It
+uses the same `scans` and `config` folders as `docker-compose.yml`, so stop
+the other one first, or both register the same panel names:
 
 ```sh
-docker compose up -d --build
+docker compose down
+docker compose -f docker-compose.dev.yml up -d --build
+docker compose -f docker-compose.dev.yml logs -f
 ```
 
 For plain docker, build a local image and use `pushscan2folder` instead of the

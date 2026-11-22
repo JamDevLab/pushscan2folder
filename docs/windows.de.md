@@ -99,7 +99,7 @@ Mit `open_after_scan = "folder"` in `[defaults]` (oder `--open-after-scan folder
 
 Das Programm baut nur ausgehende Verbindungen zum Drucker auf. Für das Scannen braucht die Windows-Firewall deshalb keine Regel.
 
-Anders ist es bei der optionalen Webseite. Mit `--web` lauscht das Programm auf einem Port (Standard 8080) und bindet an alle Adressen, wenn du nichts anderes angibst. Windows fragt dann einmal, ob das Programm in privaten oder öffentlichen Netzwerken erlaubt sein soll. Damit die Seite nur auf diesem PC erreichbar ist:
+Anders ist es bei der optionalen Webseite. Mit `--web` (oder `enabled = true` in der Tabelle `[web]` der Konfigurationsdatei) lauscht das Programm auf einem Port (Standard 8080) und bindet an alle Adressen, wenn du nichts anderes angibst. Die Setup-Fragen schlagen `127.0.0.1` vor. Windows fragt dann einmal, ob das Programm in privaten oder öffentlichen Netzwerken erlaubt sein soll. Damit die Seite nur auf diesem PC erreichbar ist:
 
 ```
 .\pushscan2folder.exe --printer 192.168.1.50 --web --web-bind 127.0.0.1
@@ -111,7 +111,7 @@ Dann ist nichts für andere Geräte erreichbar und es ist keine Firewall-Regel n
 $env:PUSHSCAN_WEB_PASSWORD = "ein langes eigenes Passwort"
 ```
 
-Für den Autostart legst du das Passwort in eine Datei und setzt `PUSHSCAN_WEB_PASSWORD_FILE` auf deren Pfad (siehe Dokumentation der Webseite).
+Das Setup legt das Passwort in `web_password.txt` neben der Konfigurationsdatei ab und trägt die Datei in `[web] password_file` ein, was der Autostart braucht. Von Hand nutzt du eine Datei und setzt `PUSHSCAN_WEB_PASSWORD_FILE` oder `password_file` (siehe Dokumentation der Webseite).
 
 ## Wo liegt was
 

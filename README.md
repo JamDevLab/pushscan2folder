@@ -61,14 +61,12 @@ Set the targets in `config/config.toml`. To update, run
 `docker compose pull && docker compose up -d`. To build the image yourself,
 see [Docker](docs/docker.md#build-it-yourself).
 
-The `docker-compose.yml` looks like this. It is shown here so you can see what
-to change:
+The `docker-compose.yml` looks like this, so you can see what to change:
 
 ```yaml
 services:
   pushscan2folder:
     image: ghcr.io/jamdevlab/pushscan2folder:latest   # or a fixed version, e.g. :0.2.0
-    # build: .                           # instead of image: build it from a clone
     restart: unless-stopped
     user: "1000:1000"                    # owner of ./scans and ./config (id -u, id -g)
     environment:

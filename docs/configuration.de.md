@@ -37,7 +37,7 @@ Konfigurationsdatei, jeden Namen mit seinem Ordner, die Adresse der Weboberfläc
 steht als "'NAME' is now on the printer panel under Scan to PC" im Log, jeder
 gespeicherte Scan als "saved PFAD".
 
-Der Unterbefehl `setup`:
+Die weiteren Unterbefehle:
 
 ```sh
 # Stellt ein paar Fragen (Drucker, Name, Ordner, Weboberfläche, unter Windows
@@ -82,7 +82,7 @@ PYTHONPATH=src python3 -m pushscan2folder uninstall --yes [--purge]
 
 Scans werden nie gelöscht, und ein Ordner, der einen Scan-Ordner enthält, bleibt erhalten.
 
-Weitere Unterbefehle zur Fehlersuche:
+`probe` und `scan` dienen der Fehlersuche:
 
 ```sh
 # Register, poll once, print the raw answers and release (debugging).

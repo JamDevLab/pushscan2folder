@@ -4,11 +4,12 @@
 
 Zurück zur [README](../README.de.md).
 
-1. Registrieren. Das Tool meldet sich mit Canons CHMP-Push-Scan-Benachrichtigungsprotokoll
-   beim Drucker an (HTTP POST an `/canon/ij/command1/port2`). Der gewählte
+1. Registrieren. Das Tool meldet sich mit Canons CHMP-Push-Scan-
+   Benachrichtigungsprotokoll beim Drucker an (HTTP POST an
+   `/canon/ij/command1/port2`). Der gewählte
    Name erscheint auf dem Bedienfeld.
-2. Abfragen. Das Tool fragt den Drucker wie die offizielle Software alle 4 Sekunden ab (einstellbar). Ist
-   der Drucker nicht erreichbar, registriert es sich mit exponentiellem Back-off
+2. Abfragen. Wie die offizielle Software fragt das Tool den Drucker alle 4
+   Sekunden ab (einstellbar). Ist der Drucker nicht erreichbar, registriert es sich mit exponentiellem Back-off
    neu, begrenzt auf 10 s, sodass die Namen etwa 10 s nach einem Neustart des
    Druckers wieder erscheinen.
 3. Scannen. Startet der Benutzer am Bedienfeld einen Scan an diesen Host, hat
@@ -16,13 +17,17 @@ Zurück zur [README](../README.de.md).
    32 Bytes Einstellungen vom Bedienfeld. Das Tool scannt mit diesen
    Einstellungen, entweder über Canons eigenes Scanner-Protokoll (mehrseitige
    Scans vom Vorlagenglas, siehe
-   [Konfiguration](configuration.de.md#mehrseitige-scans-vom-vorlagenglas)) oder über eSCL. Es schreibt
+   [Konfiguration](configuration.de.md#mehrseitige-scans-vom-vorlagenglas))
+   oder über eSCL. Es schreibt
    `scan_YYYYmmdd_HHMMSS[_NN].pdf|jpg` in das Ausgabeverzeichnis und
    überschreibt nie vorhandene Dateien. Wählst du am Bedienfeld einen Namen aus,
    ohne einen Scan zu starten, passiert nichts.
 4. Freigeben. Bei SIGINT/SIGTERM gibt das Tool die Sitzung frei.
 
-Das Tool braucht Python >= 3.11 und nur die Standardbibliothek. Es baut nur ausgehende Verbindungen zum Drucker auf (TCP 80). Eingehende Ports sind nicht nötig (außer für die optionale Weboberfläche), daher funktioniert Dockers Standard-Bridge-Netzwerk.
+Das Tool braucht Python >= 3.11 und nur die Standardbibliothek. Es baut nur
+ausgehende Verbindungen zum Drucker auf (TCP 80). Eingehende Ports sind nicht
+nötig (außer für die optionale Weboberfläche), daher funktioniert Dockers
+Standard-Bridge-Netzwerk.
 
 ## Registrierung und lange Scans
 

@@ -5,10 +5,10 @@
 # Logs:   docker compose logs -f
 # Targets and scan settings live in config/config.toml. To edit them in the
 # browser at http://<host>:8080, uncomment the web lines below.
+# To build the image from a clone of the repository: docker-compose.dev.yml.
 services:
   pushscan2folder:
     image: ghcr.io/jamdevlab/pushscan2folder:latest   # or a fixed version, e.g. :0.2.0
-    # build: .                           # instead of image: build it from a clone
     restart: unless-stopped
     user: "1000:1000"                    # owner of ./scans and ./config (id -u, id -g)
     environment:

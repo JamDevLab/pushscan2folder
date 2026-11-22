@@ -5,10 +5,9 @@ English | [Deutsch](how-it-works.de.md)
 Back to the [README](../README.md).
 
 1. Register. The tool announces itself to the printer with Canon's CHMP
-   push-scan notification protocol (HTTP POST to
-   `/canon/ij/command1/port2`). The name you chose appears on the panel.
-2. Poll. The tool polls the printer every 4 seconds like the official software (configurable). If the
-   printer is unreachable, it registers again with exponential back-off, capped
+   push-scan notification protocol (HTTP POST to `/canon/ij/command1/port2`). The name you chose appears on the panel.
+2. Poll. Like the official software, the tool polls the printer every 4
+   seconds (configurable). If the printer is unreachable, it registers again with exponential back-off, capped
    at 10 s, so the names reappear within about 10 s after a printer restart.
 3. Scan. When the user starts a scan to this host on the panel, the poll
    answer has status `0x8000` ("scan requested") and carries 32 bytes of panel
@@ -20,7 +19,10 @@ Back to the [README](../README.md).
    panel without starting a scan triggers nothing.
 4. Release. On SIGINT/SIGTERM the tool releases the session.
 
-The tool needs Python >= 3.11 and the standard library only. It makes only outbound connections to the printer (TCP 80). No inbound ports are needed (except for the optional web page), so Docker's default bridge networking works.
+The tool needs Python >= 3.11 and the standard library only. It makes only
+outbound connections to the printer (TCP 80). No inbound ports are needed
+(except for the optional web page), so Docker's default bridge networking
+works.
 
 ## Registration and long scans
 

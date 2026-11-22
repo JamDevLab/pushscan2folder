@@ -23,7 +23,7 @@ ohne JavaScript. Ein kleines Skript (`/app.js`, vom Programm selbst
 ausgeliefert, keine Inline-Skripte) aktualisiert Status und Log ohne
 sichtbares Neuladen, warnt auf den Bearbeitungsseiten vor ungespeicherten
 Änderungen und fügt im Rohtext-Editor mit der Tab-Taste zwei Leerzeichen ein.
-Ohne JavaScript laden Status und Log einfach alle 10 s neu.
+Ohne JavaScript laden Status und Log alle 10 s neu.
 
 In der mitgelieferten `docker-compose.yml` sind die Web-Zeilen auskommentiert,
 die Oberfläche ist dort also ebenfalls aus, bis du sie einkommentierst.
@@ -147,8 +147,8 @@ geschrieben.
 
 Ordner, die du auf der Weboberfläche einträgst, liegen immer innerhalb des
 Ausgabeordners (`--output` / `PUSHSCAN_OUTPUT`, in Docker `/scans`). Gib einen
-einfachen relativen Pfad ein, etwa `Paperless` oder `buero/rechnungen`, oder `.` für den Ausgabeordner selbst.
-Absolute Pfade, `..`, Backslashes und Symlinks, die aus dem Ausgabeordner
+einfachen relativen Pfad ein, etwa `Paperless` oder `buero/rechnungen`, oder `.` für den Ausgabeordner
+selbst. Absolute Pfade, `..`, Backslashes und Symlinks, die aus dem Ausgabeordner
 herausführen, lehnt die Seite ab, sie kann also nirgendwo anders schreiben.
 Ein Ziel mit einem Ordner außerhalb des Ausgabeordners (zum Beispiel
 `output = "/consume"`) lässt sich nur in der Konfigurationsdatei ändern. Die
@@ -198,8 +198,9 @@ match Host" abgelehnt. Binde den Dienst an eine interne Adresse
 
 Die mitgelieferte `docker-compose.yml` ist für die Weboberfläche
 vorbereitet (`./config:/config`, `PUSHSCAN_CONFIG: /config/config.toml`); zum
-Einschalten die Web-Zeilen und den Port einkommentieren. Binde für die Konfiguration ein Verzeichnis ein, keine einzelne
-Datei: Eine einzeln eingebundene Datei lässt sich nicht atomar ersetzen, dann
-schreibt das Programm sie direkt neu. Das Verzeichnis muss für den Benutzer
+Einschalten die Web-Zeilen und den Port einkommentieren. Binde für die
+Konfiguration ein Verzeichnis ein, keine einzelne Datei: Eine einzeln
+eingebundene Datei lässt sich nicht atomar ersetzen, dann schreibt das Programm
+sie direkt neu. Das Verzeichnis muss für den Benutzer
 aus `user:` beschreibbar sein. Setze `PUSHSCAN_TARGETS` nicht, wenn du die
 Ziele auf der Weboberfläche bearbeitest. Mehr unter [Docker](docker.de.md).

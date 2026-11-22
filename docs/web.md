@@ -22,7 +22,7 @@ works without JavaScript. One small script (`/app.js`, served by the program
 itself, no inline scripts) updates the status and log pages in place without
 a visible reload, warns about unsaved changes on the edit pages and lets the
 Tab key insert two spaces in the raw editor. Without JavaScript the status and
-log pages simply reload every 10 s.
+log pages reload every 10 s.
 
 In the provided `docker-compose.yml` the web lines are commented out, so the
 page is off there too until you uncomment them.
@@ -135,9 +135,9 @@ multi-page switches written explicitly.
 
 Folders set on the web page are always inside the output directory
 (`--output` / `PUSHSCAN_OUTPUT`, `/scans` in Docker). Enter a plain relative
-path such as `Paperless` or `office/invoices`, or `.` for the output directory itself. The page rejects absolute paths,
-`..`, backslashes and symlinks that lead outside the output directory, so it
-cannot write anywhere else. A target whose folder is outside the output
+path such as `Paperless` or `office/invoices`, or `.` for the output directory
+itself. The page rejects absolute paths, `..`, backslashes and symlinks that
+lead outside the output directory, so it cannot write anywhere else. A target whose folder is outside the output
 directory (for example `output = "/consume"`) can only be changed in the config
 file. The web page shows it read-only and keeps it when you save; you can still
 delete it there.
@@ -184,9 +184,8 @@ the proxy.
 
 The provided `docker-compose.yml` is prepared for the web page
 (`./config:/config`, `PUSHSCAN_CONFIG: /config/config.toml`); uncomment the
-web lines and the port to turn it on. Mount
-a directory for the config, not a single file: a single-file bind mount cannot
-be replaced atomically, so the program would fall back to rewriting it in
-place. The directory must be writable for the user set in `user:`. Do not set
+web lines and the port to turn it on. Mount a
+directory for the config, not a single file: a single-file bind mount cannot be
+replaced atomically, so the program would fall back to rewriting it in place. The directory must be writable for the user set in `user:`. Do not set
 `PUSHSCAN_TARGETS` when you edit the targets on the web page. More in
 [Docker](docker.md).

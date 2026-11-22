@@ -17,7 +17,7 @@ GitHub ask for the details. To report a new printer model, see
 - The panel settings "reduce bleed-through", "descreen" and "unsharp mask" are
   read but not applied yet. eSCL has no equivalent, and the official software
   probably applies them on the PC. Applying them would need image processing on
-  your computer and may be added later, for example as an optional extra.
+  your computer. That may be added later, for example as an optional extra.
 - Protocol details and open questions are in [PROTOCOL.md](PROTOCOL.md).
 - Panel names: 31 characters, about 25 visible, ASCII letters, digits, space,
   `-`, `_`, `@` only. See [Panel names](configuration.md#panel-names).

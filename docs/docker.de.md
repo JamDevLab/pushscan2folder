@@ -35,7 +35,6 @@ ist also standardmäßig aus):
 services:
   pushscan2folder:
     image: ghcr.io/jamdevlab/pushscan2folder:latest   # or a fixed version, e.g. :0.2.0
-    # build: .                           # instead of image: build it from a clone
     restart: unless-stopped
     user: "1000:1000"                    # owner of ./scans and ./config (id -u, id -g)
     environment:
@@ -68,11 +67,15 @@ docker run -d --name pushscan2folder --restart unless-stopped \
 
 ## Selbst bauen
 
-Klone das Repository. Bei Compose ersetze `image:` in `docker-compose.yml` durch
-`build: .` (oder lass beide Zeilen stehen), dann:
+Klone das Repository und nimm `docker-compose.dev.yml`. Sie baut das Image aus
+dem Klon, schaltet das Debug-Log ein und startet nicht von selbst neu. Sie
+nutzt dieselben Ordner `scans` und `config` wie `docker-compose.yml`. Stoppe
+deshalb vorher die andere, sonst melden beide dieselben Namen am Drucker an:
 
 ```sh
-docker compose up -d --build
+docker compose down
+docker compose -f docker-compose.dev.yml up -d --build
+docker compose -f docker-compose.dev.yml logs -f
 ```
 
 Bei reinem Docker baue ein lokales Image und nimm im `docker run`-Befehl oben

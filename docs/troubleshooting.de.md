@@ -18,10 +18,13 @@ melden, siehe [CONTRIBUTING.md](../CONTRIBUTING.md) (auf Englisch).
 - Die Bedienfeld-Einstellungen "Durchscheinen reduzieren", "Entrasterung" und
   "Unscharfmaskierung" werden gelesen, aber noch nicht angewendet. eSCL kennt
   keine Entsprechung, und die offizielle Software wendet sie wahrscheinlich auf
-  dem PC an. Sie anzuwenden bräuchte Bildverarbeitung auf deinem Rechner und
-  kommt vielleicht später dazu, zum Beispiel als optionales Extra.
-- Protokolldetails und offene Fragen stehen in [PROTOCOL.md](PROTOCOL.md) (auf Englisch).
-- Namen auf dem Bedienfeld: 31 Zeichen, etwa 25 sichtbar, nur ASCII-Buchstaben, Ziffern, Leerzeichen, `-`, `_`, `@`. Siehe [Namen auf dem Bedienfeld](configuration.de.md#namen-auf-dem-bedienfeld).
+  dem PC an. Dafür bräuchte es Bildverarbeitung auf deinem Rechner. Das kommt
+  vielleicht später dazu, zum Beispiel als optionales Extra.
+- Protokolldetails und offene Fragen stehen in [PROTOCOL.md](PROTOCOL.md)
+  (auf Englisch).
+- Namen auf dem Bedienfeld: 31 Zeichen, etwa 25 sichtbar, nur ASCII-Buchstaben,
+  Ziffern, Leerzeichen, `-`, `_`, `@`. Siehe
+  [Namen auf dem Bedienfeld](configuration.de.md#namen-auf-dem-bedienfeld).
 - Das Tool kontaktiert nur den Drucker. Eine automatische Suche ist nicht
   implementiert, daher musst du die Adresse des Druckers angeben.
 
