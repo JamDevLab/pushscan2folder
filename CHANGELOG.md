@@ -63,6 +63,11 @@ All notable changes are documented here. The format follows
 
 ### Changed
 
+- The default web port is 8737 (8080 is used by many other programs). The
+  Docker image stays on 8080 (`PUSHSCAN_WEB_PORT=8080`). An existing config
+  with `port = 8080` keeps 8080.
+- Windows menu: it stays open after start, stop and change the settings and
+  shows the new state. Only quit, Ctrl+C and a finished uninstall end it.
 - New config layout. The top level keeps only `printer` and `output`.
   `[defaults.document]` and `[defaults.auto]` each have `multipage` (panel
   document type Document, built-in `true`; Auto, built-in `false`) and replace

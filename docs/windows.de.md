@@ -119,13 +119,13 @@ Mit `open_after_scan = true` in `[defaults]` (oder `--open-after-scan true`, `PU
 
 Das Programm baut nur ausgehende Verbindungen zum Drucker auf. Für das Scannen braucht die Windows-Firewall deshalb keine Regel.
 
-Anders ist es bei der optionalen Webseite. Mit `--web` (oder `enabled = true` in der Tabelle `[web]` der Konfigurationsdatei) lauscht das Programm auf einem Port (Standard 8080) und bindet an alle Adressen, wenn du nichts anderes angibst. Die Setup-Fragen schlagen `127.0.0.1` vor. Windows fragt dann einmal, ob das Programm in privaten oder öffentlichen Netzwerken erlaubt sein soll. Damit die Seite nur auf diesem PC erreichbar ist:
+Anders ist es bei der optionalen Webseite. Mit `--web` (oder `enabled = true` in der Tabelle `[web]` der Konfigurationsdatei) lauscht das Programm auf einem Port (Standard 8737) und bindet an alle Adressen, wenn du nichts anderes angibst. Die Setup-Fragen schlagen `127.0.0.1` vor. Windows fragt dann einmal, ob das Programm in privaten oder öffentlichen Netzwerken erlaubt sein soll. Damit die Seite nur auf diesem PC erreichbar ist:
 
 ```
 .\pushscan2folder.exe --printer 192.168.1.50 --web --web-bind 127.0.0.1
 ```
 
-Dann ist nichts für andere Geräte erreichbar und es ist keine Firewall-Regel nötig. Im Browser http://127.0.0.1:8080 öffnen. Die Webseite braucht ein Passwort, das vor dem Start gesetzt wird, zum Beispiel:
+Dann ist nichts für andere Geräte erreichbar und es ist keine Firewall-Regel nötig. Im Browser http://127.0.0.1:8737 öffnen. Die Webseite braucht ein Passwort, das vor dem Start gesetzt wird, zum Beispiel:
 
 ```
 $env:PUSHSCAN_WEB_PASSWORD = "ein langes eigenes Passwort"

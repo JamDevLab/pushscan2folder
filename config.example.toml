@@ -55,7 +55,7 @@ trim_bottom = 2            # mm; tested on a TR8550
 # [web]
 # enabled = true
 # bind = "127.0.0.1"         # only this PC; 0.0.0.0 = reachable from the network
-# port = 8080
+# port = 8737
 # password_file = "web_password.txt"   # relative to this config file
 
 # One [[target]] per entry on the printer panel (name: max 31 chars, unique).

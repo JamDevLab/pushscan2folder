@@ -33,13 +33,13 @@ page is off there too until you uncomment them.
 PUSHSCAN_WEB=1 PUSHSCAN_WEB_PASSWORD='a long password' \
 PUSHSCAN_CONFIG=~/pushscan.toml \
 PYTHONPATH=src python3 -m pushscan2folder --printer 192.168.1.50 run
-# web page on http://0.0.0.0:8080
+# web page on http://0.0.0.0:8737
 ```
 
 | Setting | Meaning |
 |---------|---------|
 | `PUSHSCAN_WEB=1` / `--web` | enable (`run` only) |
-| `PUSHSCAN_WEB_PORT` / `--web-port` | port, default 8080 |
+| `PUSHSCAN_WEB_PORT` / `--web-port` | port, default 8737 |
 | `PUSHSCAN_WEB_BIND` / `--web-bind` | address, default `0.0.0.0` (use `127.0.0.1` to keep it local) |
 | `PUSHSCAN_WEB_PASSWORD` | password, at least 8 characters |
 | `PUSHSCAN_WEB_PASSWORD_FILE` | file with the password (e.g. a Docker secret); used if the variable above is unset |

@@ -34,13 +34,13 @@ die Oberfläche ist dort also ebenfalls aus, bis du sie einkommentierst.
 PUSHSCAN_WEB=1 PUSHSCAN_WEB_PASSWORD='a long password' \
 PUSHSCAN_CONFIG=~/pushscan.toml \
 PYTHONPATH=src python3 -m pushscan2folder --printer 192.168.1.50 run
-# web page on http://0.0.0.0:8080
+# web page on http://0.0.0.0:8737
 ```
 
 | Einstellung | Bedeutung |
 |-------------|-----------|
 | `PUSHSCAN_WEB=1` / `--web` | aktivieren (nur `run`) |
-| `PUSHSCAN_WEB_PORT` / `--web-port` | Port, Standard 8080 |
+| `PUSHSCAN_WEB_PORT` / `--web-port` | Port, Standard 8737 |
 | `PUSHSCAN_WEB_BIND` / `--web-bind` | Adresse, Standard `0.0.0.0` (mit `127.0.0.1` bleibt sie lokal) |
 | `PUSHSCAN_WEB_PASSWORD` | Passwort, mindestens 8 Zeichen |
 | `PUSHSCAN_WEB_PASSWORD_FILE` | Datei mit dem Passwort (z. B. ein Docker-Secret); wird genutzt, wenn die Variable darüber nicht gesetzt ist |

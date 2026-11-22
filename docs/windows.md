@@ -118,13 +118,13 @@ With `open_after_scan = true` in `[defaults]` (or `--open-after-scan true`, `PUS
 
 The program only makes outgoing connections to the printer, so Windows Firewall needs no rule for the scanning itself.
 
-The optional web page is different. With `--web` (or `enabled = true` in the `[web]` table of the config file) it listens on a port (8080 by default) and binds to all addresses unless you say otherwise. The setup questions suggest `127.0.0.1`. Windows then asks once whether to allow the program on private or public networks. To keep the page on this PC only, use:
+The optional web page is different. With `--web` (or `enabled = true` in the `[web]` table of the config file) it listens on a port (8737 by default) and binds to all addresses unless you say otherwise. The setup questions suggest `127.0.0.1`. Windows then asks once whether to allow the program on private or public networks. To keep the page on this PC only, use:
 
 ```
 .\pushscan2folder.exe --printer 192.168.1.50 --web --web-bind 127.0.0.1
 ```
 
-Nothing is exposed to other devices then, and no firewall rule is needed. Open http://127.0.0.1:8080 in a browser. The web page needs a password; set it before the start, for example:
+Nothing is exposed to other devices then, and no firewall rule is needed. Open http://127.0.0.1:8737 in a browser. The web page needs a password; set it before the start, for example:
 
 ```
 $env:PUSHSCAN_WEB_PASSWORD = "a long password of your own"

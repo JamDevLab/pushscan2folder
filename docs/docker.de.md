@@ -111,7 +111,9 @@ das Host-Verzeichnis (prüfe sie mit
 
 Zum Scannen braucht der Container keine Port-Weiterleitung, er verbindet sich
 nur ausgehend mit dem Drucker auf TCP 80. Port 8080 ist nur für die
-[Weboberfläche](web.de.md). Dockers Standard-Bridge-Netzwerk funktioniert.
+[Weboberfläche](web.de.md). Das Image setzt `PUSHSCAN_WEB_PORT=8080` aus
+Kompatibilität zu bestehenden Compose-Dateien, der Standard auf dem Desktop ist
+8737. Dockers Standard-Bridge-Netzwerk funktioniert.
 
 ## Konfigurationsänderungen und Druckersuche
 

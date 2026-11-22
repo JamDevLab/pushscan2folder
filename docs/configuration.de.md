@@ -153,7 +153,7 @@ Mehr unter [Vorrang](#vorrang).
 | `--max-age`    | -                  | `120`               | health        | Sekunden, nach denen `health` die Heartbeat-Datei für zu alt hält |
 | `--no-pause`   | `PUSHSCAN_NO_PAUSE`   | aus                 | alle          | Windows: nicht auf Enter warten, bevor sich ein nur für dieses Programm geöffnetes Konsolenfenster schließt. Der Autostart-Eintrag setzt es |
 | `--web`        | `PUSHSCAN_WEB`        | aus                 | run           | Stellt die [Weboberfläche](web.de.md) bereit. Umgebungsvariable: `1`, `true` oder `yes` |
-| `--web-port`   | `PUSHSCAN_WEB_PORT`   | `8080`              | run           | Port der Weboberfläche |
+| `--web-port`   | `PUSHSCAN_WEB_PORT`   | `8737`              | run           | Port der Weboberfläche |
 | `--web-bind`   | `PUSHSCAN_WEB_BIND`   | `0.0.0.0`           | run           | Adresse der Weboberfläche |
 | -              | `PUSHSCAN_WEB_PASSWORD` / `PUSHSCAN_WEB_PASSWORD_FILE` | (erforderlich mit `--web`) | run | Passwort der Weboberfläche (mind. 8 Zeichen) oder eine Datei, die es enthält. Per Umgebung oder `[web] password_file` der Konfigurationsdatei. Das Passwort selbst nie in der Konfigurationsdatei |
 | `--keep`       | -                  | aus                 | probe         | Gibt die Sitzung nicht frei |
@@ -199,7 +199,7 @@ Meldung abgelehnt, die Datei und Schlüssel nennt, damit Tippfehler auffallen.
 | `[advanced]` `trim_left`, `trim_top`, `trim_right`, `trim_bottom` | Zahl, mm, 0 bis 50 | `--trim` |
 | `[web]` `enabled` | `true` / `false` | `--web` |
 | `[web]` `bind` | Adresse, Standard `0.0.0.0` | `--web-bind` |
-| `[web]` `port` | 1 bis 65535, Standard 8080 | `--web-port` |
+| `[web]` `port` | 1 bis 65535, Standard 8737 | `--web-port` |
 | `[web]` `password_file` | Datei mit dem Passwort; relativ zur Konfigurationsdatei. Das Passwort selbst ist nie ein Schlüssel | `PUSHSCAN_WEB_PASSWORD_FILE` |
 | `[[target]]` `name` | erforderlich, max. 31 Zeichen, eindeutig | `NAME` |
 | `[[target]]` `output` | Ordner; `"."` ist der Ausgabeordner selbst; Standard `<output>/<name>` | `NAME=DIR` |

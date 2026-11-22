@@ -107,8 +107,9 @@ container user's UID (check with
 ## Network
 
 Scanning needs no port mapping; the container only connects out to the
-printer on TCP 80. Port 8080 is only for the [web page](web.md). Docker's
-default bridge networking works.
+printer on TCP 80. Port 8080 is only for the [web page](web.md). The image
+sets `PUSHSCAN_WEB_PORT=8080` for compatibility with existing compose files,
+while the desktop default is 8737. Docker's default bridge networking works.
 
 ## Config changes and printer search
 
