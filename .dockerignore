@@ -1,4 +1,5 @@
 *
 !src/
+!requirements.txt
 **/__pycache__
 **/*.pyc
