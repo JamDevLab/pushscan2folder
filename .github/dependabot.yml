@@ -1,6 +1,9 @@
 # Dependabot opens pull requests when a GitHub Action or the Python base image
-# of the Dockerfile has a newer version. The project has no Python dependencies.
-# PyInstaller is pinned in release.yml and is updated by hand.
+# of the Dockerfile has a newer version. Both are pinned by commit SHA or
+# image digest (with the version in a comment), so a moved tag cannot change
+# what CI runs; Dependabot updates the SHA, the digest and the comment.
+# PyInstaller (version and sdist SHA-256) and Inno Setup are pinned in
+# release.yml and are updated by hand. Pillow (requirements.txt) is watched too.
 version: 2
 updates:
   - package-ecosystem: github-actions
@@ -11,6 +14,10 @@ updates:
       actions:
         patterns: ["*"]
   - package-ecosystem: docker
+    directory: /
+    schedule:
+      interval: monthly
+  - package-ecosystem: pip
     directory: /
     schedule:
       interval: monthly

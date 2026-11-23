@@ -19,8 +19,8 @@ jobs:
     env:
       PYTHONPATH: src
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-python@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0  # v7.1.0
         with:
           python-version: "3.13"
       - name: Install the optional Pillow (bundled into the exe)
@@ -42,6 +42,12 @@ jobs:
         # scanners distrust them; compiling our own avoids most false alarms.
         run: |
           python -m pip download --no-binary :all: --no-deps pyinstaller==6.22.3 -d pyi-src
+          # The sdist must match the published one (PyPI SHA-256 of 6.22.3).
+          $hash = (Get-FileHash -Algorithm SHA256 pyi-src/pyinstaller-6.22.3.tar.gz).Hash.ToLower()
+          if ($hash -ne "05eb2f5615503e72939a7224d68b4aff572c6b0438ee4a17d0a4b481f399362d") {
+            Write-Error "unexpected PyInstaller sdist hash $hash"
+            exit 1
+          }
           tar -xzf pyi-src/pyinstaller-6.22.3.tar.gz -C pyi-src
           Push-Location pyi-src/pyinstaller-6.22.3/bootloader
           Remove-Item -Recurse -Force ../PyInstaller/bootloader/Windows-64bit-intel
@@ -69,7 +75,7 @@ jobs:
         run: |
           $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
           if (-not (Test-Path $iscc)) {
-            choco install innosetup -y --no-progress
+            choco install innosetup --version 6.7.1 -y --no-progress
             if ($LASTEXITCODE -ne 0) { exit 1 }
           }
           $version = (& dist\pushscan2folder\pushscan2folder.exe --version).Split(" ")[-1]
@@ -98,7 +104,7 @@ jobs:
           $setup = (Get-ChildItem *-setup.exe).Name
           $hash = (Get-FileHash $setup -Algorithm SHA256).Hash.ToLower()
           "$hash  $setup" | Out-File -Encoding ascii SHA256SUMS.txt
-      - uses: actions/upload-artifact@v7
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
         with:
           name: pushscan2folder-windows
           path: |

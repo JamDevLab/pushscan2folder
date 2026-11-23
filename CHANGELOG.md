@@ -23,6 +23,9 @@ All notable changes are documented here. The format follows
 - Web login lockout: wrong passwords are counted per client address, so one
   host on the LAN can no longer lock out everyone. A global cap (50 wrong
   passwords within 15 minutes) still locks the login for all addresses.
+- Build: GitHub Actions are pinned by commit SHA and the Docker base image
+  by digest; the release build checks the PyInstaller source hash and
+  installs a fixed Inno Setup version.
 
 ### Fixed
 
