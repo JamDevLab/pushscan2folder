@@ -73,7 +73,8 @@ class FakePrinter(BaseHTTPRequestHandler):
             if st.get("delay"):
                 import time
                 time.sleep(st["delay"])
-            self._send(200, b"%PDF-1.3 cut" if st.get("truncated") else b"%PDF-1.3 fake\n%%EOF\n")
+            self._send(200, b"%PDF-1.3 cut" if st.get("truncated")
+                       else st.get("document", b"%PDF-1.3 fake\n%%EOF\n"))
         else:
             self._send(404)
 

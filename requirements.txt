@@ -1,0 +1,3 @@
+# Optional: cut the photos out of a scan (panel size auto scan / auto multi scan).
+# Without it pushscan2folder works the same and saves the whole glass.
+pillow==13.0.0

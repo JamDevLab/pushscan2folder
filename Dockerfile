@@ -7,6 +7,8 @@ RUN useradd --create-home --uid 1000 scanner \
     && chown scanner:scanner /scans
 
 WORKDIR /app
+COPY requirements.txt /app/
+RUN pip install --no-cache-dir -r requirements.txt
 COPY src/ /app/src/
 
 ENV PYTHONPATH=/app/src \

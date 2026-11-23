@@ -15,7 +15,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Callable
 
-from . import desktop, panel
+from . import crop, desktop, panel
 from .client import ChmpClient
 from .escl import EXTENSIONS, FORMATS, EsclClient, ScanSettings
 from .native import NativeScanner, PageSettings
@@ -400,6 +400,10 @@ class PushScanService:
         if self.use_panel and interrupt:
             p = panel.decode(interrupt)
             log.info("panel settings: %s", p.describe())
+            unknown = panel.unknown_values(interrupt)
+            if unknown:
+                log.warning("unknown panel value(s): %s; please report them together "
+                            "with the 'scan requested' line above", ", ".join(unknown))
             settings = panel.apply(p, settings)
             if p.doc_type == "auto" and preset:
                 settings = replace(settings, **preset)
@@ -440,6 +444,20 @@ class PushScanService:
             return False
         modes = self.multipage if target is None or target.multipage is None else target.multipage
         return self.use_panel and panel.decode(interrupt).doc_type in modes
+
+    def cut_mode(self, settings: ScanSettings, interrupt: bytes) -> str | None:
+        """"single" or "multi" when the photos are to be cut out of the scan:
+        panel size auto scan or auto multi scan on the glass, Pillow installed."""
+        if not (self.use_panel and interrupt) or settings.source != "platen":
+            return None
+        size = panel.decode(interrupt).size
+        if size not in panel.AUTO_SIZES:
+            return None
+        if not crop.available():
+            log.info("install Pillow to cut the photos out of the scan; saving the "
+                     "whole glass")
+            return None
+        return "multi" if size == "auto-multi" else "single"
 
     def keepalive(self) -> None:
         """Poll all targets during a scan so the printer keeps them registered."""
@@ -524,6 +542,10 @@ class PushScanService:
         outdir = target.outdir
         settings = self.settings_for(interrupt, target)
         native = self.use_native(settings, interrupt, target)
+        cut = None if native else self.cut_mode(settings, interrupt)
+        saved_fmt = settings.fmt
+        if cut:
+            settings = replace(settings, fmt="jpeg")   # cut out on the JPEG, then convert
         log.info("scanning (%s): source=%s color=%s dpi=%d format=%s region=%dx%d",
                  "native, multi-page" if native else "eSCL",
                  settings.source, settings.color, settings.resolution, settings.fmt,
@@ -541,6 +563,12 @@ class PushScanService:
                             len(docs) - len(complete))
         if not complete:
             return []
+        if cut:
+            complete = [photo for page in complete
+                        for photo in crop.cut_out(page, settings.resolution, cut == "multi")]
+            if saved_fmt == "pdf":
+                complete = [jpegs_to_pdf([photo], settings.resolution) for photo in complete]
+            settings = replace(settings, fmt=saved_fmt)
         outdir.mkdir(parents=True, exist_ok=True)
         paths = output_names(outdir, settings.fmt, len(complete), datetime.now(),
                              target.filename or self.filename, target.name)
