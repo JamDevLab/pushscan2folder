@@ -205,10 +205,13 @@ Passwort liegt; das lässt sich nur in der Datei selbst oder mit
   2 Stunden ohne Anfrage, 12 Stunden nach der Anmeldung oder beim Neustart des
   Dienstes. Es gibt höchstens 20 Sitzungen gleichzeitig. Der Server speichert
   von jedem Sitzungs-Token nur einen Hash.
-- Nutze ein langes Passwort. Nach 5 falschen Passwörtern ist die Anmeldung
-  1 Minute gesperrt; jede weitere Sperre verdoppelt die Zeit, bis höchstens
-  15 Minuten. Die Sperre gilt global, nicht pro IP, weil hinter einer
-  Docker-Portweiterleitung alle Clients gleich aussehen.
+- Nutze ein langes Passwort. Nach 5 falschen Passwörtern von einer Adresse ist
+  diese Adresse 1 Minute gesperrt; jede weitere Sperre verdoppelt die Zeit, bis
+  höchstens 15 Minuten. Andere Adressen können sich weiter anmelden. Nach 50
+  falschen Passwörtern innerhalb von 15 Minuten von allen Adressen zusammen ist
+  die Anmeldung für alle gesperrt, bis das älteste davon 15 Minuten alt ist.
+  Hinter einer Docker-Portweiterleitung oder einem Reverse Proxy können alle
+  Clients wie eine Adresse aussehen; die Sperre gilt dann für alle gemeinsam.
 - Nimm lieber `PUSHSCAN_WEB_PASSWORD_FILE` (zum Beispiel ein Docker-Secret) als
   `PUSHSCAN_WEB_PASSWORD`, denn Umgebungsvariablen sind in `docker inspect`
   sichtbar.

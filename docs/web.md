@@ -188,10 +188,13 @@ can only be changed in the file itself or with `pushscan2folder setup`.
   without a request, 12 hours after login, or when the service restarts. At
   most 20 sessions exist at a time. The server keeps only a hash of each
   session token.
-- Use a long password. After 5 wrong passwords the login is locked for 1
-  minute; each further lockout doubles this, up to 15 minutes. The lock is
-  global, not per IP, because behind a Docker port mapping all clients look
-  alike.
+- Use a long password. After 5 wrong passwords from one address, that address
+  is locked for 1 minute; each further lockout doubles this, up to 15 minutes.
+  Other addresses can still log in. After 50 wrong passwords within 15 minutes
+  from all addresses together, the login is locked for everyone until the
+  oldest of them is 15 minutes old. Behind a Docker port mapping or a reverse
+  proxy all clients can look like one address; the lock then works for all of
+  them together.
 - Prefer `PUSHSCAN_WEB_PASSWORD_FILE` (for example a Docker secret) over
   `PUSHSCAN_WEB_PASSWORD`, because environment variables are visible in
   `docker inspect`.

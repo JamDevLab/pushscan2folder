@@ -3,7 +3,8 @@ settings form and raw config file editor.
 
 Plain HTTP, stdlib only. The pages work without JavaScript; one small script
 (APP_JS, edit pages only) warns about unsaved changes. Security model: one shared password,
-in-memory sessions (only token hashes are stored), a global login lockout,
+in-memory sessions (only token hashes are stored), a login lockout per address
+plus a global cap,
 CSRF tokens on every POST form, Origin check and strict response headers.
 Target folders set here must stay inside the base output directory; the
 raw editor enforces the same and cannot change "output" or "printer". Meant
@@ -51,9 +52,12 @@ MIN_PASSWORD_LENGTH = 8
 SESSION_IDLE_SECONDS = 2 * 3600       # without any request
 SESSION_MAX_SECONDS = 12 * 3600       # absolute lifetime, also the cookie Max-Age
 MAX_SESSIONS = 20                     # the oldest session is dropped beyond this
-MAX_FAILURES = 5
-LOCKOUT_SECONDS = 60                  # doubles with every further lockout ...
+MAX_FAILURES = 5                      # wrong passwords per client address ...
+LOCKOUT_SECONDS = 60                  # ... lock it; doubles with every further lockout ...
 MAX_LOCKOUT_SECONDS = 15 * 60         # ... up to this; a successful login resets it
+GLOBAL_MAX_FAILURES = 50              # wrong passwords from all addresses together ...
+GLOBAL_WINDOW_SECONDS = 15 * 60       # ... within this lock the login for everyone
+MAX_TRACKED_CLIENTS = 1024            # addresses with failures that are remembered
 MAX_BODY = 64 * 1024
 MAX_CONNECTIONS = 32                  # concurrent connections (threads)
 REQUEST_TIMEOUT = 30                  # seconds of socket inactivity (slowloris)
@@ -153,7 +157,13 @@ def _digest(value: str | bytes) -> bytes:
 
 
 class Sessions:
-    """In-memory sessions plus the global login lockout (thread safe).
+    """In-memory sessions plus the login lockout (thread safe).
+
+    The lockout counts wrong passwords per client address (so one host on the
+    LAN cannot lock out everyone else) and, as a cap against guessing from
+    many addresses, for all addresses together. Behind a Docker port mapping
+    or a reverse proxy all clients can share one address; the lockout then
+    acts globally, as before.
 
     Only the SHA-256 of a session token is kept, so a memory dump or a debug
     print of this object does not reveal a usable cookie. A session ends
@@ -167,32 +177,54 @@ class Sessions:
         self._lock = threading.Lock()
         # sha256(token) -> [csrf, created, last_seen]
         self._sessions: dict[bytes, list] = {}
-        self._failures = 0
-        self._lockouts = 0
-        self._locked_until = 0.0
+        # client address -> [failures, lockouts, locked_until, last_failure]
+        self._clients: dict[str, list] = {}
+        self._recent: list[float] = []    # times of wrong passwords from all addresses
 
-    def locked(self) -> bool:
-        with self._lock:
-            return _now() < self._locked_until
+    def _client_locked(self, client: str, now: float) -> bool:
+        entry = self._clients.get(client)
+        return entry is not None and now < entry[2]
 
-    def login(self, password_ok) -> str | None:
-        """One login attempt, atomic with respect to the lockout counter.
-        password_ok() is only called when not locked. Returns the new session
-        token, None for a wrong password. Raises PermissionError while locked."""
+    def _global_locked(self, now: float) -> bool:
+        self._recent = [t for t in self._recent if now - t < GLOBAL_WINDOW_SECONDS]
+        return len(self._recent) >= GLOBAL_MAX_FAILURES
+
+    def locked(self, client: str = "") -> bool:
         with self._lock:
             now = _now()
-            if now < self._locked_until:
+            return self._client_locked(client, now) or self._global_locked(now)
+
+    def _forget_clients(self, now: float) -> None:
+        """Bound the address table: drop entries that are no longer locked and
+        whose last failure is long ago, then the oldest ones."""
+        stale = MAX_LOCKOUT_SECONDS * 2
+        for key in [k for k, e in self._clients.items() if now >= e[2] and now - e[3] > stale]:
+            del self._clients[key]
+        while len(self._clients) > MAX_TRACKED_CLIENTS:
+            oldest = min(self._clients, key=lambda k: self._clients[k][3])
+            del self._clients[oldest]
+
+    def login(self, password_ok, client: str = "") -> str | None:
+        """One login attempt from address `client`, atomic with respect to the
+        lockout counters. password_ok() is only called when not locked.
+        Returns the new session token, None for a wrong password. Raises
+        PermissionError while this address or the login as a whole is locked."""
+        with self._lock:
+            now = _now()
+            if self._client_locked(client, now) or self._global_locked(now):
                 raise PermissionError("locked")
             if not password_ok():
-                self._failures += 1
-                if self._failures >= MAX_FAILURES:
-                    self._failures = 0
-                    self._locked_until = now + min(LOCKOUT_SECONDS * 2 ** self._lockouts,
-                                                   MAX_LOCKOUT_SECONDS)
-                    self._lockouts += 1
+                entry = self._clients.setdefault(client, [0, 0, 0.0, now])
+                entry[0] += 1
+                entry[3] = now
+                if entry[0] >= MAX_FAILURES:
+                    entry[0] = 0
+                    entry[2] = now + min(LOCKOUT_SECONDS * 2 ** entry[1], MAX_LOCKOUT_SECONDS)
+                    entry[1] += 1
+                self._recent.append(now)
+                self._forget_clients(now)
                 return None
-            self._failures = 0
-            self._lockouts = 0
+            self._clients.pop(client, None)
             self._expire(now)
             while len(self._sessions) >= MAX_SESSIONS:
                 oldest = min(self._sessions, key=lambda k: self._sessions[k][1])
@@ -1727,7 +1759,7 @@ class Handler(BaseHTTPRequestHandler):
         client = self.client_address[0]
         try:
             token = sessions.login(
-                lambda: hmac.compare_digest(supplied, self.server.password_digest))
+                lambda: hmac.compare_digest(supplied, self.server.password_digest), client)
         except PermissionError:
             log.warning("web login from %s refused, locked after too many failures", client)
             return self._send(429, render_login("Too many attempts, wait a while and try again."))

@@ -135,7 +135,7 @@ class AuthTests(WebTestBase):
         self.assertIn("Path=/", cookie)
         self.assertEqual(self.client.request("GET", "/")[0], 200)
 
-    def test_global_lockout(self):
+    def test_lockout_same_address(self):
         clock = [1000.0]
         with mock.patch.object(web, "_now", lambda: clock[0]):
             for _ in range(5):
@@ -1447,6 +1447,40 @@ class SessionTests(WebTestBase):
         for t in threads:
             t.join()
         self.assertEqual(len(calls), web.MAX_FAILURES)
+
+    def test_lockout_is_per_client_address(self):
+        clock = [1000.0]
+        sessions = web.Sessions()
+        with mock.patch.object(web, "_now", lambda: clock[0]):
+            for _ in range(web.MAX_FAILURES):
+                self.assertIsNone(sessions.login(lambda: False, "10.0.0.66"))
+            with self.assertRaises(PermissionError):
+                sessions.login(lambda: True, "10.0.0.66")
+            self.assertTrue(sessions.locked("10.0.0.66"))
+            self.assertFalse(sessions.locked("10.0.0.5"))
+            self.assertIsNotNone(sessions.login(lambda: True, "10.0.0.5"))
+            clock[0] += web.LOCKOUT_SECONDS + 1
+            self.assertIsNotNone(sessions.login(lambda: True, "10.0.0.66"))
+
+    def test_global_cap_over_many_addresses(self):
+        clock = [1000.0]
+        sessions = web.Sessions()
+        with mock.patch.object(web, "_now", lambda: clock[0]):
+            for i in range(web.GLOBAL_MAX_FAILURES):
+                sessions.login(lambda: False, f"10.0.{i}.1")   # one try per address
+            with self.assertRaises(PermissionError):
+                sessions.login(lambda: True, "10.9.9.9")
+            clock[0] += web.GLOBAL_WINDOW_SECONDS + 1
+            self.assertIsNotNone(sessions.login(lambda: True, "10.9.9.9"))
+
+    def test_address_table_is_bounded(self):
+        clock = [1000.0]
+        sessions = web.Sessions()
+        with mock.patch.object(web, "_now", lambda: clock[0]), \
+                mock.patch.object(web, "GLOBAL_MAX_FAILURES", 10 ** 6):
+            for i in range(web.MAX_TRACKED_CLIENTS + 50):
+                sessions.login(lambda: False, f"10.{i // 256}.{i % 256}.1")
+        self.assertLessEqual(len(sessions._clients), web.MAX_TRACKED_CLIENTS)
 
     @staticmethod
     def _attempt(sessions, check):

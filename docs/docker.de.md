@@ -153,8 +153,10 @@ Docker-Netzwerks zeigen statt der Adresse des echten Clients. Das passiert, wenn
 Dockers Userland-Proxy (`docker-proxy`) die Verbindung weiterleitet, zum
 Beispiel bei Rootless Docker, bei einer Verbindung über IPv6 auf eine
 IPv4-Portzuordnung oder bei manchen NAS-Systemen. Das Programm schreibt diese
-Adresse nur ins Log. Die Anmeldesperre gilt global und nicht pro Adresse (siehe
-[Sicherheitsmodell](web.de.md#sicherheitsmodell)), es geht also nichts kaputt.
+Adresse ins Log und zählt falsche Passwörter pro Adresse (siehe
+[Sicherheitsmodell](web.de.md#sicherheitsmodell)). Mit der Gateway-Adresse
+teilen sich alle Clients eine Sperre; ein falsches Passwort von einem Client
+zählt dann auch für die anderen.
 
 Um die echte Adresse zu sehen, gibt es diese Möglichkeiten:
 

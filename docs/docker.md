@@ -147,9 +147,10 @@ Behind Docker, the log line "web login from 172.x.x.1" can show the gateway of
 the Docker network instead of the address of the real client. This happens when
 Docker's userland proxy (`docker-proxy`) forwards the connection, for example
 with rootless Docker, with a connection over IPv6 to an IPv4 port mapping, or
-on some NAS systems. The program only logs this address. The login lockout is
-global and not per address (see [Security model](web.md#security-model)), so
-nothing breaks.
+on some NAS systems. The program logs this address and counts wrong passwords
+per address (see [Security model](web.md#security-model)). With the gateway
+address all clients share one lock, so a wrong password from one client also
+counts for the others.
 
 To see the real address, use one of these:
 
