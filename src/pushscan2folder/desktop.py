@@ -76,19 +76,47 @@ def explorer_select(path: Path, popen=subprocess.Popen) -> None:
         popen(f'explorer.exe /select,"{path}"')
 
 
-def open_path(path: Path, popen=subprocess.Popen, startfile=None) -> None:
-    """Open a file with the program the system has for it. Windows: the file
-    association, else Notepad; macOS "open"; elsewhere "xdg-open". Raises OSError."""
+DETACHED_PROCESS = 0x00000008
+CREATE_NEW_PROCESS_GROUP = 0x00000200
+CREATE_BREAKAWAY_FROM_JOB = 0x01000000
+
+
+def windows_has_program(suffix: str) -> bool:
+    """True when Windows has a program for files ending in `suffix`."""
+    import ctypes
+    from ctypes import wintypes
+    size = wintypes.DWORD(0)
+    # ASSOCF_INIT_IGNOREUNKNOWN (0x400), ASSOCSTR_EXECUTABLE (2); with no
+    # buffer the call only reports the length: S_FALSE (1) when found.
+    result = ctypes.windll.shlwapi.AssocQueryStringW(
+        0x400, 2, suffix, None, None, ctypes.byref(size))
+    return result >= 0
+
+
+def _start_detached(command: list[str], popen) -> None:
+    """Start a program that keeps running when this console closes."""
+    kwargs = dict(stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                  stderr=subprocess.DEVNULL, close_fds=True)
+    flags = DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP
+    try:   # also leave the job of the terminal, if it allows that
+        popen(command, creationflags=flags | CREATE_BREAKAWAY_FROM_JOB, **kwargs)
+    except OSError:
+        popen(command, creationflags=flags, **kwargs)
+
+
+def open_path(path: Path, popen=subprocess.Popen, has_program=None) -> None:
+    """Open a file with the program the system has for it, independent of
+    this console. Windows: through Explorer (the program then belongs to
+    Explorer, not to this terminal), else Notepad; macOS "open"; elsewhere
+    "xdg-open". Raises OSError."""
     if is_windows():
-        startfile = startfile or getattr(os, "startfile", None)
         try:
-            if startfile is None:
-                raise OSError("no os.startfile")
-            startfile(str(path))
-        except OSError:   # no program for this file type
-            popen(["notepad.exe", str(path)])
+            found = (has_program or windows_has_program)(path.suffix)
+        except (OSError, AttributeError):
+            found = False
+        _start_detached(["explorer.exe" if found else "notepad.exe", str(path)], popen)
         return
-    popen(["open" if is_macos() else "xdg-open", str(path)],
+    popen(["open" if is_macos() else "xdg-open", str(path)], start_new_session=True,
           stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
 

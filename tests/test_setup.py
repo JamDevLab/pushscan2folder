@@ -618,13 +618,19 @@ class GreetingTests(unittest.TestCase):
         from pushscan2folder import desktop
         path = Path("C:/x/config.toml")
         with mock.patch.object(desktop, "is_windows", return_value=True):
-            startfile, popen = mock.Mock(), mock.Mock()
-            desktop.open_path(path, popen=popen, startfile=startfile)
-            startfile.assert_called_once_with(str(path))
-            self.assertFalse(popen.called)
-            startfile = mock.Mock(side_effect=OSError("no program"))
-            desktop.open_path(path, popen=popen, startfile=startfile)
+            popen = mock.Mock()
+            desktop.open_path(path, popen=popen, has_program=lambda s: s == ".toml")
+            self.assertEqual(popen.call_args[0][0], ["explorer.exe", str(path)])
+            self.assertTrue(popen.call_args[1]["creationflags"] & desktop.DETACHED_PROCESS)
+            popen = mock.Mock()
+            desktop.open_path(path, popen=popen, has_program=lambda s: False)
             self.assertEqual(popen.call_args[0][0], ["notepad.exe", str(path)])
+            # The terminal's job forbids leaving it: start without that flag.
+            popen = mock.Mock(side_effect=[OSError("denied"), None])
+            desktop.open_path(path, popen=popen, has_program=mock.Mock(side_effect=OSError))
+            self.assertEqual(popen.call_count, 2)
+            self.assertFalse(popen.call_args[1]["creationflags"]
+                             & desktop.CREATE_BREAKAWAY_FROM_JOB)
         with mock.patch.object(desktop, "is_windows", return_value=False), \
                 mock.patch.object(desktop, "is_macos", return_value=False):
             popen = mock.Mock()
