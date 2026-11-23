@@ -110,7 +110,7 @@ error, so a typo cannot turn a protection off.
 - Settings (`/settings`) edits `resolution`, `color`, `format`, `source`,
   `size`, `open_after_scan`, `filename` (shown as "File name", see
   [File names](configuration.md#file-names)) and the four `trim_*` values,
-  `ignore_panel` and `interval` (these three groups live in `[advanced]`), and
+  the four `adf_trim_*` values, `ignore_panel` and `interval` (these three groups live in `[advanced]`), and
   the multi-page dialog as two check boxes, one for the panel document type
   "Document" and one for "Auto" (written to `multipage` in
   `[defaults.document]` and `[defaults.auto]`), each

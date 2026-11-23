@@ -146,6 +146,7 @@ Mehr unter [Vorrang](#vorrang).
 | `--resolution` | `PUSHSCAN_RESOLUTION` | `300`               | run           | DPI. Ersatzwert. Das Bedienfeld bietet 75, 150, 300, 600 |
 | `--source`     | `PUSHSCAN_SOURCE`     | `auto`              | run (Umgebung: nur run) | `auto`, `platen` oder `adf`. Ersatzwert |
 | `--trim`       | `PUSHSCAN_TRIM`       | keiner              | run           | Rand abschneiden, indem ein kleinerer Bereich gescannt wird, z. B. `right=1,bottom=2` (Schlüssel `left`, `top`, `right`, `bottom`, in mm, 0 bis 50). Nur Vorlagenglas. Ersetzt die `trim_*`-Werte der Konfigurationsdatei als Ganzes, siehe [Rand abschneiden](#rand-abschneiden) |
+| `--adf-trim`   | `PUSHSCAN_ADF_TRIM`   | keiner              | run           | Rand bei Scans vom Dokumenteneinzug (ADF) abschneiden, indem ein kleinerer Bereich gescannt wird, gleiche Syntax wie `--trim`. Ersetzt die `adf_trim_*`-Werte der Konfigurationsdatei als Ganzes, siehe [Rand abschneiden](#rand-abschneiden) |
 | `--targets`    | `PUSHSCAN_TARGETS`    | -                   | run           | Mehrere Einträge auf dem Bedienfeld, jeder mit eigenem Ordner und optionaler Voreinstellung, siehe [Mehrere Ziele](#mehrere-ziele). Ersetzt `--name` für `run` |
 | `--ignore-panel` | `PUSHSCAN_IGNORE_PANEL` | aus             | run           | Ignoriert die Einstellungen vom Bedienfeld und nutzt immer die vier Optionen oben (`--format`, `--color`, `--resolution`, `--source`). Umgebungsvariable: `1`, `true` oder `yes`. Deaktiviert auch mehrseitige Scans |
 | `--multipage`  | `PUSHSCAN_MULTIPAGE`  | `document`          | run           | `document`, `auto`, `both` oder `off`, siehe [Mehrseitige Scans](#mehrseitige-scans-vom-vorlagenglas) |
@@ -199,6 +200,7 @@ Meldung abgelehnt, die Datei und Schlüssel nennt, damit Tippfehler auffallen.
 | `[advanced]` `interval` | Sekunden | `--interval` |
 | `[advanced]` `verbose`, `ignore_panel` | `true` / `false` | `--verbose`, `--ignore-panel` |
 | `[advanced]` `trim_left`, `trim_top`, `trim_right`, `trim_bottom` | Zahl, mm, 0 bis 50 | `--trim` |
+| `[advanced]` `adf_trim_left`, `adf_trim_top`, `adf_trim_right`, `adf_trim_bottom` | Zahl, mm, 0 bis 50 | `--adf-trim` |
 | `[web]` `enabled` | `true` / `false` | `--web` |
 | `[web]` `bind` | Adresse; nicht gesetzt: `0.0.0.0`, wenn ein Passwort gesetzt ist, sonst `127.0.0.1` (nur dieser PC). Auf einer Loopback-Adresse (`127.0.0.1`, `::1`, `localhost`) ist kein Passwort nötig | `--web-bind` |
 | `[web]` `port` | 1 bis 65535, Standard 8737 | `--web-port` |
@@ -290,7 +292,7 @@ gelten weiterhin vor der Datei. Das betrifft auch Änderungen von der
 
 Sofort übernommen werden: die Scan-Vorgaben (Schlüssel in `[defaults]`, `size`,
 `filename`, die `multipage`-Schlüssel), `interval`, `ignore_panel` und die
-`trim_*`-Werte aus `[advanced]`, `open_after_scan`, die Ziele, `output` und `printer`. Ziele, deren Namen
+`trim_*`- und `adf_trim_*`-Werte aus `[advanced]`, `open_after_scan`, die Ziele, `output` und `printer`. Ziele, deren Namen
 bleiben, behalten ihre Anmeldung am Bedienfeld. Ändert sich der Drucker, werden
 die Namen am alten Drucker freigegeben und am neuen angemeldet.
 
@@ -335,8 +337,11 @@ TR8550 entfernten laut Tests `trim_right = 1` und `trim_bottom = 2` (mm) den
 Rand. Mit `--trim right=1,bottom=2` (oder `PUSHSCAN_TRIM`, oder den
 `trim_*`-Schlüsseln in der Tabelle `[advanced]` der Konfigurationsdatei) fordert das Tool beim Drucker einen kleineren
 Scanbereich an, sodass der Rand gar nicht erst gescannt wird. Es gibt keine
-Bildverarbeitung. Der Zuschnitt gilt nur für das Vorlagenglas, ADF-Scans werden
-nicht zugeschnitten. Bliebe in einer Richtung weniger als 1 Zoll übrig, wird der
+Bildverarbeitung. Der Zuschnitt mit `trim_*` gilt nur für das Vorlagenglas. Scans vom
+Dokumenteneinzug haben eigene Werte: `--adf-trim` (oder `PUSHSCAN_ADF_TRIM`, oder
+die `adf_trim_*`-Schlüssel in `[advanced]`), mit gleicher Syntax und gleichen
+Grenzen. Es ist ungetestet, ob jeder Drucker den Scanbereich am Einzug
+übernimmt. Bliebe in einer Richtung weniger als 1 Zoll übrig, wird der
 Zuschnitt übersprungen und eine Warnung ins Log geschrieben. Die Einstellung ist
 global, nicht pro Ziel.
 

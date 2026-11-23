@@ -141,7 +141,8 @@ environment wins over the [configuration file](#configuration-file). More in
 | `--color`      | `PUSHSCAN_COLOR`      | `color`             | run           | `color` or `gray`. Only used with `--ignore-panel` or if the panel sends no colour |
 | `--resolution` | `PUSHSCAN_RESOLUTION` | `300`               | run           | DPI. Fallback. The panel offers 75, 150, 300, 600 |
 | `--source`     | `PUSHSCAN_SOURCE`     | `auto`              | run (env: run only) | `auto`, `platen` or `adf`. Fallback |
-| `--trim`       | `PUSHSCAN_TRIM`       | none                | run           | Cut off a border by scanning a smaller area, e.g. `right=1,bottom=2` (keys `left`, `top`, `right`, `bottom`, in mm, 0 to 50). Platen only. Replaces the `trim_*` config values as a whole, see [Trimming a border](#trimming-a-border) |
+| `--trim`       | `PUSHSCAN_TRIM`       | none                | run           | Cut off a border by scanning a smaller area, e.g. `right=1,bottom=2` (keys `left`, `top`, `right`, `bottom`, in mm, 0 to 50). Glass only. Replaces the `trim_*` config values as a whole, see [Trimming a border](#trimming-a-border) |
+| `--adf-trim`   | `PUSHSCAN_ADF_TRIM`   | none                | run           | Cut off a border of document feeder (ADF) scans by scanning a smaller area, same syntax as `--trim`. Replaces the `adf_trim_*` config values as a whole, see [Trimming a border](#trimming-a-border) |
 | `--targets`    | `PUSHSCAN_TARGETS`    | -                   | run           | Several panel entries, each with its own folder and optional preset, see [Multiple targets](#multiple-targets). Replaces `--name` for `run` |
 | `--ignore-panel` | `PUSHSCAN_IGNORE_PANEL` | off             | run           | Ignore the panel settings and always use the four options above (`--format`, `--color`, `--resolution`, `--source`). Env var: `1`, `true` or `yes`. Also disables multi-page scans |
 | `--multipage`  | `PUSHSCAN_MULTIPAGE`  | `document`          | run           | `document`, `auto`, `both` or `off`, see [Multi-page scans](#multi-page-scans-from-the-platen) |
@@ -193,6 +194,7 @@ the file and the key, so typos are caught.
 | `[advanced]` `interval` | seconds | `--interval` |
 | `[advanced]` `verbose`, `ignore_panel` | `true` / `false` | `--verbose`, `--ignore-panel` |
 | `[advanced]` `trim_left`, `trim_top`, `trim_right`, `trim_bottom` | number, mm, 0 to 50 | `--trim` |
+| `[advanced]` `adf_trim_left`, `adf_trim_top`, `adf_trim_right`, `adf_trim_bottom` | number, mm, 0 to 50 | `--adf-trim` |
 | `[web]` `enabled` | `true` / `false` | `--web` |
 | `[web]` `bind` | address; not set: `0.0.0.0` when a password is set, else `127.0.0.1` (this PC only). On a loopback address (`127.0.0.1`, `::1`, `localhost`) no password is needed | `--web-bind` |
 | `[web]` `port` | 1 to 65535, default 8737 | `--web-port` |
@@ -276,7 +278,7 @@ over the file. This also applies to changes made on the [web page](web.md).
 
 These are applied right away: the scan defaults (`[defaults]` keys, `size`,
 `filename`, the `multipage` keys), `interval`, `ignore_panel` and the `trim_*`
-values from `[advanced]`, `open_after_scan`, the targets, `output` and `printer`. Targets whose names stay
+and `adf_trim_*` values from `[advanced]`, `open_after_scan`, the targets, `output` and `printer`. Targets whose names stay
 keep their registration on the panel. If the printer changes, the names are
 released on the old printer and registered on the new one.
 
@@ -317,8 +319,11 @@ Some scanners capture a thin border at the glass edge. On a TR8550, tests
 showed `trim_right = 1` and `trim_bottom = 2` (mm) remove it. With
 `--trim right=1,bottom=2` (or `PUSHSCAN_TRIM`, or the `trim_*` keys in the
 `[advanced]` table of the config file) the tool asks the printer for a smaller scan area, so the border
-is never scanned. No image processing is involved. Trimming applies to the
-platen only, ADF scans are not trimmed. If less than 1 inch would remain in
+is never scanned. No image processing is involved. Trimming with `trim_*` applies to the
+glass only. Scans from the document feeder have their own values: `--adf-trim`
+(or `PUSHSCAN_ADF_TRIM`, or the `adf_trim_*` keys in `[advanced]`), same syntax
+and limits. It is untested whether every printer honours the scan region on
+the feeder. If less than 1 inch would remain in
 either direction, trimming is skipped and a warning is logged. The setting is
 global, not per target.
 

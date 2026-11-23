@@ -119,7 +119,8 @@ Fehler, damit ein Tippfehler keinen Schutz ausschaltet.
 - Einstellungen (`/settings`) bearbeitet `resolution`, `color`, `format`,
   `source`, `size`, `open_after_scan`, `filename` (angezeigt als "File name",
   siehe [Dateinamen](configuration.de.md#dateinamen)) und die vier
-  `trim_*`-Werte, `ignore_panel` und `interval` (diese stehen in `[advanced]`)
+  `trim_*`-Werte, die vier
+  `adf_trim_*`-Werte, `ignore_panel` und `interval` (diese stehen in `[advanced]`)
   sowie der Mehrseiten-Dialog als zwei Haken, einer für den Dokumenttyp
   "Dokument" am Panel und einer für "Auto" (wird als `multipage` in
   `[defaults.document]` und `[defaults.auto]` geschrieben), jeweils mit kurzer Erklärung. Die
