@@ -87,7 +87,7 @@ Fehler, damit ein Tippfehler keinen Schutz ausschaltet.
   einem vertrauenswürdigen Netz und niemals mit einem ins Internet
   weitergeleiteten Port. Alles andere bleibt: CSRF-Token in allen Formularen
   (eines pro Prozess statt pro Sitzung), die Origin-Prüfung, die
-  Sicherheits-Header und die Regel, dass Zielordner im Ausgabeverzeichnis
+  Sicherheits-Header und die Regel, dass Zielordner im Basisordner
   bleiben.
   Ohne Anmeldung antwortet die Seite nur, wenn sie über eine IP-Adresse, als
   `localhost`, über einen Namen ohne Punkt (`nas`) oder über einen lokalen
@@ -99,40 +99,42 @@ Fehler, damit ein Tippfehler keinen Schutz ausschaltet.
 
 - Status (`/`) zeigt den Drucker, die letzte erfolgreiche Abfrage oder den
   letzten Fehler, ausstehende Änderungen an den Zielen, die Ziele (Ordner,
-  registriert, Voreinstellung für *Automatisch*, mehrseitig) und die letzten Scans. Sie
-  aktualisiert sich alle 10 s.
+  registriert, Einstellungen für *Automatisch*, Dialog für die nächste Seite)
+  und die letzten Scans. Sie aktualisiert sich alle 10 s.
 - Log (`/log`) zeigt die letzten 500 Logzeilen (INFO und höher).
-- Ziele (`/targets`) fügt Ziele hinzu, ändert und löscht sie, mit Name, Ordner,
-  Dialog für mehrseitige Scans und Voreinstellung für *Automatisch*. Namen und Ordner
-  werden wie in der Konfigurationsdatei geprüft. Die Karten lassen sich mit
-  "Move up" und "Move down" umsortieren, "Add target" fügt eine leere Karte
-  hinzu; gespeichert wird erst mit "Save". Das Bedienfeld des Druckers listet
-  die Ziele in dieser Reihenfolge. Nach einer geänderten Reihenfolge
-  verschwinden die Namen kurz, während sie neu registriert werden. Beim Speichern wird die
-  Konfigurationsdatei geschrieben, und der laufende Dienst wechselt vor seinem
-  nächsten Abfragezyklus zur neuen Liste (bis dahin als "pending" angezeigt).
-  Die Optionen für *Automatisch* je Ziel zeigen den aktuellen Standardwert,
-  etwa "Default (300 dpi)"; er stammt von der Einstellungsseite.
+- Ziele (`/targets`) fügt Ziele hinzu, ändert und löscht sie. Eine Zielkarte
+  hat Name und Ordner, "Open after a scan", die Einstellungen für *Automatisch*
+  (Auflösung, Format, Größe), drei Haken für die nächste Seite (Document, Auto
+  und Photo) und den aufklappbaren Bereich "Other folder per document type" mit
+  einem Ordner je Dokumenttyp. Namen und Ordner werden wie in der
+  Konfigurationsdatei geprüft, und Datumsfelder wie `{now:%Y}` sind in Ordnern
+  erlaubt. Die Karten lassen sich mit "Move up" und "Move down" umsortieren,
+  "Add target" fügt eine leere Karte hinzu; gespeichert wird erst mit "Save".
+  Das Bedienfeld des Druckers listet die Ziele in dieser Reihenfolge. Nach einer
+  geänderten Reihenfolge verschwinden die Namen kurz, während sie neu
+  registriert werden. Beim Speichern wird die Konfigurationsdatei geschrieben,
+  und der laufende Dienst wechselt vor seinem nächsten Abfragezyklus zur neuen
+  Liste (bis dahin als "pending" angezeigt). Die Optionen für *Automatisch* je
+  Ziel zeigen den aktuellen Standardwert, etwa "Default (300 dpi)"; er stammt
+  von der Einstellungsseite.
   Der Editor hat kein Feld für die Dateinamen-Vorlage eines Ziels. Ein
   `filename`, das ein Ziel in der Konfigurationsdatei hat, bleibt beim Speichern
   erhalten.
-- Einstellungen (`/settings`) bearbeitet `resolution`, `color`, `format`,
-  `source`, `size`, `open_after_scan`, `filename` (angezeigt als "File name",
-  siehe [Dateinamen](configuration.de.md#dateinamen)) und die vier
-  `trim_*`-Werte, die vier
-  `adf_trim_*`-Werte, `ignore_panel` und `interval` (diese stehen in `[advanced]`)
-  sowie der Mehrseiten-Dialog als zwei Haken, einer für den Dokumenttyp
-  "Dokument" am Panel und einer für "Auto" (wird als `multipage` in
-  `[defaults.document]` und `[defaults.auto]` geschrieben), jeweils mit kurzer Erklärung. Die
+- Einstellungen (`/settings`) bearbeitet `interval`, den Dialog für die nächste
+  Seite (je ein Haken für Document, Auto und Photo, geschrieben nach
+  `next_page`), die "Auto settings" (`resolution`, `format` und `size` der
+  Tabelle `auto`), `open_after_scan`, `filename` (angezeigt als "File name",
+  siehe [Dateinamen](configuration.de.md#dateinamen)), "Glass trim" (`trim`) und
+  "Feeder trim" (`adf_trim`), die letzten beiden mit einem Feld pro Seite. Die
   Werte werden mit denselben Regeln wie die Konfigurationsdatei geprüft; ein
-  leeres Feld entfernt den Schlüssel. Der Basis-Ausgabeordner `output` wird nur
+  leeres Feld entfernt den Schlüssel. Der Basisordner `folder` wird nur
   angezeigt. Der Abschnitt "Fixed" zeigt den `printer` mit einem Knopf "Search
-  the network", siehe unten. Überschreibt eine Umgebungsvariable oder
-  Kommandozeilenoption einen Wert (etwa `PUSHSCAN_INTERVAL` oder
-  `PUSHSCAN_TRIM`), weist die Seite darauf hin und zeigt den verwendeten Wert;
-  der gespeicherte Wert wirkt nicht, solange die Überschreibung besteht. Die
-  Einstellungen werden in die Datei geschrieben, und der laufende Dienst
-  übernimmt sie innerhalb eines Abfragezyklus, siehe
+  the network", siehe unten. Nur `printer` und `folder` kann die Umgebung oder
+  die Kommandozeile überschreiben (`PUSHSCAN_PRINTER` / `--printer`,
+  `PUSHSCAN_FOLDER` / `--folder`). Geschieht das, weist die Seite darauf hin und
+  zeigt den verwendeten Wert; der gespeicherte Wert wirkt nicht, solange die
+  Überschreibung besteht. Die Einstellungen werden in die Datei geschrieben, und
+  der laufende Dienst übernimmt sie innerhalb eines Abfragezyklus, siehe
   [Datei im laufenden Betrieb ändern](configuration.de.md#datei-im-laufenden-betrieb-ändern).
   Nur die `[web]`-Optionen brauchen einen Neustart.
   Die Druckersuche führt dieselbe mDNS-Suche wie das Setup aus (etwa 5
@@ -150,11 +152,11 @@ Fehler, damit ein Tippfehler keinen Schutz ausschaltet.
   Kommentare inklusive, nachdem er wie beim Start geprüft wurde; eine ungültige
   Datei wird nicht geschrieben, der Fehler (bei TOML-Syntaxfehlern mit
   Zeilennummer) steht neben deinem Text. Die Weboberfläche bekommt trotzdem
-  keinen Dateizugriff außerhalb des Ausgabeordners: Der Editor lehnt ein
-  geändertes `output` oder `printer` ab, ebenso ein `[[target]]`, dessen
-  Ausgabeordner kein relativer Pfad innerhalb des Ausgabeordners ist. Ziele, die
-  bereits so in der Datei stehen (etwa `output = "/consume"`), dürfen
-  unverändert bleiben. Das Formular enthält einen Hash des Dateitexts: Hat sich
+  keinen Dateizugriff außerhalb des Basisordners: Der Editor lehnt ein
+  geändertes `folder` oder `printer` ab, ebenso ein `[[target]]` mit einem
+  Ordner (`folder` oder einem der Typ-Ordner), der kein relativer Pfad innerhalb
+  des Basisordners ist. Ziele, die bereits so in der Datei stehen (etwa
+  `folder = "/consume"`), dürfen unverändert bleiben. Das Formular enthält einen Hash des Dateitexts: Hat sich
   die Datei inzwischen geändert, wird nichts gespeichert und der neue Inhalt
   angezeigt. Der laufende Dienst übernimmt die Änderungen innerhalb eines
   Abfragezyklus, außer den `[web]`-Optionen, die einen Neustart brauchen. Die
@@ -162,13 +164,9 @@ Fehler, damit ein Tippfehler keinen Schutz ausschaltet.
 
 ## Ziele und Ordner bearbeiten
 
-Ob sich die Ziele bearbeiten lassen, hängt davon ab, woher sie kommen:
-
-- aus `PUSHSCAN_TARGETS` / `--targets`: Bearbeiten ist abgeschaltet, weil die
-  Variable die Datei beim nächsten Start überschreiben würde;
-- aus der Konfigurationsdatei (`PUSHSCAN_CONFIG`, `--config` oder der
-  Standardort): editierbar; existiert die Datei noch nicht, legt das erste
-  Speichern sie an.
+Die Ziele werden in der Konfigurationsdatei bearbeitet (`PUSHSCAN_CONFIG`,
+`--config` oder der Standardort); existiert die Datei noch nicht, legt das
+erste Speichern sie an.
 
 Jede Zielkarte hat außerdem "Open after a scan" (`open_after_scan` des Ziels;
 "Default" nimmt den Wert der Einstellungsseite, "Yes" und "No" entscheiden für dieses Ziel). Auf der Einstellungsseite ist "Open after scan" ein Kontrollkästchen; ohne Haken wird `false` gespeichert, weil ein Kontrollkästchen "nicht gesetzt" nicht ausdrücken kann.
@@ -176,21 +174,24 @@ Jede Zielkarte hat außerdem "Open after a scan" (`open_after_scan` des Ziels;
 Kommentare in der Konfigurationsdatei gehen beim Speichern über das Ziel- oder
 Einstellungsformular verloren, bis auf den kurzen Kopf und die auskommentierten
 Beispiele, die neu geschrieben werden. Die Datei wird neu geschrieben; andere Schlüssel
-behalten ihre Werte. Nur der Rohtext-Editor behält Kommentare. Bei jedem
-gespeicherten Ziel werden beide Schalter für mehrseitige Scans ausdrücklich
-geschrieben.
+behalten ihre Werte. Nur der Rohtext-Editor behält Kommentare. Ein Ziel, dessen Haken für die
+nächste Seite der globalen Liste entsprechen, bekommt keinen Schlüssel
+`next_page`.
 
 Ordner, die du auf der Weboberfläche einträgst, liegen immer innerhalb des
-Ausgabeordners (`--output` / `PUSHSCAN_OUTPUT`, in Docker `/scans`). Gib einen
-einfachen relativen Pfad ein, etwa `Paperless` oder `buero/rechnungen`, oder `.` für den Ausgabeordner
-selbst. Absolute Pfade, `..`, Backslashes und Symlinks, die aus dem Ausgabeordner
-herausführen, lehnt die Seite ab, sie kann also nirgendwo anders schreiben.
-Ein Ziel mit einem Ordner außerhalb des Ausgabeordners (zum Beispiel
-`output = "/consume"`) lässt sich nur in der Konfigurationsdatei ändern. Die
+Basisordners (`--folder` / `PUSHSCAN_FOLDER`, in Docker `/scans`). Gib einen
+einfachen relativen Pfad ein, etwa `Paperless` oder `buero/rechnungen`, oder `.`
+für den Basisordner selbst. Dasselbe gilt für die drei Ordner im aufklappbaren
+Bereich "Other folder per document type". Datumsfelder wie `{now:%Y}` sind
+erlaubt, und auch der Ordner, der daraus entsteht, bleibt innerhalb des
+Basisordners. Absolute Pfade, `..`, Backslashes und Symlinks, die aus dem
+Basisordner herausführen, lehnt die Seite ab, sie kann also nirgendwo anders
+schreiben. Ein Ziel mit einem Ordner außerhalb des Basisordners (zum Beispiel
+`folder = "/consume"`) lässt sich nur in der Konfigurationsdatei ändern. Die
 Weboberfläche zeigt es schreibgeschützt an und behält es beim Speichern bei;
 löschen kannst du es dort trotzdem.
 
-Der Rohtext-Editor lehnt außerdem Änderungen an `output`, `printer` und am
+Der Rohtext-Editor lehnt außerdem Änderungen an `folder`, `printer` und am
 Abschnitt `[web]` ab. Den Drucker kannst du nur auf der Einstellungsseite mit
 der Netzwerksuche ändern. `[web]` legt fest, wer die Seite erreicht und wo das
 Passwort liegt; das lässt sich nur in der Datei selbst oder mit
@@ -246,8 +247,7 @@ Einschalten die Web-Zeilen und den Port einkommentieren. Binde für die
 Konfiguration ein Verzeichnis ein, keine einzelne Datei: Eine einzeln
 eingebundene Datei lässt sich nicht atomar ersetzen, dann schreibt das Programm
 sie direkt neu. Das Verzeichnis muss für den Benutzer
-aus `user:` beschreibbar sein. Setze `PUSHSCAN_TARGETS` nicht, wenn du die
-Ziele auf der Weboberfläche bearbeitest. Hinter Docker kann das Log das Gateway
+aus `user:` beschreibbar sein. Hinter Docker kann das Log das Gateway
 des Docker-Netzwerks als Client-Adresse zeigen, siehe
 [Client-Adresse im Log](docker.de.md#client-adresse-im-log). Mehr unter
 [Docker](docker.de.md).

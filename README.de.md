@@ -25,7 +25,7 @@ Getestet mit einem Canon PIXMA TR8550 (TR8500-Serie).
 - Fügt dem Bedienfeld des Druckers einen Eintrag für "Scannen an PC" hinzu
 - Mehrere Ziele, jedes mit eigenem Ordner
 - Mehrseitige PDFs vom Vorlagenglas, mit dem Dialog für die nächste Seite am Bedienfeld
-- Voreinstellungen pro Ziel für den Dokumenttyp *Automatisch*
+- Einstellungen pro Ziel für den Dokumenttyp *Automatisch* und ein Ordner pro Dokumenttyp
 - Optionale passwortgeschützte Weboberfläche für Status, Log, Ziele und Einstellungen
 - Für Docker und NAS geeignet, nur ausgehende Verbindungen zum Drucker (TCP 80)
 - Fotos: Bei der Bedienfeld-Größe "auto scan" oder "auto multi scan" werden die Fotos aus dem Glasscan ausgeschnitten, eine Datei pro Foto (braucht Pillow, optional)
@@ -93,33 +93,40 @@ Port), dann läuft sie auf Port 8080. Mehr in [Docker](docs/docker.de.md) und
 Auf einem normalen Linux-Rechner:
 
 ```sh
-PYTHONPATH=src python3 -m pushscan2folder --printer 192.168.1.50 run --output ./scans
+PYTHONPATH=src python3 -m pushscan2folder --printer 192.168.1.50 run --folder ./scans
 ```
 
 Wähle dann den Host am Bedienfeld des Druckers (Scannen an PC) und starte den Scan.
 
 ## Konfiguration
 
-Die Einstellungen kommen aus Kommandozeilenoptionen, Umgebungsvariablen
-(`PUSHSCAN_*`) oder einer TOML-Datei ([config.example.toml](config.example.toml)).
-Die Kommandozeile hat Vorrang vor der Umgebung, und die Umgebung hat Vorrang vor
-der Datei. Die Adresse des Druckers ist die einzige erforderliche Einstellung.
+Das Bedienfeld des Druckers bestimmt Farbe, Quelle (das Einzugsfach, wenn
+Papier darin liegt, sonst das Vorlagenglas) und, bei den Dokumenttypen Dokument
+und Foto, Größe, Format und Auflösung. Den Rest legt die TOML-Datei
+([config.example.toml](config.example.toml)) fest: Ordner, Dateinamen, welche
+Dokumenttypen nach der nächsten Seite fragen, und die Einstellungen für den
+Dokumenttyp Auto. Nur die Adresse des Druckers und der Basisordner können auch
+über Kommandozeile oder Umgebung kommen (`--printer`, `--folder`,
+`PUSHSCAN_PRINTER`, `PUSHSCAN_FOLDER`). Die Adresse des Druckers ist die einzige
+erforderliche Einstellung. `pushscan2folder check` zeigt, was eine Datei
+bewirkt.
 
 Eine minimale Datei mit zwei Zielen:
 
 ```toml
 printer = "192.168.1.50"
+folder = "/scans"
 
 [[target]]
 name = "Scans"
 
 [[target]]
 name = "Paperless"
-output = "consume"
+folder = "consume"
 ```
 
-Die vollständige Optionstabelle, Ziele und Voreinstellungen, Rand abschneiden,
-mehrseitige Scans und Einstellungen vom Bedienfeld stehen in
+Die vollständige Schlüsseltabelle, Ordner, der Dialog für die nächste Seite,
+Rand abschneiden und Einstellungen vom Bedienfeld stehen in
 [docs/configuration.de.md](docs/configuration.de.md).
 
 ## Weboberfläche
@@ -139,7 +146,7 @@ einen normalen Linux-Rechner oben passt am ehesten.
 
 ## Weitere Dokumentation
 
-- [Konfiguration](docs/configuration.de.md): Optionen, Konfigurationsdatei, Ziele, Voreinstellungen, Rand, mehrseitige Scans
+- [Konfiguration](docs/configuration.de.md): Optionen, Konfigurationsdatei, Ziele, Ordner, Rand, Dialog für die nächste Seite
 - [Weboberfläche](docs/web.de.md): Seiten, Passwörter, Sicherheit, HTTPS
 - [Docker](docs/docker.de.md): Compose, Benutzer, Volumes, paperless-ngx, NAS
 - [Fehlersuche](docs/troubleshooting.de.md): Einschränkungen und häufige Probleme

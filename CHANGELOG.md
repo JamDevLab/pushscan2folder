@@ -7,17 +7,49 @@ All notable changes are documented here. The format follows
 
 ### Added
 
-- A separate border trim for the document feeder: `--adf-trim` /
-  `PUSHSCAN_ADF_TRIM` and the `adf_trim_left`, `adf_trim_top`,
-  `adf_trim_right`, `adf_trim_bottom` keys in `[advanced]`, with their own
-  fields on the web settings page. The existing `trim_*` values stay glass
-  only. Off by default, because the feeder sometimes pulls a page in skewed.
+- A separate border trim for the document feeder: the `adf_trim` table in
+  `[advanced]`, with its own fields on the web settings page. The `trim`
+  table stays glass only. Off by default, because the feeder sometimes pulls
+  a page in skewed.
+- A folder per document type: `document_folder`, `auto_folder` and
+  `photo_folder` in a `[[target]]` (and in the web target editor).
+- Date fields in folders: `{name}`, `{date}`, `{time}` and `{now:FORMAT}`,
+  for example `folder = "Archive/{now:%Y}"`. A field value is always one
+  folder name part.
+- The next page dialog for the document type Photo (`"photo"` in
+  `next_page`), for fixed photo sizes. With the sizes auto scan and auto
+  multi scan the photos are still cut out.
+- `pushscan2folder check` checks the config file and shows the folders and
+  settings of every target.
 - Docker: if the file in `PUSHSCAN_CONFIG` does not exist and its folder
   does, the first start writes a commented example config file there instead
   of stopping with "config file not found".
 
 ### Changed
 
+- Breaking: the config file layout was redesigned and old keys are no longer
+  read (a file with an old key is rejected with a message naming it). The
+  printer panel decides colour, source and, for Document and Photo, size,
+  format and resolution; the file only holds what is left. Renames:
+  - `output` is now `folder`; `--output` / `PUSHSCAN_OUTPUT` are now
+    `--folder` / `PUSHSCAN_FOLDER` (the Docker image sets
+    `PUSHSCAN_FOLDER=/scans`).
+  - `multipage` and `[defaults.document]` / `[defaults.auto]` are now the
+    list `next_page = ["document", "auto", "photo"]`, also per target.
+  - `[defaults]` `resolution`, `format` and `size`, and `[target.auto]`, are
+    now the one-line table `auto = { resolution, format, size }`, global and
+    per target.
+  - `[defaults]` `open_after_scan` and `filename` moved to the top level.
+  - `trim_left` ... `trim_bottom` and `adf_trim_left` ... `adf_trim_bottom`
+    in `[advanced]` are now the tables `trim = { left, top, right, bottom }`
+    and `adf_trim = { ... }`.
+  - In a `[[target]]`, `output` is now `folder`.
+  - Tables in braces must stay on one line.
+- The web target editor and settings page follow the new layout: three next
+  page boxes (document, auto, photo), the auto settings, "Other folder per
+  document type", and the settings interval, next page, auto settings, open
+  after scan, file name, glass trim and feeder trim. Only the printer and the
+  base folder can be overridden by the environment or the command line.
 - `open_after_scan` without a desktop session (for example in Docker) logs
   its warning once instead of after every scan.
 - Web login lockout: wrong passwords are counted per client address, so one
@@ -26,6 +58,22 @@ All notable changes are documented here. The format follows
 - Build: GitHub Actions are pinned by commit SHA and the Docker base image
   by digest; the release build checks the PyInstaller source hash and
   installs a fixed Inno Setup version.
+
+### Removed
+
+- Config keys: `color`, `source`, `ignore_panel`, `multipage`, `[defaults]`,
+  `[defaults.document]`, `[defaults.auto]`, `[target.document]`,
+  `[target.auto]`, `trim_*` and `adf_trim_*`, and the migration of keys from
+  versions before 0.3.
+- `PUSHSCAN_TARGETS` and `--targets` with the `NAME=DIR@preset` list.
+- The run options `--format`, `--color`, `--resolution`, `--source`, `--trim`,
+  `--adf-trim`, `--ignore-panel`, `--multipage`, `--filename`, `--interval`
+  and `--open-after-scan`, and the variables `PUSHSCAN_FORMAT`,
+  `PUSHSCAN_COLOR`, `PUSHSCAN_RESOLUTION`, `PUSHSCAN_SOURCE`, `PUSHSCAN_TRIM`,
+  `PUSHSCAN_ADF_TRIM`, `PUSHSCAN_IGNORE_PANEL`, `PUSHSCAN_MULTIPAGE`,
+  `PUSHSCAN_FILENAME`, `PUSHSCAN_INTERVAL` and `PUSHSCAN_OPEN_AFTER_SCAN`.
+  The `scan` subcommand keeps its own `--format`, `--color`, `--resolution`
+  and `--source`.
 
 ### Fixed
 

@@ -7,15 +7,20 @@ Back to the [README](../README.md).
 - [Subcommands](#subcommands)
 - [Options](#options)
 - [Configuration file](#configuration-file)
+- [What the panel decides](#what-the-panel-decides)
+- [Keys](#keys)
+- [Next page dialog](#next-page-dialog)
+- [Folders](#folders)
+- [Date fields in folders](#date-fields-in-folders)
+- [Document type Auto](#document-type-auto)
+- [Trimming a border](#trimming-a-border)
+- [Checking the file](#checking-the-file)
 - [Precedence](#precedence)
 - [Changing the file while running](#changing-the-file-while-running)
 - [Panel settings](#panel-settings)
-- [Trimming a border](#trimming-a-border)
-- [Multi-page scans from the platen](#multi-page-scans-from-the-platen)
 - [ADF](#adf)
 - [Multiple targets](#multiple-targets)
 - [Panel names](#panel-names)
-- [Presets per target](#presets-per-target)
 - [File names](#file-names)
 
 ## Subcommands
@@ -23,12 +28,12 @@ Back to the [README](../README.md).
 Without a subcommand, `run` is used, so `pushscan2folder --printer 192.168.1.50`
 works like `pushscan2folder --printer 192.168.1.50 run`. Global options
 (`--config`, `--printer`, `--name`, `--log-file`, `--verbose`) go before the
-subcommand; run options such as `--output` may be given without it.
+subcommand; run options such as `--folder` may be given without it.
 
 Run the service:
 
 ```sh
-PYTHONPATH=src python3 -m pushscan2folder --printer 192.168.1.50 run --output ./scans
+PYTHONPATH=src python3 -m pushscan2folder --printer 192.168.1.50 run --folder ./scans
 ```
 
 Then choose the host on the printer panel (scan to PC) and start the scan.
@@ -63,6 +68,13 @@ entries, setup asks only for printer, web page and autostart and leaves the
 targets alone. Setup also starts by itself when the program is started
 without any argument in a console and no config file exists yet; non-interactive
 starts (Docker, services) never ask anything.
+
+Check the config file without starting the service (see
+[Checking the file](#checking-the-file)):
+
+```sh
+PYTHONPATH=src python3 -m pushscan2folder check
+```
 
 Run without a window (details for Windows in [windows.md](windows.md)):
 
@@ -119,56 +131,45 @@ PYTHONPATH=src python3 -m pushscan2folder health \
 PYTHONPATH=src python3 -m pushscan2folder --printer 192.168.1.50 probe
 
 # Scan once via eSCL without using the panel
-PYTHONPATH=src python3 -m pushscan2folder --printer 192.168.1.50 scan --output ./scans
+PYTHONPATH=src python3 -m pushscan2folder --printer 192.168.1.50 scan --folder ./scans
 ```
 
 ## Options
 
-Global options go before the subcommand. Every option can also be set with an
-environment variable. The command line wins over the environment, and the
-environment wins over the [configuration file](#configuration-file). More in
-[Precedence](#precedence).
+Global options go before the subcommand. The command line wins over the
+environment, and the environment wins over the
+[configuration file](#configuration-file). More in [Precedence](#precedence).
+Scan settings such as format, resolution, colour and source are not options.
+The panel and the config file decide them, see
+[What the panel decides](#what-the-panel-decides).
 
 | Option         | Env var            | Default             | Applies to    | Description |
 |----------------|--------------------|---------------------|---------------|-------------|
 | `--config`     | `PUSHSCAN_CONFIG`     | `~/.config/pushscan2folder/config.toml` if present | all | TOML configuration file, see [Configuration file](#configuration-file) |
 | `--printer`    | `PUSHSCAN_PRINTER`    | (required)          | all           | Printer IP or host name |
-| `--name`       | `PUSHSCAN_NAME`       | `USER  HOSTNAME`    | all           | Name shown on the panel, see [Panel names](#panel-names). The default replaces characters the panel cannot show with `-` |
+| `--name`       | `PUSHSCAN_NAME`       | `USER  HOSTNAME`    | all           | Name shown on the panel, see [Panel names](#panel-names). Used when the config file has no `[[target]]`. The default replaces characters the panel cannot show with `-` |
 | `-v/--verbose` | `PUSHSCAN_VERBOSE`    | off                 | all           | Debug logging. The env var enables it with `1`, `true` or `yes` |
-| `--output`     | `PUSHSCAN_OUTPUT`     | `./scans`           | run, scan     | Output directory (created if missing) |
-| `--interval`   | `PUSHSCAN_INTERVAL`   | `4`                 | run           | Poll interval in seconds |
-| `--format`     | `PUSHSCAN_FORMAT`     | `pdf`               | run (env: run only) | `pdf` or `jpeg`. Fallback, see [Panel settings](#panel-settings) |
-| `--color`      | `PUSHSCAN_COLOR`      | `color`             | run           | `color` or `gray`. Only used with `--ignore-panel` or if the panel sends no colour |
-| `--resolution` | `PUSHSCAN_RESOLUTION` | `300`               | run           | DPI. Fallback. The panel offers 75, 150, 300, 600 |
-| `--source`     | `PUSHSCAN_SOURCE`     | `auto`              | run (env: run only) | `auto`, `platen` or `adf`. Fallback |
-| `--trim`       | `PUSHSCAN_TRIM`       | none                | run           | Cut off a border by scanning a smaller area, e.g. `right=1,bottom=2` (keys `left`, `top`, `right`, `bottom`, in mm, 0 to 50). Glass only. Replaces the `trim_*` config values as a whole, see [Trimming a border](#trimming-a-border) |
-| `--adf-trim`   | `PUSHSCAN_ADF_TRIM`   | none                | run           | Cut off a border of document feeder (ADF) scans by scanning a smaller area, same syntax as `--trim`. Replaces the `adf_trim_*` config values as a whole, see [Trimming a border](#trimming-a-border) |
-| `--targets`    | `PUSHSCAN_TARGETS`    | -                   | run           | Several panel entries, each with its own folder and optional preset, see [Multiple targets](#multiple-targets). Replaces `--name` for `run` |
-| `--ignore-panel` | `PUSHSCAN_IGNORE_PANEL` | off             | run           | Ignore the panel settings and always use the four options above (`--format`, `--color`, `--resolution`, `--source`). Env var: `1`, `true` or `yes`. Also disables multi-page scans |
-| `--multipage`  | `PUSHSCAN_MULTIPAGE`  | `document`          | run           | `document`, `auto`, `both` or `off`, see [Multi-page scans](#multi-page-scans-from-the-platen) |
-| `--open-after-scan` | `PUSHSCAN_OPEN_AFTER_SCAN` | `false`     | run, start    | `true` or `false` (also `yes`/`no`, `1`/`0`, `on`/`off`; the old `folder` and `file` count as `true`). Desktop PC only: after a job is saved, open the folder (Windows: Explorer with the new file selected), once per job. On Linux it needs `DISPLAY` or `WAYLAND_DISPLAY`. A failure only logs a warning. Docker has no desktop, keep it `false` (else one warning at the start of the first job) |
-| `--filename`   | `PUSHSCAN_FILENAME`   | `scan_{now:%Y%m%d_%H%M%S}` | run    | Template for the file name of a scan, without the extension, see [File names](#file-names) |
-| `--heartbeat-file` | `PUSHSCAN_HEARTBEAT_FILE` | -          | run, health   | File that `run` touches after every successful contact with the printer, and that `health` checks. The Docker image sets it, see [Docker](docker.md#healthcheck) |
+| `--folder`     | `PUSHSCAN_FOLDER`     | `folder` of the file, else `./scans` | run, start, scan | Base folder of all targets (created if missing) |
+| `--heartbeat-file` | `PUSHSCAN_HEARTBEAT_FILE` | -          | run, start, health | File that `run` touches after every successful contact with the printer, and that `health` checks. The Docker image sets it, see [Docker](docker.md#healthcheck) |
 | `--max-age`    | -                  | `120`               | health        | Seconds after which `health` calls the heartbeat file too old |
 | `--no-pause`   | `PUSHSCAN_NO_PAUSE`   | off                 | all           | Windows: never wait for Enter before a console window opened for this program closes. The autostart entry sets it |
-| `--web`        | `PUSHSCAN_WEB`        | off                 | run           | Serve the [web page](web.md). Env var: `1`, `true` or `yes` |
-| `--web-port`   | `PUSHSCAN_WEB_PORT`   | `8737`              | run           | Port of the web page |
-| `--web-bind`   | `PUSHSCAN_WEB_BIND`   | see `[web]` `bind`  | run           | Address of the web page |
+| `--web`        | `PUSHSCAN_WEB`        | off                 | run, start    | Serve the [web page](web.md). Env var: `1`, `true` or `yes` |
+| `--web-port`   | `PUSHSCAN_WEB_PORT`   | `8737`              | run, start    | Port of the web page |
+| `--web-bind`   | `PUSHSCAN_WEB_BIND`   | see `[web]` `bind`  | run, start    | Address of the web page |
 | -              | `PUSHSCAN_WEB_PASSWORD` / `PUSHSCAN_WEB_PASSWORD_FILE` | (required with `--web` unless the bind address is loopback) | run | Web password (min. 8 characters), or a file containing it. Env, or `[web] password_file` of the config file. Never the password itself in the config file |
 | `--keep`       | -                  | off                 | probe         | Do not release the session |
 
-Notes:
-
-- `scan` has its own `--format` and `--source` options. They do not read the
-  `PUSHSCAN_FORMAT` / `PUSHSCAN_SOURCE` variables, and `scan` always uses the
-  default colour mode and resolution (color, 300 dpi) and always uses eSCL.
-- The scan area comes from the panel size; without panel data it is A4.
+The `scan` subcommand (one scan over eSCL without the panel) has its own
+options `--folder`, `--format` (`pdf` or `jpeg`, default `pdf`), `--color`
+(`color` or `gray`, default `color`), `--resolution` (default 300) and
+`--source` (`auto`, `platen` or `adf`, default `auto`). It does not use the
+config file settings for these.
 
 ## Configuration file
 
-Instead of a long command line you can keep the settings in a TOML file
+Instead of a long command line you keep the settings in a TOML file
 (this needs Python 3.11 for `tomllib`). See [config.example.toml](../config.example.toml)
-for a commented example.
+for a commented example. Every key is optional.
 
 Location: `--config PATH` / `PUSHSCAN_CONFIG`; without it
 `$XDG_CONFIG_HOME/pushscan2folder/config.toml` (default
@@ -176,49 +177,121 @@ Location: `--config PATH` / `PUSHSCAN_CONFIG`; without it
 explicitly must exist, otherwise the program exits with an error.
 
 Unknown keys, wrong types and invalid values are rejected with a message naming
-the file and the key, so typos are caught.
+the file and the key, so typos are caught. Keys of earlier versions are not
+read any more, see the [changelog](../CHANGELOG.md) for the renames.
 
-| Key | Values | Same as |
-|-----|--------|---------|
-| `printer` | IP or host name | `--printer` |
-| `output` | folder; relative target outputs resolve against it | `--output` |
-| `[defaults]` `resolution` | `75`, `150`, `300`, `600` | `--resolution` |
-| `[defaults]` `color` | `color`, `gray` | `--color` |
-| `[defaults]` `format` | `pdf`, `jpeg` | `--format` |
-| `[defaults]` `source` | `auto`, `platen`, `adf` | `--source` |
-| `[defaults]` `size` | `a4`, `letter`, `legal`, `10x15`, `13x18` | scan area without panel data |
-| `[defaults]` `open_after_scan` | `true`, `false` (the old `"off"`, `"folder"`, `"file"` are still read) | `--open-after-scan` |
-| `[defaults]` `filename` | template, see [File names](#file-names) | `--filename` |
-| `[defaults.document]` `multipage` | `true` / `false`, built-in `true` | `--multipage` (panel document type *Document*) |
-| `[defaults.auto]` `multipage` | `true` / `false`, built-in `false` | `--multipage` (panel document type *Auto*) |
-| `[advanced]` `interval` | seconds | `--interval` |
-| `[advanced]` `verbose`, `ignore_panel` | `true` / `false` | `--verbose`, `--ignore-panel` |
-| `[advanced]` `trim_left`, `trim_top`, `trim_right`, `trim_bottom` | number, mm, 0 to 50 | `--trim` |
-| `[advanced]` `adf_trim_left`, `adf_trim_top`, `adf_trim_right`, `adf_trim_bottom` | number, mm, 0 to 50 | `--adf-trim` |
-| `[web]` `enabled` | `true` / `false` | `--web` |
-| `[web]` `bind` | address; not set: `0.0.0.0` when a password is set, else `127.0.0.1` (this PC only). On a loopback address (`127.0.0.1`, `::1`, `localhost`) no password is needed | `--web-bind` |
-| `[web]` `port` | 1 to 65535, default 8737 | `--web-port` |
-| `[web]` `password_file` | file holding the password; relative to the config file. The password itself is never a key | `PUSHSCAN_WEB_PASSWORD_FILE` |
-| `[[target]]` `name` | required, max 31 chars, unique | `NAME` |
-| `[[target]]` `output` | folder; `"."` is the output directory itself; default `<output>/<name>` | `NAME=DIR` |
-| `[[target]]` `filename` | template, see [File names](#file-names); wins over `[defaults]` for this target | - |
-| `[[target]]` `open_after_scan` | `true`, `false`; wins over `[defaults]` for this target, for example `false` for an archive folder | - |
-| `[target.document]` `multipage` | `true` / `false` | `mp:` for document type *Document* |
-| `[target.auto]` `resolution`, `format`, `size` | as above | the `@preset` options |
-| `[target.auto]` `multipage` | `true` / `false` | `mp:` for document type *Auto scan* |
+A small file with two targets:
 
-The multi-page booleans of a target start from `[defaults.document]` and
-`[defaults.auto]` (or `--multipage`) and replace the value for that target. If
-a target sets neither, it follows the defaults.
+```toml
+printer = "192.168.1.50"
+folder = "/scans"
 
-The printer panel has three document types. *Photo* needs no table, because the
-panel sends all of its settings itself (JPEG, size, resolution). With *Document*
-the panel sends them too and `[defaults.document]` only decides about the
-multi-page dialog. With *Auto* the panel sends no size, format or resolution, so
-`[defaults]` and `[target.auto]` decide.
+[[target]]
+name = "Scans"
 
-If `[defaults.document]` or `[defaults.auto]` is left out, the built-in value applies (`true` for *Document*, `false` for *Auto*). Setting only one of them keeps
-the built-in value of the other.
+[[target]]
+name = "Paperless"
+next_page = ["document", "auto"]
+```
+
+Tables written in braces, such as `auto = { ... }` and `trim = { ... }`, must
+stay on one line. TOML does not allow a line break inside them.
+
+## What the panel decides
+
+The printer panel sends its choices with every scan request, and the tool
+follows them:
+
+- The colour is the start button you press (colour or black and white).
+- The source is the document feeder when paper is in it, else the glass.
+- For the document types *Document* and *Photo* the panel also sends size,
+  format and resolution.
+
+So the config file has no keys for colour, source, size, format or resolution
+of these two types. It decides what the panel does not send:
+
+- the folders, the file names and whether a finished file is opened,
+- which document types get the [next page dialog](#next-page-dialog),
+- the settings of the document type *Auto*, where the panel sends no size,
+  format or resolution ([Document type Auto](#document-type-auto)),
+- the border trim ([Trimming a border](#trimming-a-border)).
+
+## Keys
+
+Top level:
+
+| Key | Type | Default | Meaning |
+|-----|------|---------|---------|
+| `printer` | text | none (required, here or by `--printer`) | printer IP or host name |
+| `folder` | text | `./scans`, on Windows and macOS `Documents/Scans` | base folder; relative target folders resolve against it, see [Folders](#folders) |
+| `filename` | text | `scan_{now:%Y%m%d_%H%M%S}` | template of the file name without extension, see [File names](#file-names) |
+| `next_page` | list of `"document"`, `"auto"`, `"photo"` | `["document"]` | document types that get the next page dialog on the glass, see [Next page dialog](#next-page-dialog). `[]` means none |
+| `auto` | inline table | `{ resolution = 300, format = "pdf", size = "a4" }` | settings for the document type *Auto*, see [Document type Auto](#document-type-auto) |
+| `open_after_scan` | `true` / `false` | `false` | desktop PC only: after a job is saved, open the folder (Windows: Explorer with the new file selected), once per job. On Linux it needs `DISPLAY` or `WAYLAND_DISPLAY`. A failure only logs a warning. Docker has no desktop, keep it `false` (else one warning at the start of the first job) |
+
+`[advanced]`, rarely needed:
+
+| Key | Type | Default | Meaning |
+|-----|------|---------|---------|
+| `interval` | number | `4` | seconds between polls |
+| `verbose` | `true` / `false` | `false` | debug log, needs a restart |
+| `trim` | inline table | none | border to cut off glass scans, keys `left`, `top`, `right`, `bottom`, mm, 0 to 50, see [Trimming a border](#trimming-a-border) |
+| `adf_trim` | inline table | none | the same for scans from the document feeder |
+
+`[web]`, see [Web page](web.md):
+
+| Key | Type | Default | Meaning |
+|-----|------|---------|---------|
+| `enabled` | `true` / `false` | `false` | serve the web page |
+| `bind` | text | `0.0.0.0` when a password is set, else `127.0.0.1` (this PC only) | address of the web page. On a loopback address (`127.0.0.1`, `::1`, `localhost`) no password is needed |
+| `port` | 1 to 65535 | `8737` | port of the web page |
+| `password_file` | text | none | file holding the password, relative to the config file. The password itself is never a key |
+
+`[[target]]`, one block per entry on the printer panel:
+
+| Key | Type | Default | Meaning |
+|-----|------|---------|---------|
+| `name` | text | required | name on the panel, max 31 characters, unique, see [Panel names](#panel-names) |
+| `folder` | text | the name of the target | folder of the scans; `"."` is the base folder itself. Date fields are allowed, see [Folders](#folders) |
+| `document_folder`, `auto_folder`, `photo_folder` | text | `folder` | another folder for scans of one document type |
+| `filename` | text | top level `filename` | file name template for this target |
+| `next_page` | list | top level `next_page` | replaces the global list for this target |
+| `auto` | inline table | top level `auto` | keys set here win over the global `auto`, the others stay |
+| `open_after_scan` | `true` / `false` | top level value | for this target, for example `false` for an archive folder |
+
+## Next page dialog
+
+For scans on the glass the printer can show a dialog after every page:
+*Stop*, *Black and white*, *Colour* and *Finish*. Put the next page on the
+glass and press *Colour* or *Black and white* to scan it (each page can have
+its own colour mode), or press *Finish* to end. All pages are saved as one PDF
+(with format JPEG: one file per page).
+
+This uses Canon's own scanner protocol (`/canon/ij/command2/port3`) instead of
+eSCL, because only that protocol has the "next page" question. The printer
+delivers each page as a JPEG; the PDF embeds the JPEGs unchanged.
+
+`next_page` lists the document types that get the dialog. The default is
+`["document"]`, like the official software. A target can set its own list, and
+`next_page = []` turns the dialog off.
+
+```toml
+next_page = ["document", "auto"]       # also ask with Auto
+```
+
+The feeder always scans all pages in one go, so it never shows the dialog and
+always uses eSCL.
+
+For *Photo* the dialog is only shown for fixed photo sizes. With the sizes
+*auto scan* and *auto multi scan* the printer sends the whole glass and the
+photos are cut out on the PC instead (see [Photos](#photos)), so `"photo"` in
+the list has no effect for these two sizes.
+
+Verified with A4 at 300 dpi; other resolutions and sizes use the same
+parameters but have not been tested yet. With *Auto* the panel sends no
+resolution or format, so the `auto` settings are used. The printer may reset the
+document type to *Auto* after a scan, so check it before the next multi-page
+scan.
 
 ### Photos
 
@@ -241,46 +314,156 @@ Docker image include it. When you run from source, install it with
 the whole glass is saved; the log then says "install Pillow to cut the photos
 out of the scan".
 
-### Older config files
+## Folders
 
-Files from earlier versions still work. The old keys are read and the log shows
-a warning that lists them. Setup and the web page write the new layout.
+`folder` at the top level is the base folder. Each `[[target]]` saves below it:
 
-| Old place | New place |
-|-----------|-----------|
-| `interval`, `verbose`, `ignore_panel` at the top level | `[advanced]` |
-| `trim_*` in `[defaults]` | `[advanced]` |
-| `multipage = "document"` (or `auto`, `both`, `off`) at the top level | `multipage` in `[defaults.document]` and `[defaults.auto]` |
-| `document_multipage` in a `[[target]]` | `multipage` in `[target.document]` |
+- Without `folder` the target saves into a subfolder named after it. Characters
+  other than letters, digits, `.`, `_` and `-` become `_`.
+- A relative `folder` is resolved against the base folder, an absolute one is
+  used as is, and `"."` means the base folder itself.
+- `document_folder`, `auto_folder` and `photo_folder` give one document type
+  another folder, with the same rules. Without them the type uses `folder`.
 
-If the old and the new place of the same key are both present, the file is
-rejected with a message such as "keep only ...".
+```toml
+folder = "/scans"
+
+[[target]]
+name = "Paperless"                # /scans/Paperless
+photo_folder = "Photos"           # photos go to /scans/Photos
+
+[[target]]
+name = "Archive"
+folder = "Archive/{now:%Y}"       # /scans/Archive/2026
+```
+
+Two targets may not share a folder (`a b` and `a_b` both map to `a_b`, for
+example). The Docker image sets `PUSHSCAN_FOLDER=/scans`, see
+[Precedence](#precedence).
+
+## Date fields in folders
+
+The folders of a target (`folder` and the three type folders) may contain the
+same fields as [file names](#file-names): `{name}` (the target name),
+`{date}` (`2026-11-22`), `{time}` (`183005`) and `{now:FORMAT}` with Python
+`strftime` codes. The fields are filled in when a scan is saved, so the folder
+can change by year or month without editing the file.
+
+```toml
+folder = "Archive/{now:%Y}/{now:%m}"    # Archive/2026/11
+```
+
+The value of one field is always a single folder name part. A field never
+adds a path separator or `..`: a format such as `{now:%d/%m}` gives `03_11`,
+not two folders. The slashes you type between the fields are the only way to
+make subfolders. A wrong field, such as `{now.year}` or `{}`, is rejected when the
+file is read.
+
+## Document type Auto
+
+With the panel document type *Auto* the panel sends only type, colour and
+source. The `auto` table decides the rest:
+
+```toml
+auto = { resolution = 300, format = "pdf", size = "a4" }
+```
+
+| Key | Values | Default |
+|-----|--------|---------|
+| `resolution` | `75`, `150`, `300`, `600` | `300` |
+| `format` | `"pdf"`, `"jpeg"` | `"pdf"` |
+| `size` | `"a4"`, `"letter"`, `"legal"`, `"10x15"`, `"13x18"` | `"a4"` |
+
+You may set only some keys. A `[[target]]` can have its own `auto`; its keys win
+over the global table and the others stay, so `auto = { format = "jpeg" }` in
+a target keeps the global resolution and size.
+
+## Trimming a border
+
+Some scanners capture a thin border at the glass edge. On a TR8550, tests
+showed that 1 mm on the right and 2 mm at the bottom remove it. With the
+`trim` table in `[advanced]` the tool asks the printer for a smaller scan
+area, so the border is never scanned. No image processing is involved.
+
+```toml
+[advanced]
+trim = { right = 1, bottom = 2 }     # glass
+adf_trim = { }                       # document feeder, 0 by default
+```
+
+The keys are `left`, `top`, `right` and `bottom`, in mm from 0 to 50. Sides
+that are not named stay 0. `trim` applies to the glass only. Scans from the
+document feeder have their own table `adf_trim`, 0 by default. The TR8550
+honours the smaller area on the feeder. The feeder sometimes pulls a page in
+slightly skewed, so a trim there can cut off a little of the page; leave it
+empty unless the border bothers you. If less than 1 inch would remain in
+either direction, trimming is skipped and a warning is logged. The setting is
+global, not per target.
+
+## Checking the file
+
+`pushscan2folder check` reads the config file like `run` does, reports an error
+with the key that is wrong, or shows what the file does: base folder, file
+names, the settings for *Auto*, the trim, and for each target its folders with
+today's date filled in. It does not contact the printer. Run it after editing
+the file. The output for [config.example.toml](../config.example.toml):
+
+```
+$ pushscan2folder --config config.example.toml check
+config file: config.example.toml
+printer: 192.168.1.50
+base folder: /scans
+file names: scan_{now:%Y-%m-%d_%H-%M-%S}
+next page dialog: document
+document type Auto: 300 dpi, pdf, a4
+trim: glass right 1 mm, bottom 2 mm; feeder none
+open after scan: no
+poll interval: 4 s
+target 'Scans':
+  folder: /scans/Scans
+target 'Paperless':
+  folder: /scans/Paperless
+  photo scans: /scans/Photos
+  next page dialog: document, auto
+target 'Archive':
+  folder: /scans/Archive/2026
+  next page dialog: none
+  document type Auto: 600 dpi, jpeg, a4
+OK
+```
+
+The exit code is 0 if the file can be used and 2 otherwise, also when no printer
+is set.
 
 ## Precedence
 
 Command line > environment variable > config file > built-in default.
 
-- The Docker image sets `PUSHSCAN_OUTPUT=/scans`, so in the container the
-  file's `output` key is overridden. Mount your folders below `/scans` or use
-  absolute target outputs (see [Docker](docker.md)).
-- If `--targets` / `PUSHSCAN_TARGETS` is set, it replaces the `[[target]]` list
-  of the file completely.
-- The panel settings come first for the scan itself, the CLI options only fill
-  in, see [Panel settings](#panel-settings) and
-  [Presets per target](#presets-per-target).
+Of the keys in the file, only `printer` and `folder` can be overridden this way
+(by `--printer` / `PUSHSCAN_PRINTER` and `--folder` / `PUSHSCAN_FOLDER`), plus
+the web options of `[web]` and `verbose`. Everything else is set in the file
+only.
+
+- The Docker image sets `PUSHSCAN_FOLDER=/scans`, so in the container the
+  file's `folder` key is overridden. Mount your folders below `/scans` or use
+  absolute target folders (see [Docker](docker.md)).
+- The panel settings come first for the scan itself, the `auto` table only
+  fills in for the document type *Auto*, see
+  [Panel settings](#panel-settings).
 
 ## Changing the file while running
 
 Before each poll cycle, never during a scan, `run` checks the modification
 time and size of the config file. If it changed, the file is read again like at
-startup. Command line options and `PUSHSCAN_*` environment variables still win
-over the file. This also applies to changes made on the [web page](web.md).
+startup. The command line options and the `PUSHSCAN_FOLDER` and
+`PUSHSCAN_PRINTER` variables still win over the file. This also applies to
+changes made on the [web page](web.md).
 
-These are applied right away: the scan defaults (`[defaults]` keys, `size`,
-`filename`, the `multipage` keys), `interval`, `ignore_panel` and the `trim_*`
-and `adf_trim_*` values from `[advanced]`, `open_after_scan`, the targets, `output` and `printer`. Targets whose names stay
-keep their registration on the panel. If the printer changes, the names are
-released on the old printer and registered on the new one.
+These are applied right away: `folder`, `filename`, `next_page`, `auto`,
+`open_after_scan`, `interval`, `trim` and `adf_trim`, the targets and
+`printer`. Targets whose names stay keep their registration on the panel. If the
+printer changes, the names are released on the old printer and registered on the
+new one.
 
 These need a restart: the web page on or off, its bind address, port and
 password file, the log file, the debug log (`verbose` in `[advanced]`) and the heartbeat file.
@@ -295,12 +478,8 @@ works when you edit `./config/config.toml` on the host.
 The printer sends 32 bytes with each scan request: document type, colour,
 source, size, format, resolution, bleed-through, descreen and unsharp mask.
 The tool maps these to eSCL, so the scan follows what you chose on the panel.
-
-The CLI options `--format`, `--color`, `--resolution` and `--source` (and the
-`PUSHSCAN_*` env vars) are only the fallback. They apply to document type
-"Auto scan", where the panel sends no details, and to any field the panel
-leaves unset. With `--ignore-panel` (or `PUSHSCAN_IGNORE_PANEL=1`) the CLI values
-are always used.
+Only for the document type *Auto* the [`auto` table](#document-type-auto)
+supplies size, format and resolution.
 
 - Bleed-through, descreen and unsharp mask have no eSCL equivalent and are
   ignored (see [Troubleshooting](troubleshooting.md#limitations)).
@@ -313,83 +492,46 @@ are always used.
 - Cancelling a scan on the panel leaves a truncated document. The tool detects
   this and discards it, so nothing is saved.
 
-## Trimming a border
-
-Some scanners capture a thin border at the glass edge. On a TR8550, tests
-showed `trim_right = 1` and `trim_bottom = 2` (mm) remove it. With
-`--trim right=1,bottom=2` (or `PUSHSCAN_TRIM`, or the `trim_*` keys in the
-`[advanced]` table of the config file) the tool asks the printer for a smaller scan area, so the border
-is never scanned. No image processing is involved. Trimming with `trim_*` applies to the
-glass only. Scans from the document feeder have their own values: `--adf-trim`
-(or `PUSHSCAN_ADF_TRIM`, or the `adf_trim_*` keys in `[advanced]`), same syntax
-and limits, 0 by default. The TR8550 honours the smaller area on the feeder.
-The feeder sometimes pulls a page in slightly skewed, so a trim there can cut
-off a little of the page; leave it at 0 unless the border bothers you. If less than 1 inch would remain in
-either direction, trimming is skipped and a warning is logged. The setting is
-global, not per target.
-
-## Multi-page scans from the platen
-
-For platen scans with document type *Document* the printer shows a dialog
-after every page: *Stop*, *Black and white*, *Colour* and *Finish*. Put the
-next page on the glass and press *Colour* or *Black and white* to scan it
-(each page can have its own colour mode), or press *Finish* to end. All pages
-are saved as one PDF (with format JPEG: one file per page).
-
-This uses Canon's own scanner protocol (`/canon/ij/command2/port3`) instead of
-eSCL, because only that protocol has the "next page" question.
-The printer delivers each page as a JPEG; the PDF embeds the JPEGs unchanged.
-
-`--multipage` (`PUSHSCAN_MULTIPAGE`) sets which document types get the
-dialog. In the config file the same is set with `multipage` in
-`[defaults.document]` (built-in `true`) and `[defaults.auto]` (built-in
-`false`):
-
-| Value                | Dialog for                                        |
-|----------------------|---------------------------------------------------|
-| `document` (default) | Document, like the official software              |
-| `auto`               | Auto scan only                                    |
-| `both`               | Document and auto scan                            |
-| `off`                | never; all scans use eSCL                         |
-
-Verified with A4 at 300 dpi; other resolutions and sizes use the same
-parameters but have not been tested yet.
-
-`1`/`true`/`yes` mean `document`, `0`/`false`/`no` mean `off`. With auto scan
-the panel sends no resolution or format, so the fallback options are used.
-ADF scans always use eSCL (the ADF already delivers all pages in one PDF).
-
-The printer may reset the document type to *Auto scan* after a scan, so check
-it before the next multi-page scan.
-
 ## ADF
 
 The printer detects the source with its paper sensor; the panel has no source
 choice. Legal size is only available from the ADF. The ADF is simplex only.
-Without panel data (auto scan) and with `--source auto`, the tool asks the
-printer whether paper is loaded. It uses the ADF if so and the platen otherwise.
+The tool uses the feeder when paper is loaded in it and the glass otherwise.
 
 ## Multiple targets
 
 One instance can register several names with the printer. Each name shows up as
-its own computer on the panel, and its scans go to a separate folder:
+its own computer on the panel, and its scans go to a separate folder. You
+define them as `[[target]]` blocks in the config file (or on the
+[web page](web.md)):
 
-```sh
-PYTHONPATH=src python3 -m pushscan2folder --printer 192.168.1.50 run \
-  --output ./scans --targets "Scans,Paperless=consume,Archive=/data/archive"
+```toml
+folder = "/scans"
+
+[[target]]
+name = "Scans"
+
+[[target]]
+name = "Paperless"
+folder = "consume"
+
+[[target]]
+name = "Archive"
+folder = "/data/archive"
 ```
 
-The list is separated by commas, and each entry takes one of two forms:
+See [Folders](#folders) for how the folders resolve. Names must be unique and
+follow the [panel name rules](#panel-names). All names share one poll loop, so
+the poll interval applies to the whole list. Without any `[[target]]` the tool
+registers one name, `--name` or `USER  HOSTNAME`, and saves into the base
+folder.
 
-- `NAME` saves into `<output>/NAME`. Characters other than letters, digits, `.`, `_`
-  and `-` become `_`.
-- `NAME=DIR` saves into `DIR`. A relative `DIR` is resolved against `--output`,
-  an absolute one is used as is. `.` means `--output` itself, without a subfolder.
-
-Names must be unique and follow the [panel name rules](#panel-names). Two
-targets may not share a folder (`a b` and `a_b` both map to `a_b`, for
-example). All names share one poll loop, so the poll interval applies to the
-whole list.
+For paperless-ngx, mount its consume folder inside the base folder, for
+example `- /path/to/paperless/consume:/scans/Paperless` in Docker (see
+[Docker](docker.md#paperless-ngx)), and use a target named `Paperless`. A
+folder inside the base folder can also be chosen on the
+[web page](web.md); an absolute one like `/consume` works too, but only in the
+config file.
 
 ## Panel names
 
@@ -403,49 +545,11 @@ Observed on the TR8550:
 - 20 names at the same time worked (a scrollable list), and no limit was found.
 - The list is ordered by registration time, not alphabetically.
 
-## Presets per target
-
-Append `@` and options joined with `+` to give a target its own settings:
-
-```sh
---targets "Scans,Paperless@300dpi,Archive@600dpi+jpeg+mp:both"
-```
-
-| Option | Meaning |
-|--------|---------|
-| `75dpi`, `150dpi`, `300dpi`, `600dpi` | resolution |
-| `pdf`, `jpeg` | file format |
-| `a4`, `letter`, `legal`, `10x15`, `13x18` | scan area |
-| `mp:document`, `mp:auto`, `mp:both`, `mp:off` | multi-page dialog, overrides `--multipage` for this target |
-
-Which value wins:
-
-- Auto scan on the panel: the preset wins for resolution, format and size.
-  The colour always comes from the panel (the start button pressed), a preset
-  has no colour. Settings missing from the preset come from the global options.
-- Document and photo: the panel settings win, and the preset only fills in
-  what the panel does not send.
-- With `--ignore-panel` the preset always applies.
-
-Options are not case sensitive. An unknown option stops the program with an
-error, so `NAME=DIR` cannot be used with a folder name containing `@`.
-
-The `@preset` string is the short form of the `[target.auto]` table of the
-[configuration file](#configuration-file).
-
-For paperless-ngx, mount its consume folder inside the output directory, for
-example `- /path/to/paperless/consume:/scans/Paperless` in Docker (see
-[Docker](docker.md#paperless-ngx)), and use the target `Paperless@300dpi`. A
-folder inside the output directory can also be chosen on the
-[web page](web.md); an absolute one like `Paperless=/consume` works too, but
-only from the command line or the config file.
-
 ## File names
 
-The template for the name of a scan file is set with `filename` in
-`[defaults]`, `--filename` or `PUSHSCAN_FILENAME`. A `filename` in a
-`[[target]]` applies to that target only and wins over the other settings. The
-usual precedence applies otherwise (see [Precedence](#precedence)). On the
+The template for the name of a scan file is set with `filename` at the top
+level of the config file. A `filename` in a `[[target]]` applies to that target
+only and wins over the global one. On the
 [web page](web.md#pages) the Settings page has a "File name" field.
 
 The default is `scan_{now:%Y%m%d_%H%M%S}`, which gives the same names as
@@ -460,7 +564,6 @@ because the extension comes from the format (`.pdf` or `.jpg`).
 | `{now:FORMAT}` | the date and time with Python `strftime` codes | `{now:%Y%m%d_%H%M%S}` gives `20261122_183005` |
 
 ```toml
-[defaults]
 filename = "{name}_{date}_{time}"     # My_PC_2026-11-22_183005.pdf
 
 [[target]]

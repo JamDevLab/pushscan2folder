@@ -36,8 +36,8 @@ GitHub ask for the details. To report a new printer model, see
   check it before the next multi-page scan.
 - Multi-page scans are verified with A4 at 300 dpi. Other resolutions and
   sizes use the same parameters but have not been tested yet.
-- Tested border trim values for the TR8550: `trim_right = 1` and
-  `trim_bottom = 2` (mm), see [Trimming a border](configuration.md#trimming-a-border).
+- Tested border trim values for the TR8550: `trim = { right = 1, bottom = 2 }`
+  (mm), see [Trimming a border](configuration.md#trimming-a-border).
 - Selecting a name on the panel without starting a scan triggers nothing.
 - The printer drops a registration after roughly 60 s without polls. The tool
   polls every 5 s during long scans and registers again automatically, see
@@ -72,22 +72,23 @@ GitHub ask for the details. To report a new printer model, see
 - The log shows an address like `172.x.x.1` for web logins in Docker: see
   [Client address in the log](docker.md#client-address-in-the-log).
 - The scan has an unexpected file name: see [File names](configuration.md#file-names).
-  A target's own `filename` wins over `[defaults]`, and `PUSHSCAN_FILENAME` or
-  `--filename` win over the config file.
+  A target's own `filename` wins over the global `filename`.
 - The name does not show up on the panel: names with characters other than
   letters, digits, space, `-`, `_` and `@` are rejected, see
   [Panel names](configuration.md#panel-names). After a printer restart the
   names reappear within about 10 s.
-- A preset has no colour: the colour always comes from the panel, see
-  [Presets per target](configuration.md#presets-per-target).
-- The multi-page dialog does not appear: it is only shown for platen scans,
-  by default only for document type *Document*, and not with `--ignore-panel`.
-  See [Multi-page scans](configuration.md#multi-page-scans-from-the-platen).
-- Scans cannot be written in Docker: the output directory must be writable
+- The `auto` settings have no colour: the colour always comes from the panel, see
+  [Document type Auto](configuration.md#document-type-auto).
+- The next page dialog does not appear: it is only shown for platen scans and
+  only for the document types listed in `next_page` (by default only
+  *Document*). For *Photo* with the sizes *auto scan* and *auto multi scan* it
+  never appears. See [Next page dialog](configuration.md#next-page-dialog).
+- Scans cannot be written in Docker: the base folder must be writable
   for the container user, see [User, uid and gid](docker.md#user-uid-and-gid).
 - The web page refuses to start: see [Password options](web.md#password-options).
   Forms refused with "Origin does not match Host" behind a reverse proxy: see
   [HTTPS](web.md#https-behind-a-reverse-proxy).
-- The targets cannot be edited on the web page: editing is disabled when they
-  come from `PUSHSCAN_TARGETS` / `--targets`, see
-  [Editing targets and folders](web.md#editing-targets-and-folders).
+- A setting from the config file has no effect: `pushscan2folder check` shows
+  what the file does, and `PUSHSCAN_FOLDER` or `PUSHSCAN_PRINTER` (as set in the
+  Docker image) override `folder` and `printer`, see
+  [Precedence](configuration.md#precedence).

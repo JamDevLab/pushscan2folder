@@ -13,9 +13,9 @@ Back to the [README](../README.md).
    answer has status `0x8000` ("scan requested") and carries 32 bytes of panel
    settings. The tool scans with these settings, using either Canon's own
    scanner protocol (multi-page platen scans, see
-   [Configuration](configuration.md#multi-page-scans-from-the-platen)) or
-   eSCL. It writes `scan_YYYYmmdd_HHMMSS[_NN].pdf|jpg` into the output
-   directory and never overwrites existing files. Selecting a name on the
+   [Configuration](configuration.md#next-page-dialog)) or
+   eSCL. It writes `scan_YYYYmmdd_HHMMSS[_NN].pdf|jpg` into the target's
+   folder and never overwrites existing files. Selecting a name on the
    panel without starting a scan triggers nothing.
 4. Release. On SIGINT/SIGTERM the tool releases the session.
 

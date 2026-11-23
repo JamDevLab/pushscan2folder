@@ -3,7 +3,7 @@
 #         (see config.example.toml)
 # Start:  docker compose up -d     Update: docker compose pull && docker compose up -d
 # Logs:   docker compose logs -f
-# Targets and scan settings live in config/config.toml. To edit them in the
+# Targets, folders and scan settings live in config/config.toml. To edit them in the
 # browser at http://<host>:8080, uncomment the web lines below.
 # To build the image from a clone of the repository: docker-compose.dev.yml.
 services:

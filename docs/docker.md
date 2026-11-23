@@ -11,7 +11,7 @@ example a Raspberry Pi). The tags are the exact version (`0.3.0`), major.minor
 
 ## Docker Compose
 
-The provided `docker-compose.yml` keeps the targets and scan settings in
+The provided `docker-compose.yml` keeps the targets, folders and scan settings in
 `config/config.toml`; only the printer IP and the (commented out) web settings
 are in the compose file:
 
@@ -91,7 +91,7 @@ docker build -t pushscan2folder .
 
 ## User, uid and gid
 
-The image runs as a non-root user. The output directory must be writable by
+The image runs as a non-root user. The base folder must be writable by
 that user. Either pass `--user "$(id -u):$(id -g)"` (as above, or `user:` in
 compose) so files belong to you, or `chown` the host directory to the
 container user's UID (check with
@@ -99,10 +99,10 @@ container user's UID (check with
 
 ## Volumes
 
-- `./scans:/scans` is the output directory. The image sets
-  `PUSHSCAN_OUTPUT=/scans`, which overrides the `output` key of the config
+- `./scans:/scans` is the base folder. The image sets
+  `PUSHSCAN_FOLDER=/scans`, which overrides the `folder` key of the config
   file (see [Precedence](configuration.md#precedence)). Mount your folders
-  below `/scans` or use absolute target outputs.
+  below `/scans` or use absolute target folders.
 - `./config:/config` holds `config.toml`. Mount a directory, not a single
   file: a single-file bind mount cannot be replaced atomically, so the program
   would fall back to rewriting it in place when the [web page](web.md) saves.
@@ -161,8 +161,9 @@ To see the real address, use one of these:
 
 ## Paperless-ngx
 
-Mount the paperless consume folder inside the output directory and use a
-target named like the folder, for example `Paperless@300dpi`:
+Mount the paperless consume folder inside the base folder and use a
+target named like the folder, for example `name = "Paperless"` in the config
+file (it saves into `/scans/Paperless`):
 
 ```yaml
     volumes:
@@ -170,9 +171,8 @@ target named like the folder, for example `Paperless@300dpi`:
 ```
 
 The folder can also be chosen on the web page, because it lies inside the
-output directory. An absolute target folder like `Paperless=/consume` only
-works from the command line or the config file. See
-[Presets per target](configuration.md#presets-per-target).
+base folder. An absolute target folder like `/consume` only works in the
+config file. See [Folders](configuration.md#folders).
 
 ## NAS notes
 
@@ -182,4 +182,3 @@ works from the command line or the config file. See
   regardless of the port), see [Security model](web.md#security-model).
 - Prefer `PUSHSCAN_WEB_PASSWORD_FILE` (a Docker secret) over the plain
   variable, because environment variables are visible in `docker inspect`.
-- Do not set `PUSHSCAN_TARGETS` when you edit the targets on the web page.

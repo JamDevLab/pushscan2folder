@@ -82,7 +82,7 @@ error, so a typo cannot turn a protection off.
   with a port forwarded to the internet. Everything else stays: CSRF tokens
   on all forms (one per process instead of per session), the Origin check,
   the security headers, and the rule that target folders stay inside the
-  output directory.
+  base folder.
   Without a login the page answers only when it is opened by IP address,
   as `localhost`, by a name without dots (`nas`) or by a local name ending in
   `.local`, `.lan`, `.home`, `.home.arpa`, `.internal` or `.fritz.box`. This
@@ -92,35 +92,37 @@ error, so a typo cannot turn a protection off.
 ## Pages
 
 - Status (`/`) shows the printer, the last successful poll or last error,
-  pending target changes, the targets (folder, registered, auto-scan preset,
-  multi-page) and the last scans. It refreshes every 10 s.
+  pending target changes, the targets (folder, registered, auto-scan settings,
+  next page dialog) and the last scans. It refreshes every 10 s.
 - Log (`/log`) shows the last 500 log lines (INFO and above).
-- Targets (`/targets`) adds, changes and deletes targets with name, folder,
-  multi-page dialog and the auto-scan preset. Names and folders are validated
-  as in the config file. The cards can be reordered with "Move up" and
-  "Move down", and "Add target" adds an empty card; none of this is saved
-  until you press Save. The printer panel lists the targets in this order,
-  so after a change of the order the names briefly disappear while they are
-  registered again. Saving writes the config file, and the running
+- Targets (`/targets`) adds, changes and deletes targets. A target card has
+  the name and folder, "Open after a scan", the auto scan settings (resolution,
+  format, size), three next page boxes (Document, Auto and Photo) and the
+  fold-out "Other folder per document type" with one folder for each type.
+  Names and folders are validated as in the config file, and date fields such
+  as `{now:%Y}` are allowed in folders. The cards can be reordered with "Move
+  up" and "Move down", and "Add target" adds an empty card; none of this is
+  saved until you press Save. The printer panel lists the targets in this
+  order, so after a change of the order the names briefly disappear while they
+  are registered again. Saving writes the config file, and the running
   service switches to the new list before its next poll cycle (shown as
-  "pending" until then). The per-target Auto scan options show the current
+  "pending" until then). The per-target auto scan options show the current
   default, for example "Default (300 dpi)", which comes from the Settings page.
   The editor has no field for the file name template of a target. A `filename`
   that a target has in the config file is kept when you save.
-- Settings (`/settings`) edits `resolution`, `color`, `format`, `source`,
-  `size`, `open_after_scan`, `filename` (shown as "File name", see
-  [File names](configuration.md#file-names)) and the four `trim_*` values,
-  the four `adf_trim_*` values, `ignore_panel` and `interval` (these groups live in `[advanced]`), and
-  the multi-page dialog as two check boxes, one for the panel document type
-  "Document" and one for "Auto" (written to `multipage` in
-  `[defaults.document]` and `[defaults.auto]`), each
-  with a short explanation. Values are
+- Settings (`/settings`) edits `interval`, the next page dialog (one box each
+  for Document, Auto and Photo, written to `next_page`), the "Auto settings"
+  (`resolution`, `format` and `size` of the `auto` table), `open_after_scan`,
+  `filename` (shown as "File name", see
+  [File names](configuration.md#file-names)), "Glass trim" (`trim`) and
+  "Feeder trim" (`adf_trim`), the last two as one field per side. Values are
   validated with the same rules as the config file; an empty field removes the
-  key. The base `output` folder is shown read-only. The section "Fixed" shows
-  the `printer` with a "Search the network" button, see below. If an
-  environment variable or command line option overrides a value (for example
-  `PUSHSCAN_INTERVAL` or `PUSHSCAN_TRIM`), the page says so and shows the
-  value in use; the saved value has no effect while the override exists.
+  key. The base `folder` is shown read-only. The section "Fixed" shows
+  the `printer` with a "Search the network" button, see below. Only `printer`
+  and `folder` can be overridden by the environment or the command line
+  (`PUSHSCAN_PRINTER` / `--printer`, `PUSHSCAN_FOLDER` / `--folder`). If one of
+  them is, the page says so and shows the value in use; the saved value has no
+  effect while the override exists.
   Settings are written to the file, and the running service applies them
   within a poll cycle, see
   [Changing the file while running](configuration.md#changing-the-file-while-running).
@@ -138,23 +140,19 @@ error, so a typo cannot turn a protection off.
   config file. It writes the text exactly as given, comments included, after
   checking it like at startup; an invalid file is not written and the error
   (with line number for TOML syntax errors) is shown next to your text. The web
-  page still gets no file access beyond the output directory, so the editor
-  refuses a changed `output` or `printer`, and a `[[target]]` whose output
-  folder is not a relative path inside the output directory. Targets already
-  in the file with such a folder (for example `output = "/consume"`) may stay
-  unchanged. The form carries a hash of the file text: if the file changed on
+  page still gets no file access beyond the base folder, so the editor
+  refuses a changed `folder` or `printer`, and a `[[target]]` with a folder
+  (`folder` or one of the type folders) that is not a relative path inside the
+  base folder. Targets already in the file with such a folder (for example
+  `folder = "/consume"`) may stay unchanged. The form carries a hash of the file text: if the file changed on
   disk meanwhile, nothing is saved and the new content is shown. The running
   service applies the changes within a poll cycle, except the `[web]` options,
   which need a restart. The size limit is 64 KB.
 
 ## Editing targets and folders
 
-Whether the targets can be edited depends on where they come from:
-
-- from `PUSHSCAN_TARGETS` / `--targets`: editing is disabled, because the
-  variable would override the file at the next start;
-- from the config file (`PUSHSCAN_CONFIG`, `--config` or the default location):
-  editable; if the file does not exist yet, the first save creates it.
+The targets are edited in the config file (`PUSHSCAN_CONFIG`, `--config` or the
+default location); if the file does not exist yet, the first save creates it.
 
 Each target card also has "Open after a scan" (`open_after_scan` of the target;
 "Default" uses the Settings page value, "Yes" and "No" decide for this target). On the Settings page "Open after scan" is a check box; unticked is saved as `false`, because a check box cannot say "not set".
@@ -162,19 +160,22 @@ Each target card also has "Open after a scan" (`open_after_scan` of the target;
 Comments in the config file are lost when saving from the Targets or Settings
 form, except the short header and the commented examples, which are written
 again. The file is rewritten; other keys keep their values. Only the raw editor
-keeps comments. Every saved target gets both
-multi-page switches written explicitly.
+keeps comments. A target whose next page boxes equal the global list gets no
+`next_page` key.
 
-Folders set on the web page are always inside the output directory
-(`--output` / `PUSHSCAN_OUTPUT`, `/scans` in Docker). Enter a plain relative
-path such as `Paperless` or `office/invoices`, or `.` for the output directory
-itself. The page rejects absolute paths, `..`, backslashes and symlinks that
-lead outside the output directory, so it cannot write anywhere else. A target whose folder is outside the output
-directory (for example `output = "/consume"`) can only be changed in the config
+Folders set on the web page are always inside the base folder
+(`--folder` / `PUSHSCAN_FOLDER`, `/scans` in Docker). Enter a plain relative
+path such as `Paperless` or `office/invoices`, or `.` for the base folder
+itself. The same goes for the three folders of the fold-out "Other folder per
+document type". Date fields such as `{now:%Y}` are allowed, and the folder
+they produce stays inside the base folder too. The page rejects absolute
+paths, `..`, backslashes and symlinks that lead outside the base folder, so it
+cannot write anywhere else. A target whose folder is outside the base
+folder (for example `folder = "/consume"`) can only be changed in the config
 file. The web page shows it read-only and keeps it when you save; you can still
 delete it there.
 
-The raw editor also refuses changes to `output`, `printer` and the `[web]`
+The raw editor also refuses changes to `folder`, `printer` and the `[web]`
 table. The printer can only be changed on the Settings page with the network
 search. `[web]` decides who can reach the page and where the password is, so it
 can only be changed in the file itself or with `pushscan2folder setup`.
@@ -226,8 +227,7 @@ The provided `docker-compose.yml` is prepared for the web page
 (`./config:/config`, `PUSHSCAN_CONFIG: /config/config.toml`); uncomment the
 web lines and the port to turn it on. Mount a
 directory for the config, not a single file: a single-file bind mount cannot be
-replaced atomically, so the program would fall back to rewriting it in place. The directory must be writable for the user set in `user:`. Do not set
-`PUSHSCAN_TARGETS` when you edit the targets on the web page. Behind Docker, the
+replaced atomically, so the program would fall back to rewriting it in place. The directory must be writable for the user set in `user:`. Behind Docker, the
 log can show the gateway of the Docker network as the client address, see
 [Client address in the log](docker.md#client-address-in-the-log). More in
 [Docker](docker.md).
