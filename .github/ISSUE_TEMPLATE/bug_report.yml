@@ -35,7 +35,7 @@ body:
     attributes:
       label: pushscan2folder version
       description: Output of `pushscan2folder --version` (or `python3 -m pushscan2folder --version`).
-      placeholder: 0.3.0
+      placeholder: 0.4.0
     validations:
       required: true
   - type: textarea

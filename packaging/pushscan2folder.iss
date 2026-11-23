@@ -1,7 +1,7 @@
 ﻿; Inno Setup script for the Windows installer of pushscan2folder.
 ; Built by .github/workflows/release.yml after PyInstaller made the folder
 ; dist\pushscan2folder:
-;   ISCC /DAppVersion=0.3.0 packaging\pushscan2folder.iss
+;   ISCC /DAppVersion=0.4.0 packaging\pushscan2folder.iss
 ; Installs for the current user only (no administrator rights), into
 ; %LOCALAPPDATA%\Programs\pushscan2folder, with Start menu entries and an
 ; entry under Settings > Apps for uninstalling.

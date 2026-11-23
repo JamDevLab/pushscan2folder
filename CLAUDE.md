@@ -86,7 +86,7 @@ without Pillow installed (tests that need Pillow skip themselves).
 
 ## Status and open points
 
-- Released: 0.3.0 (2026-11-23). `## [Unreleased]` in `CHANGELOG.md` lists
+- Released: 0.4.0 (2026-11-23, config v2, next page dialog after the feeder). `## [Unreleased]` in `CHANGELOG.md` lists
   what is on `next` since then.
 - Tested by hand only with a TR8550: Windows (installer, menu, background
   mode) and Docker on Linux. macOS runs only in CI.
