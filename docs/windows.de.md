@@ -35,7 +35,7 @@ Weil der Installer nicht signiert ist, zeigt Windows SmartScreen beim Start even
 - ob nach jedem Scan der Ordner geöffnet werden soll (Standard ja, siehe [Ordner nach dem Scan öffnen](#ordner-nach-dem-scan-öffnen)),
 - ob das Programm beim Anmelden automatisch starten soll (Standard ja).
 
-Danach schreibt es `%APPDATA%\pushscan2folder\config.toml`, zeigt, wo alles liegt, und fragt "Run in the background now?" (Standard ja, siehe unten). Bei nein fragt es "Start now?" und läuft im Konsolenfenster. Das Webpasswort steht nicht in `config.toml`, sondern in `web_password.txt` daneben. `%APPDATA%` gehört nur deinem Benutzerkonto.
+Danach schreibt es `%APPDATA%\pushscan2folder\config.toml`, zeigt, wo alles liegt, und fragt "Run in the background now?" (Standard ja, siehe unten). Bei nein fragt es "Start now?" und läuft im Konsolenfenster. Das Webpasswort steht in `web_password.txt` neben `config.toml`. `%APPDATA%` gehört nur deinem Benutzerkonto.
 
 Beim nächsten Start per Doppelklick oder aus dem Startmenü findet das Programm die Konfigurationsdatei und zeigt ein Menü mit der Version und der Angabe, ob das Programm im Hintergrund läuft:
 

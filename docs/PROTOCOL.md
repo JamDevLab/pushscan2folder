@@ -130,9 +130,9 @@ and descreen are 0 (not applicable). With the sizes auto scan (0x0b) and auto
 multi scan (0x0c) the printer sends the whole glass. The PC cuts out the photos
 (see [Photos](configuration.md#photos)).
 
-The printer enforces some panel restrictions, not the protocol: compact PDF
-cannot be combined with unsharp mask or bleed-through reduction, and the panel
-shows a warning until the unsharp mask is switched off.
+The panel enforces some restrictions itself: compact PDF cannot be combined
+with unsharp mask or bleed-through reduction, and the panel shows a warning
+until the unsharp mask is switched off.
 
 The ADF orientation setting (portrait / landscape) did not change the data
 when scanning from the platen.

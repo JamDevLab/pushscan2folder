@@ -143,8 +143,9 @@ PYTHONPATH=src python3 -m pushscan2folder --printer 192.168.1.50 scan --folder .
 Globale Optionen stehen vor dem Unterbefehl. Die Kommandozeile hat Vorrang vor
 der Umgebung, und die Umgebung hat Vorrang vor der
 [Konfigurationsdatei](#konfigurationsdatei). Mehr unter [Vorrang](#vorrang).
-Scan-Einstellungen wie Format, Auflösung, Farbe und Quelle sind keine Optionen.
-Das Bedienfeld und die Konfigurationsdatei legen sie fest, siehe
+Außer beim Debug-Befehl `scan` gibt es keine Optionen für Scan-Einstellungen
+wie Format, Auflösung, Farbe und Quelle. Sie kommen vom Bedienfeld und aus der
+Konfigurationsdatei, siehe
 [Was das Bedienfeld entscheidet](#was-das-bedienfeld-entscheidet).
 
 | Option         | Umgebungsvariable  | Standard            | Gilt für      | Beschreibung |
@@ -332,7 +333,7 @@ Glas liegt, spielt keine Rolle.
 
 Ist der Einzug leer, wenn du mehr wählst, schreibt das Programm eine Warnung ins
 Log und fragt erneut. Nach 3 Runden in Folge ohne Seite beendet es den Auftrag.
-Stoppst du eine Einzug-Runde am Panel, endet der Auftrag sofort. Die bisher
+Stoppst du eine Einzugsrunde am Bedienfeld, endet der Auftrag sofort. Die bisher
 gescannten Seiten bleiben immer erhalten.
 
 ### Fotos
@@ -398,7 +399,7 @@ folder = "Archive/{now:%Y}/{now:%m}"    # Archive/2026/11
 
 Der Wert eines Felds ist immer ein einzelner Teil des Ordnernamens. Ein Feld
 fügt nie einen Pfadtrenner oder `..` ein: ein Format wie `{now:%d/%m}` ergibt
-`03_11`, nicht zwei Ordner. Die Schrägstriche, die du zwischen die Felder
+`03_11` statt zwei Ordnern. Die Schrägstriche, die du zwischen die Felder
 schreibst, sind der einzige Weg zu Unterordnern. Ein falsches Feld wie
 `{now.year}` oder `{}` wird beim Lesen der Datei abgelehnt.
 
@@ -627,7 +628,7 @@ filename = "scan_{now:%Y%m%d_%H%M%S}"   # dieses Ziel behält den Standardstil
 Weitere Felder gibt es nicht. Attributzugriff wie `{now.year}` und
 Positionsfelder wie `{}` werden abgelehnt, ebenso eine Vorlage, die einen
 leeren Namen ergibt. Das Programm prüft die Vorlage beim Start, ein Fehler
-stoppt es also mit einer Meldung und nicht mitten in einem Scan.
+stoppt es also mit einer Meldung, statt mitten in einem Scan zu scheitern.
 
 Das Ergebnis wird für das Dateisystem bereinigt:
 

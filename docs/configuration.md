@@ -139,8 +139,9 @@ PYTHONPATH=src python3 -m pushscan2folder --printer 192.168.1.50 scan --folder .
 Global options go before the subcommand. The command line wins over the
 environment, and the environment wins over the
 [configuration file](#configuration-file). More in [Precedence](#precedence).
-Scan settings such as format, resolution, colour and source are not options.
-The panel and the config file decide them, see
+Apart from the debugging command `scan`, there are no options for scan
+settings such as format, resolution, colour and source. They come from the
+panel and the config file, see
 [What the panel decides](#what-the-panel-decides).
 
 | Option         | Env var            | Default             | Applies to    | Description |
@@ -387,8 +388,8 @@ folder = "Archive/{now:%Y}/{now:%m}"    # Archive/2026/11
 ```
 
 The value of one field is always a single folder name part. A field never
-adds a path separator or `..`: a format such as `{now:%d/%m}` gives `03_11`,
-not two folders. The slashes you type between the fields are the only way to
+adds a path separator or `..`: a format such as `{now:%d/%m}` gives `03_11`
+instead of two folders. The slashes you type between the fields are the only way to
 make subfolders. A wrong field, such as `{now.year}` or `{}`, is rejected when the
 file is read.
 
@@ -609,7 +610,7 @@ filename = "scan_{now:%Y%m%d_%H%M%S}"   # this target keeps the default style
 No other fields exist. Attribute access such as `{now.year}` and positional
 fields such as `{}` are rejected, and so is a template that gives an empty
 name. The program checks the template at startup, so a mistake stops it with an
-error message and not in the middle of a scan.
+error message instead of failing in the middle of a scan.
 
 The result is made safe for the file system:
 

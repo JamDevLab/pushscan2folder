@@ -35,7 +35,7 @@ Start "pushscan2folder" from the Start menu (or the desktop icon, or `pushscan2f
 - whether to open the folder after each scan (default yes, see [Open the folder after a scan](#open-the-folder-after-a-scan)),
 - whether to start the program automatically when you log in (default yes).
 
-Then it writes `%APPDATA%\pushscan2folder\config.toml`, shows where everything is and asks "Run in the background now?" (default yes, see below). If you answer no, it asks "Start now?" and runs in the console window. The web password is not stored in `config.toml` but in `web_password.txt` next to it. `%APPDATA%` belongs to your user account only.
+Then it writes `%APPDATA%\pushscan2folder\config.toml`, shows where everything is and asks "Run in the background now?" (default yes, see below). If you answer no, it asks "Start now?" and runs in the console window. The web password is stored in `web_password.txt` next to `config.toml`. `%APPDATA%` belongs to your user account only.
 
 The next time you start it by double click or from the Start menu, the program finds the config file and shows a menu with the version and whether the program runs in the background:
 
