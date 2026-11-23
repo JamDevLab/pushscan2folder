@@ -20,6 +20,31 @@ All notable changes are documented here. The format follows
 
 - `open_after_scan` without a desktop session (for example in Docker) logs
   its warning once instead of after every scan.
+- Web login lockout: wrong passwords are counted per client address, so one
+  host on the LAN can no longer lock out everyone. A global cap (50 wrong
+  passwords within 15 minutes) still locks the login for all addresses.
+
+### Fixed
+
+- Scans are written to a hidden `.part` file first and then published under
+  their final name, so a watched folder (for example a Paperless consume
+  folder) never sees a half-written file. An existing file or symlink with
+  the same name is never replaced or followed.
+- A scan is no longer lost when the photo cut-out or the PDF step fails on
+  unusual image data: the whole scan or the pages as JPEG files are saved
+  instead.
+- Native multi-page scans could loop forever if the printer reported data
+  but sent none; reads from the printer now also have an overall time limit.
+- An eSCL job that ends with an error is cancelled on the printer.
+- `stop` can no longer signal other processes through a damaged state file;
+  a starting background instance no longer fails if `status` runs at the
+  same moment.
+- The setup wizard strips control characters from printer names found on
+  the network.
+- Windows: helper programs are started by their full path, and an autostart
+  entry with a folder ending in a backslash works.
+- The installer shows a progress page while an update waits for a running
+  scan to finish.
 
 ## [0.3.0] - 2026-11-23
 
