@@ -5,7 +5,6 @@ Platen scans whose panel document type is in `multipage` (default:
 pages (multi-page PDF). Everything else uses eSCL."""
 from __future__ import annotations
 
-import errno
 import logging
 import os
 import re
@@ -132,29 +131,14 @@ def check_filename(template: str) -> None:
 
 
 def _publish(tmp: Path, final: Path) -> None:
-    """Give the finished temp file its final name without ever replacing or
-    following anything that exists there. Raises FileExistsError if the name
-    is taken (a dangling symlink counts)."""
-    try:
-        os.link(tmp, final)  # atomic, fails if `final` exists
-        return
-    except FileExistsError:
-        raise
-    except OSError as exc:
-        if exc.errno not in (errno.EPERM, errno.ENOTSUP, errno.EXDEV, errno.EOPNOTSUPP,
-                             errno.EACCES, errno.ENOSYS, errno.EINVAL):
-            raise
-    # No hard links here (some SMB/NAS shares, FAT): copy; "x" never overwrites
-    # and does not follow a symlink.
-    with open(final, "xb") as dst:
-        try:
-            with open(tmp, "rb") as src:
-                while chunk := src.read(1 << 20):
-                    dst.write(chunk)
-        except BaseException:
-            dst.close()
-            final.unlink(missing_ok=True)
-            raise
+    """Give the finished temp file its final name. Raises FileExistsError if
+    the name is taken (a dangling symlink counts), so nothing is replaced or
+    followed. A rename, not a hard link: folder watchers such as the
+    Paperless consumer react to "moved to" or "closed after writing", and a
+    new hard link is neither."""
+    if os.path.lexists(final):
+        raise FileExistsError(final)
+    os.rename(tmp, final)   # same folder; on Windows it never overwrites
 
 
 def save_files(directory: Path, files: list[tuple[bytes, str]], now: datetime,

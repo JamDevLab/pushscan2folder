@@ -465,17 +465,13 @@ class HelperTests(unittest.TestCase):
             self.assertEqual([p.read_bytes() for p in paths], [b"a", b"b"])
             self.assertEqual(sorted(p.name for p in d.glob(".*")), [])
 
-    def test_save_files_copy_fallback_without_hard_links(self):
-        now = datetime(2026, 11, 22, 0, 1, 3)
-        with tempfile.TemporaryDirectory() as d:
-            d = Path(d)
-            (d / "scan_20261122_000103.pdf").write_bytes(b"old")
-            with mock.patch.object(os, "link", side_effect=OSError(1, "not permitted")):
-                paths = save_files(d, [(b"%PDF new", "pdf")], now)
-            self.assertEqual(paths[0].name, "scan_20261122_000103-1.pdf")
-            self.assertEqual(paths[0].read_bytes(), b"%PDF new")
-            self.assertEqual((d / "scan_20261122_000103.pdf").read_bytes(), b"old")
-            self.assertEqual(list(d.glob(".*")), [])
+    def test_save_files_renames_into_place(self):
+        # A rename gives folder watchers (Paperless: close-write / moved-to) an event.
+        with tempfile.TemporaryDirectory() as d, \
+                mock.patch.object(os, "rename", wraps=os.rename) as rename:
+            paths = save_files(Path(d), [(b"%PDF", "pdf")], datetime(2026, 1, 2))
+            rename.assert_called_once()
+            self.assertEqual(Path(rename.call_args[0][1]), paths[0])
 
     def test_filename_template(self):
         now = datetime(2026, 11, 22, 18, 30, 5)

@@ -27,6 +27,8 @@ MAX_DOCUMENT_BYTES = 512 * 1024 * 1024
 MAX_JOB_BYTES = 1024 * 1024 * 1024
 MAX_DOCUMENTS = 500
 CLEANUP_TIMEOUT = 3.0                 # seconds for the best-effort job DELETE
+# Total time for one document: an ADF PDF with all pages can stream for long.
+DOCUMENT_DEADLINE = 2 * 3600.0
 
 # A4 at 300 dpi in eSCL units (1/300 inch); the printer clamps to its maximum.
 A4_WIDTH = 2480
@@ -95,13 +97,13 @@ class EsclClient:
 
     def _request(self, method: str, path: str, body: bytes | None = None,
                  headers: dict | None = None, limit: int = MAX_RESPONSE,
-                 timeout: float | None = None):
+                 timeout: float | None = None, deadline: float | None = None):
         conn = http.client.HTTPConnection(self.printer, self.port,
                                           timeout=self.timeout if timeout is None else timeout)
         try:
             conn.request(method, path, body=body, headers=headers or {})
             resp = conn.getresponse()
-            return resp.status, dict(resp.getheaders()), read_body(resp, limit, EsclError)
+            return resp.status, dict(resp.getheaders()), read_body(resp, limit, EsclError, deadline)
         finally:
             conn.close()
 
@@ -146,7 +148,8 @@ class EsclClient:
                 try:
                     code, _, data = self._request(
                         "GET", f"{path}/NextDocument",
-                        limit=min(MAX_DOCUMENT_BYTES, MAX_JOB_BYTES - total))
+                        limit=min(MAX_DOCUMENT_BYTES, MAX_JOB_BYTES - total),
+                        deadline=DOCUMENT_DEADLINE)
                 except (OSError, EsclError) as exc:   # EsclError: over the limit
                     if not docs:
                         raise

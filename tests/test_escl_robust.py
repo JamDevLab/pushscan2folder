@@ -93,8 +93,8 @@ class EsclJobTests(unittest.TestCase):
         calls = []
         answers = list(answers)
 
-        def fake(method, path, body=None, headers=None, limit=0, timeout=None):
-            calls.append((method, path))
+        def fake(method, path, body=None, headers=None, limit=0, timeout=None, deadline=None):
+            calls.append((method, path, deadline))
             if method == "POST":
                 return 201, {"Location": "/eSCL/ScanJobs/7"}, b""
             if method == "DELETE":
@@ -113,12 +113,22 @@ class EsclJobTests(unittest.TestCase):
     def test_empty_document_is_an_error_and_job_dropped(self):
         docs, calls = self.run_scan([(200, {}, b"")])
         self.assertIsNone(docs)
-        self.assertEqual(calls[-1], ("DELETE", "/eSCL/ScanJobs/7"))
+        self.assertEqual(calls[-1][:2], ("DELETE", "/eSCL/ScanJobs/7"))
 
     def test_normal_end_sends_no_delete(self):
         docs, calls = self.run_scan([(200, {}, b"doc"), (404, {}, b"")])
         self.assertEqual(docs, [b"doc"])
-        self.assertNotIn("DELETE", [m for m, _ in calls])
+        self.assertNotIn("DELETE", [c[0] for c in calls])
+
+    def test_documents_get_the_long_deadline(self):
+        # An ADF PDF with all pages streams while the feeder runs: more than
+        # the general read deadline must be allowed.
+        _, calls = self.run_scan([(200, {}, b"doc"), (404, {}, b"")])
+        gets = [c for c in calls if c[0] == "GET"]
+        self.assertTrue(gets)
+        for c in gets:
+            self.assertEqual(c[2], escl.DOCUMENT_DEADLINE)
+        self.assertGreater(escl.DOCUMENT_DEADLINE, client_mod.READ_DEADLINE * 6)
 
     def test_failure_after_document_deletes_job(self):
         docs, calls = self.run_scan([(200, {}, b"doc"), OSError("gone")])
