@@ -11,7 +11,7 @@ All notable changes are documented here. The format follows
   `PUSHSCAN_ADF_TRIM` and the `adf_trim_left`, `adf_trim_top`,
   `adf_trim_right`, `adf_trim_bottom` keys in `[advanced]`, with their own
   fields on the web settings page. The existing `trim_*` values stay glass
-  only. It is untested whether every printer honours the region on the feeder.
+  only. Off by default, because the feeder sometimes pulls a page in skewed.
 - Docker: if the file in `PUSHSCAN_CONFIG` does not exist and its folder
   does, the first start writes a commented example config file there instead
   of stopping with "config file not found".

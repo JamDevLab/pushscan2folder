@@ -322,8 +322,9 @@ showed `trim_right = 1` and `trim_bottom = 2` (mm) remove it. With
 is never scanned. No image processing is involved. Trimming with `trim_*` applies to the
 glass only. Scans from the document feeder have their own values: `--adf-trim`
 (or `PUSHSCAN_ADF_TRIM`, or the `adf_trim_*` keys in `[advanced]`), same syntax
-and limits. It is untested whether every printer honours the scan region on
-the feeder. If less than 1 inch would remain in
+and limits, 0 by default. The TR8550 honours the smaller area on the feeder.
+The feeder sometimes pulls a page in slightly skewed, so a trim there can cut
+off a little of the page; leave it at 0 unless the border bothers you. If less than 1 inch would remain in
 either direction, trimming is skipped and a warning is logged. The setting is
 global, not per target.
 

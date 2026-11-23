@@ -340,8 +340,10 @@ Scanbereich an, sodass der Rand gar nicht erst gescannt wird. Es gibt keine
 Bildverarbeitung. Der Zuschnitt mit `trim_*` gilt nur für das Vorlagenglas. Scans vom
 Dokumenteneinzug haben eigene Werte: `--adf-trim` (oder `PUSHSCAN_ADF_TRIM`, oder
 die `adf_trim_*`-Schlüssel in `[advanced]`), mit gleicher Syntax und gleichen
-Grenzen. Es ist ungetestet, ob jeder Drucker den Scanbereich am Einzug
-übernimmt. Bliebe in einer Richtung weniger als 1 Zoll übrig, wird der
+Grenzen, standardmäßig 0. Der TR8550 hält den kleineren Bereich auch am Einzug
+ein. Der Einzug zieht eine Seite manchmal leicht schräg ein, dann kann ein
+Zuschnitt dort etwas von der Seite abschneiden. Lass ihn auf 0, solange der
+Rand nicht stört. Bliebe in einer Richtung weniger als 1 Zoll übrig, wird der
 Zuschnitt übersprungen und eine Warnung ins Log geschrieben. Die Einstellung ist
 global, nicht pro Ziel.
 
