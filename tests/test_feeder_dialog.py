@@ -148,6 +148,13 @@ class FeederRoundTests(unittest.TestCase):
         self.assertEqual(svc.scan_feeder(ScanSettings(source="adf")), [])
         self.native.ask_next_page.assert_not_called()
 
+    def test_cancelled_later_round_finishes_without_dialog(self):
+        svc = self.service([[fake_jpeg()], [fake_jpeg(width=20)[:-2]]],
+                           [native.NEXT_COLOR, native.NEXT_COLOR])
+        pages = svc.scan_feeder(ScanSettings(source="adf", fmt="jpeg"))
+        self.assertEqual(len(pages), 1)
+        self.assertEqual(self.native.ask_next_page.call_count, 1)
+
     def test_empty_feeder_asks_again_then_gives_up(self):
         svc = self.service([[fake_jpeg()]], [native.NEXT_COLOR] * 5, loaded=lambda: False)
         pages = svc.scan_feeder(ScanSettings(source="adf", fmt="jpeg"))

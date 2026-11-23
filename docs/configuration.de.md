@@ -332,7 +332,8 @@ Glas liegt, spielt keine Rolle.
 
 Ist der Einzug leer, wenn du mehr wählst, schreibt das Programm eine Warnung ins
 Log und fragt erneut. Nach 3 Runden in Folge ohne Seite beendet es den Auftrag.
-Die bisher gescannten Seiten bleiben immer erhalten.
+Stoppst du eine Einzug-Runde am Panel, endet der Auftrag sofort. Die bisher
+gescannten Seiten bleiben immer erhalten.
 
 ### Fotos
 

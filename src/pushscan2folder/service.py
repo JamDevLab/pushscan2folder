@@ -563,12 +563,18 @@ class PushScanService:
         while True:
             docs = self._feeder_round(current, first=not pages)
             complete = [d for d in docs if is_complete(d, "jpeg")]
-            if len(complete) != len(docs):
+            cancelled = len(complete) != len(docs)
+            if cancelled:
                 log.warning("discarded %d incomplete page(s)", len(docs) - len(complete))
             if not pages and not complete:
                 return []          # first round cancelled: no dialog
             pages += complete
             self._pages = len(pages)
+            if cancelled:
+                # Stop on the panel; the printer is still busy and would
+                # refuse the dialog job anyway (DeviceBusy).
+                log.info("feeder scan cancelled on the panel, keeping %d page(s)", len(pages))
+                break
             empty = 0 if complete else empty + 1
             if empty >= MAX_EMPTY_FEEDER_ROUNDS:
                 log.warning("no pages in %d feeder rounds, finishing", empty)

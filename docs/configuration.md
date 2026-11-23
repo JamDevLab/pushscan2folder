@@ -322,8 +322,9 @@ round, and the scan head moves briefly. It does not matter what is on the
 glass.
 
 If the feeder is empty when you choose more, the program logs a warning and
-asks again. After 3 rounds in a row without a page it finishes. The pages
-scanned so far are always kept.
+asks again. After 3 rounds in a row without a page it finishes. Stopping a
+feeder round on the panel ends the job at once. The pages scanned so far are
+always kept.
 
 ### Photos
 
