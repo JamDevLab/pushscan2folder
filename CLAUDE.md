@@ -31,7 +31,7 @@ software. License: AGPL-3.0.
 - `docs/`: user docs, English plus a German `*.de.md` copy of each page;
   `docs/PROTOCOL.md` describes the printer protocol.
 - `packaging/`: PyInstaller entry point and the Inno Setup installer script.
-- `.github/workflows/`: tests (Linux, macOS, Windows; Python 3.11 to 3.13),
+- `.github/workflows/`: tests (Linux and Windows on Python 3.11 and 3.13, plus 3.12 and 3.15 on Linux, macOS on 3.13 only),
   Docker image, Windows release build.
 
 ## Commands
