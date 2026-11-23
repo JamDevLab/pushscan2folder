@@ -6,8 +6,8 @@ Back to the [README](../README.md).
 
 From version 0.2.0 on, a published image is built on each release:
 `ghcr.io/jamdevlab/pushscan2folder`, for linux/amd64 and linux/arm64 (for
-example a Raspberry Pi). The tags are the exact version (`0.2.0`), major.minor
-(`0.2`) and `latest`. You do not need a clone.
+example a Raspberry Pi). The tags are the exact version (`0.3.0`), major.minor
+(`0.3`) and `latest`. You do not need a clone.
 
 ## Docker Compose
 
@@ -26,7 +26,7 @@ docker compose logs -f
 ```
 
 To update, run `docker compose pull && docker compose up -d`. Use `:latest` or
-pin a version, for example `:0.2.0`.
+pin a version, for example `:0.3.0`.
 
 The file looks like this (the web lines are commented out, so the web page is
 off by default):
@@ -34,7 +34,7 @@ off by default):
 ```yaml
 services:
   pushscan2folder:
-    image: ghcr.io/jamdevlab/pushscan2folder:latest   # or a fixed version, e.g. :0.2.0
+    image: ghcr.io/jamdevlab/pushscan2folder:latest   # or a fixed version, e.g. :0.3.0
     restart: unless-stopped
     user: "1000:1000"                    # owner of ./scans and ./config (id -u, id -g)
     environment:

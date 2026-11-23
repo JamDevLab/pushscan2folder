@@ -67,7 +67,7 @@ The `docker-compose.yml` looks like this, so you can see what to change:
 ```yaml
 services:
   pushscan2folder:
-    image: ghcr.io/jamdevlab/pushscan2folder:latest   # or a fixed version, e.g. :0.2.0
+    image: ghcr.io/jamdevlab/pushscan2folder:latest   # or a fixed version, e.g. :0.3.0
     restart: unless-stopped
     user: "1000:1000"                    # owner of ./scans and ./config (id -u, id -g)
     environment:

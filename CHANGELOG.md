@@ -5,6 +5,12 @@ All notable changes are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-11-23
+
+A clearer config file layout, one Windows program with a menu, a web page
+that needs no login on this PC, and photo cut-out for the panel sizes auto
+scan and auto multi scan.
+
 ### Added
 
 - Photos: with the panel document type *Photo* and the size *auto scan* or
