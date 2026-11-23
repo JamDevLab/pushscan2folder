@@ -61,6 +61,8 @@ READ_IMAGE_LENGTH = 0x00100008
 # Bounds for what the printer sends (all pages stay in memory until saved).
 MAX_REPLY = READ_IMAGE_LENGTH + 64 * 1024
 MAX_PAGE_BYTES = 256 * 1024 * 1024
+PAGE_DEADLINE = 30 * 60.0      # seconds for reading one page
+RETRY_DELAY = 0.5              # pause before repeating a failed request
 MAX_PAGES = 200
 MAX_SCAN_BYTES = 1024 * 1024 * 1024   # all pages of one scan together
 
@@ -204,6 +206,7 @@ class NativeScanner:
                 self._close()
                 if attempt == 2:
                     raise
+                time.sleep(RETRY_DELAY)
                 continue
             if resp.status != 200:
                 raise NativeError(f"{method} {PATH}: HTTP {resp.status}")
@@ -249,19 +252,22 @@ class NativeScanner:
     def _read_page(self, keepalive: Callable[[], None], limit: int | None = None) -> bytes:
         limit = MAX_PAGE_BYTES if limit is None else limit
         image = bytearray()
-        idle_since = time.monotonic()
+        started = idle_since = time.monotonic()
         while True:
+            if time.monotonic() - started > PAGE_DEADLINE:
+                raise NativeError(f"page not complete after {PAGE_DEADLINE:.0f} s")
             reply = self.command(OP_READ_IMAGE, READ_IMAGE_LENGTH)
             if len(reply) < 8:
                 raise NativeError(f"short image reply: {reply.hex()}")
             flags = reply[0]
             (size,) = struct.unpack_from(">I", reply, 4)
-            image += reply[8:8 + size]
+            chunk = reply[8:8 + size]
+            image += chunk
             if len(image) > limit:
                 raise NativeError(f"page larger than {limit} bytes (limit)")
             if flags & IMAGE_PAGE_END:
                 return bytes(image)
-            if size:
+            if chunk:   # an empty chunk is no progress, whatever `size` says
                 idle_since = time.monotonic()
             else:
                 if time.monotonic() - idle_since > 120:

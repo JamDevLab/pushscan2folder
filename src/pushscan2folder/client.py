@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import http.client
 import logging
+import time
 
 from . import protocol
 
@@ -17,15 +18,33 @@ class ChmpError(RuntimeError):
     pass
 
 
-def read_body(resp: http.client.HTTPResponse, limit: int, error=RuntimeError) -> bytes:
+# Total time for reading one body. The socket timeout only covers a single
+# recv, so a peer trickling bytes could otherwise hold a read for hours.
+READ_DEADLINE = 600.0
+READ_CHUNK = 64 * 1024
+
+
+def read_body(resp: http.client.HTTPResponse, limit: int, error=RuntimeError,
+              deadline: float | None = None) -> bytes:
     """Read a response body of at most `limit` bytes, so a misbehaving
-    printer cannot fill the memory. Raises `error` if it is larger."""
+    printer cannot fill the memory. Raises `error` if it is larger or if
+    reading takes longer than `deadline` seconds (default READ_DEADLINE)."""
     if resp.length is not None and resp.length > limit:
         raise error(f"response of {resp.length} bytes exceeds the limit of {limit}")
-    data = resp.read(limit + 1)
-    if len(data) > limit:
+    end = time.monotonic() + (READ_DEADLINE if deadline is None else deadline)
+    parts = []
+    total = 0
+    while total <= limit:
+        chunk = resp.read(min(READ_CHUNK, limit + 1 - total))
+        if not chunk:
+            break
+        parts.append(chunk)
+        total += len(chunk)
+        if time.monotonic() > end:
+            raise error("reading the response took too long")
+    if total > limit:
         raise error(f"response exceeds the limit of {limit} bytes")
-    return data
+    return b"".join(parts)
 
 
 class ChmpClient:

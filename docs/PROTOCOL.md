@@ -152,7 +152,10 @@ settings. The scan itself uses eSCL (AirScan), an open HTTP protocol:
    with a `Location` header.
 2. `GET <Location>/NextDocument` until `404`. The platen delivers one
    document; the ADF delivers one PDF with all pages.
-3. `GET /eSCL/ScannerStatus` reports `ScannerAdfLoaded` when paper is in the
+3. If the job does not end with that `404` (an error, a size limit, an empty
+   document), the program sends `DELETE <Location>` (the eSCL way to cancel
+   a job) and ignores its answer. Not yet observed on the TR8550.
+4. `GET /eSCL/ScannerStatus` reports `ScannerAdfLoaded` when paper is in the
    feeder.
 
 Notes for the TR8550:
