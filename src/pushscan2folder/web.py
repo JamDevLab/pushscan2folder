@@ -6,8 +6,8 @@ Plain HTTP, stdlib only. The pages work without JavaScript; one small script
 in-memory sessions (only token hashes are stored), a login lockout per address
 plus a global cap,
 CSRF tokens on every POST form, Origin check and strict response headers.
-Target folders set here must stay inside the base output directory; the
-raw editor enforces the same and cannot change "output" or "printer". Meant
+Target folders set here must stay inside the base folder; the
+raw editor enforces the same and cannot change "folder" or "printer". Meant
 for a trusted LAN only. With PUSHSCAN_WEB_AUTH=0 there is no login at all (password
 None, also the default on a loopback bind without a password): the CSRF token is
 then one per process and the page says so in the nav.
@@ -32,18 +32,19 @@ import sys
 import threading
 import time
 from dataclasses import dataclass, field
+from datetime import datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path, PurePosixPath
 from urllib.parse import parse_qs, urlsplit
 
 from . import SOURCE_URL, __version__, panel
-from .config import (COLORS, FORMATS, SAME_FOLDER, SOURCES, Config, ConfigError, TargetSpec,
-                     dump_config, mode_from_flags,
+from .config import (DEFAULT_AUTO, DEFAULT_INTERVAL, FORMATS, SAME_FOLDER, TRIM_SIDES,
+                     TYPE_FOLDER_KEYS, Config, ConfigError, TargetSpec, dump_config,
                      load_config, load_config_text, parse_config, size_name, write_config)
 from .platform_support import component_problem
 from .protocol import PANEL_CHARS, VISIBLE_NAME_CHARS, check_name
-from .service import (DEFAULT_FILENAME, MULTIPAGE_MODES, RESOLUTIONS, TRIM_MAX_MM,
-                      check_targets, safe_dirname)
+from .service import (DEFAULT_FILENAME, DEFAULT_NEXT_PAGE, DOC_TYPES, RESOLUTIONS,
+                      TRIM_MAX_MM, check_targets, render_folder, safe_dirname)
 from .status import LogBuffer
 
 log = logging.getLogger(__name__)
@@ -65,6 +66,7 @@ LOG_LINES_SHOWN = 500
 MAX_ROWS = 100
 ARIA_CURRENT = ' aria-current="page"'
 MAX_FOLDER_CHARS = 255
+DOC_TYPE_LABELS = {"document": "Document", "auto": "Auto", "photo": "Photo"}
 COOKIE = "p2f_session"
 SECURE_COOKIE = "__Host-p2f_session"  # needs Secure, Path=/ and no Domain
 def _read_resource(name: str) -> bytes:
@@ -101,12 +103,12 @@ def esc(value) -> str:
 class WebContext:
     """What the web page needs to know about the running service.
 
-    targets_from_env: targets come from --targets/PUSHSCAN_TARGETS, which
-    would override the config file again at the next start.
+    printer, folder: the printer address and the base folder in use.
+    next_page: the document types with the next page dialog (global setting).
     config_path: file the editors write (None = unknown, no editing).
-    overrides: config key -> what overrides its file value (environment
-    variable or command line option), shown on the settings page.
-    effective: config key -> the value in use (display text).
+    overrides: config key ("printer" or "folder") -> what overrides its file
+    value (environment variable or command line option), shown on the
+    settings page.
     auth: False when the web page runs without a login (PUSHSCAN_WEB_AUTH=0, or
     no password on a loopback bind). local_only: the bind address is loopback.
     discover_fn: searches the network for scanners (discovery.discover); None
@@ -117,21 +119,15 @@ class WebContext:
     service: object                  # .status, .request_targets()
     log_buffer: LogBuffer
     printer: str
-    output: Path
-    multipage_mode: str = "document"
+    folder: Path
+    next_page: frozenset = DEFAULT_NEXT_PAGE
     config_path: Path | None = None
-    targets_from_env: bool = False
     overrides: dict = field(default_factory=dict)
-    effective: dict = field(default_factory=dict)
     auth: bool = True
     local_only: bool = False         # listens on a loopback address only
     discover_fn: object = None       # () -> list[discovery.Scanner]
     found: list = field(default_factory=list)
     printer_pending: str | None = None   # set from the page, not yet read back
-
-    def default_label(self, key: str, builtin: str) -> str:
-        """The value in use for a setting without a per-target value."""
-        return self.effective.get(key, builtin)
 
     def config_block_reason(self) -> str | None:
         if self.config_path is None:
@@ -140,10 +136,6 @@ class WebContext:
         return None
 
     def edit_block_reason(self) -> str | None:
-        if self.targets_from_env:
-            return ("The targets are set by PUSHSCAN_TARGETS / --targets. That setting "
-                    "would override the config file again at the next start, so editing "
-                    "is disabled. Remove it to edit the targets here.")
         if self.config_path is None:
             return ("No config file is known. Set PUSHSCAN_CONFIG to a writable file "
                     "to edit the targets here.")
@@ -276,50 +268,86 @@ class Sessions:
 # --- target editor model -------------------------------------------------------
 
 _FOLDER_BAD_CHARS = re.compile(r"[\x00-\x1f\x7f\\]")
+SAMPLE_TIME = datetime(2026, 1, 2, 3, 4, 5)   # date fields in folders are tried with this
 
 
-def check_web_folder(value: str, base: Path) -> None:
-    """A folder typed on the web page must be "." (the base output directory
-    itself) or a plain relative path below it: no absolute path, no "." or ".." component, no
-    empty component, no backslash, control character or any of : < > " | ? *
-    (drive letters, NTFS streams, wildcards), no Windows device name (CON,
-    NUL, COM1 ...) and no component ending in a dot or a space. These rules
-    are the same on every platform. Finally (symlinks resolved, UNC paths
-    included) it must end up strictly inside the resolved base. Raises
-    ValueError."""
-    if not value:
-        raise ValueError("folder is empty")
-    if value == SAME_FOLDER:
-        return  # "." alone: straight into the output directory
-    if len(value) > MAX_FOLDER_CHARS:
-        raise ValueError(f"folder is longer than {MAX_FOLDER_CHARS} characters")
+def _check_folder_shape(value: str) -> None:
+    """Structure rules of a typed folder (no file system access). Raises ValueError."""
     if _FOLDER_BAD_CHARS.search(value):
         raise ValueError("folder must not contain backslashes or control characters")
     if value.startswith("/") or PurePosixPath(value).is_absolute():
-        raise ValueError("folder must be relative to the output directory, "
+        raise ValueError("folder must be relative to the base folder, "
                          "absolute paths can only be set in the config file")
-    parts = value.split("/")
-    if any(part in ("", ".", "..") for part in parts):
+    if any(part in ("", ".", "..") for part in value.split("/")):
         raise ValueError('folder must not contain empty, "." or ".." parts')
-    for part in parts:
+
+
+def check_web_folder(value: str, base: Path) -> None:
+    """A folder typed on the web page must be "." (the base folder itself) or
+    a plain relative path below it: no absolute path, no "." or ".."
+    component, no empty component, no backslash, control character or any of
+    : < > " | ? * (drive letters, NTFS streams, wildcards), no Windows device
+    name (CON, NUL, COM1 ...) and no component ending in a dot or a space.
+    These rules are the same on every platform. The folder may contain date
+    fields such as {now:%Y}: the template itself must pass the structure
+    rules, and so must a sample it renders to (a field value is always one
+    safe path part). Finally (symlinks resolved, UNC paths included) the
+    sample must end up strictly inside the resolved base. Raises ValueError."""
+    if not value:
+        raise ValueError("folder is empty")
+    if value == SAME_FOLDER:
+        return  # "." alone: straight into the base folder
+    if len(value) > MAX_FOLDER_CHARS:
+        raise ValueError(f"folder is longer than {MAX_FOLDER_CHARS} characters")
+    _check_folder_shape(value)
+    sample = value
+    if "{" in value or "}" in value:
+        sample = render_folder(value, "scan", SAMPLE_TIME).as_posix()   # raises ValueError
+        _check_folder_shape(sample)
+    for part in sample.split("/"):
         problem = component_problem(part)
         if problem:
             raise ValueError(f"folder part {part!r}: {problem}")
     root = Path(base).resolve(strict=False)
-    resolved = (root / value).resolve(strict=False)
+    resolved = (root / sample).resolve(strict=False)
     if resolved == root or not resolved.is_relative_to(root):
-        raise ValueError("folder resolves outside the output directory (symlink?)")
+        raise ValueError("folder resolves outside the base folder (symlink?)")
+
+
+# Every field of Config and TargetSpec must be classified here. A test compares
+# these lists with dataclasses.fields(), so a new field cannot be forgotten.
+# Config fields the raw editor may change (their values are validated by the
+# config parser, folders of targets by folder_problems).
+WEB_EDITABLE_FIELDS = ("filename", "next_page", "auto", "open_after_scan", "interval",
+                       "verbose", "trim", "adf_trim", "targets")
+# Config fields the web page may not change: where scans go, which printer is
+# used and who can reach the page.
+LOCKED_FIELDS = ("printer", "folder", "web_enabled", "web_bind", "web_port",
+                 "web_password_file")
+WEB_FIELDS = ("web_enabled", "web_bind", "web_port", "web_password_file")
+# TargetSpec fields that hold folders (all checked with check_web_folder) ...
+FOLDER_FIELDS = ("folder", "type_folders")
+# ... and the other ones.
+TARGET_OTHER_FIELDS = ("name", "filename", "next_page", "auto", "open_after_scan")
+
+
+def folder_problems(spec: TargetSpec, base: Path) -> list[str]:
+    """Why the folders of a config file target are not allowed on the web
+    page (empty if all of them pass check_web_folder)."""
+    problems = []
+    for folder in spec.folders():
+        try:
+            check_web_folder(folder, base)
+        except ValueError as exc:
+            problems.append(f"{folder!r}: {exc}")
+    return problems
 
 
 def web_editable(spec: TargetSpec, base: Path) -> bool:
-    """True if the folder of a config file target passes check_web_folder.
+    """True if every folder of a config file target passes check_web_folder.
     Others (absolute paths, "..", symlinks leading out) are set in the
     config file only; the web page shows such targets read-only."""
-    try:
-        check_web_folder(spec.output if spec.output else safe_dirname(spec.name), base)
-    except ValueError:
-        return False
-    return True
+    return not folder_problems(spec, base)
 
 
 def locked_specs(cfg: Config, base: Path) -> dict[str, TargetSpec]:
@@ -330,12 +358,12 @@ def locked_specs(cfg: Config, base: Path) -> dict[str, TargetSpec]:
 @dataclass
 class Row:
     name: str = ""
-    output: str = ""
-    docmp: bool = False
+    folder: str = ""
+    type_folders: dict = field(default_factory=dict)   # document type -> folder text
+    next_page: frozenset = frozenset()   # document types with the next page dialog
     res: str = ""
     fmt: str = ""
     size: str = ""
-    automp: bool = False
     opened: str = ""        # open_after_scan of the target: "yes", "no" or "" = the default
     delete: bool = False
     existing: bool = False
@@ -346,21 +374,17 @@ def _yes_no(flag: bool | None) -> str:
     return "" if flag is None else "yes" if flag else "no"
 
 
-def row_from_spec(spec: TargetSpec, global_mode: str) -> Row:
-    modes = MULTIPAGE_MODES[global_mode]
-    p = spec.preset
+def row_from_spec(spec: TargetSpec, global_next_page: frozenset) -> Row:
     return Row(
-        name=spec.name, output=spec.output or "",
-        docmp=("document" in modes) if spec.document_multipage is None else spec.document_multipage,
-        res=str(p["resolution"]) if "resolution" in p else "",
-        fmt=p.get("fmt", ""), size=size_name(p) or "",
-        automp=("auto" in modes) if spec.auto_multipage is None else spec.auto_multipage,
+        name=spec.name, folder=spec.folder or "", type_folders=dict(spec.type_folders),
+        next_page=global_next_page if spec.next_page is None else spec.next_page,
+        res=str(spec.auto["resolution"]) if "resolution" in spec.auto else "",
+        fmt=spec.auto.get("format", ""), size=spec.auto.get("size", ""),
         opened=_yes_no(spec.open_after_scan), existing=True, orig=spec.name)
 
 
-def blank_row(global_mode: str) -> Row:
-    modes = MULTIPAGE_MODES[global_mode]
-    return Row(docmp="document" in modes, automp="auto" in modes)
+def blank_row(global_next_page: frozenset) -> Row:
+    return Row(next_page=global_next_page)
 
 
 def rows_from_form(form: dict[str, str]) -> list[Row]:
@@ -372,9 +396,11 @@ def rows_from_form(form: dict[str, str]) -> list[Row]:
     for i in range(count):
         def get(key, i=i):
             return form.get(f"{key}_{i}", "")
-        rows.append(Row(name=get("name").strip(), output=get("output").strip(),
-                        docmp=bool(get("docmp")), res=get("res"),
-                        fmt=get("fmt"), size=get("size"), automp=bool(get("automp")),
+        type_folders = {kind: get(TYPE_FOLDER_KEYS[kind]).strip() for kind in DOC_TYPES}
+        rows.append(Row(name=get("name").strip(), folder=get("folder").strip(),
+                        type_folders={k: v for k, v in type_folders.items() if v},
+                        next_page=frozenset(k for k in DOC_TYPES if get(f"np_{k}")),
+                        res=get("res"), fmt=get("fmt"), size=get("size"),
                         opened=get("open"),
                         delete=bool(get("del")), existing=get("existing") == "1",
                         orig=get("orig") if get("existing") == "1" else ""))
@@ -398,12 +424,14 @@ def claim_locked(rows: list[Row], locked: dict[str, TargetSpec]) -> list[str | N
 
 
 def specs_from_rows(rows: list[Row], base: Path,
-                    locked: dict[str, TargetSpec] | None = None
+                    locked: dict[str, TargetSpec] | None = None,
+                    global_next_page: frozenset = DEFAULT_NEXT_PAGE
                     ) -> tuple[list[TargetSpec], list[str]]:
     """Validate the rows like the config file does, and their folders with
     check_web_folder. A row standing for a read-only target (see
     claim_locked) keeps it exactly as in the config file, whatever the form
-    sent; it can only be deleted. Returns (specs, errors)."""
+    sent; it can only be deleted. A row whose next page boxes equal the
+    global list gets next_page None. Returns (specs, errors)."""
     locked = locked or {}
     specs: list[TargetSpec] = []
     errors: list[str] = []
@@ -426,32 +454,38 @@ def specs_from_rows(rows: list[Row], base: Path,
             errors.append(f'{label}: duplicate target name "{row.name}"')
             continue
         seen.add(row.name)
-        output = row.output or None
-        try:
-            check_web_folder(output or safe_dirname(row.name), base)
-        except ValueError as exc:
-            errors.append(f"{label}: {exc}")
-        preset: dict = {}
+        folder = row.folder or None
+        folders = [("", folder or safe_dirname(row.name))]
+        folders += [(f"{kind} folder: ", row.type_folders[kind])
+                    for kind in DOC_TYPES if row.type_folders.get(kind)]
+        for prefix, value in folders:
+            try:
+                check_web_folder(value, base)
+            except ValueError as exc:
+                errors.append(f"{label}: {prefix}{exc}")
+        auto: dict = {}
         if row.res:
             if not row.res.isdigit() or int(row.res) not in RESOLUTIONS:
                 errors.append(f"{label}: invalid resolution {row.res!r}")
             else:
-                preset["resolution"] = int(row.res)
+                auto["resolution"] = int(row.res)
         if row.fmt:
-            if row.fmt not in ("pdf", "jpeg"):
+            if row.fmt not in FORMATS:
                 errors.append(f"{label}: invalid format {row.fmt!r}")
             else:
-                preset["fmt"] = row.fmt
+                auto["format"] = row.fmt
         if row.size:
             if row.size not in panel.REGIONS:
                 errors.append(f"{label}: invalid size {row.size!r}")
             else:
-                preset["width"], preset["height"] = panel.REGIONS[row.size]
+                auto["size"] = row.size
         if row.opened not in ("", "yes", "no"):
             errors.append(f"{label}: invalid open after scan {row.opened!r}")
-        specs.append(TargetSpec(row.name, output=output, preset=preset,
-                                document_multipage=row.docmp, auto_multipage=row.automp,
-                                open_after_scan={"yes": True, "no": False}.get(row.opened)))
+        specs.append(TargetSpec(
+            row.name, folder=folder,
+            type_folders={k: row.type_folders[k] for k in DOC_TYPES if row.type_folders.get(k)},
+            next_page=None if row.next_page == global_next_page else frozenset(row.next_page),
+            auto=auto, open_after_scan={"yes": True, "no": False}.get(row.opened)))
     if not errors and not specs:
         errors.append("At least one target is required.")
     return specs, errors
@@ -469,7 +503,8 @@ def apply_targets(ctx: WebContext, rows: list[Row]) -> tuple[list[TargetSpec], l
     (specs, errors); nothing is written if there are errors. Raises
     ConfigError/OSError; warnings are logged."""
     cfg = read_config(ctx)
-    specs, errors = specs_from_rows(rows, ctx.output, locked_specs(cfg, ctx.output))
+    specs, errors = specs_from_rows(rows, ctx.folder, locked_specs(cfg, ctx.folder),
+                                    cfg.next_page_types())
     if errors:
         return specs, errors
     # The form has no file name field: keep a target's own template from the file.
@@ -478,7 +513,7 @@ def apply_targets(ctx: WebContext, rows: list[Row]) -> tuple[list[TargetSpec], l
         if spec.filename is None and spec.name in on_disk:
             spec.filename = on_disk[spec.name].filename
     cfg.targets = list(specs)
-    targets = cfg.build_targets(ctx.output, ctx.multipage_mode)
+    targets = cfg.build_targets(ctx.folder)
     try:
         warnings = check_targets(targets)
     except ValueError as exc:
@@ -492,43 +527,42 @@ def apply_targets(ctx: WebContext, rows: list[Row]) -> tuple[list[TargetSpec], l
 
 # --- settings form and raw editor model ----------------------------------------------
 
+TRIM_KEYS = tuple(f"{table}_{side}" for table in ("trim", "adf_trim") for side in TRIM_SIDES)
 # Built-in values used when a key is not set anywhere.
-BUILTIN = {"resolution": "300", "color": "color", "format": "pdf", "source": "auto",
-           "size": "a4", "multipage": "document", "interval": "4", "open_after_scan": "no",
+BUILTIN = {"interval": f"{DEFAULT_INTERVAL:g}", "open_after_scan": "no",
            "filename": DEFAULT_FILENAME,
-           "trim_left": "0", "trim_top": "0", "trim_right": "0", "trim_bottom": "0",
-           "adf_trim_left": "0", "adf_trim_top": "0", "adf_trim_right": "0",
-           "adf_trim_bottom": "0"}
-TRIM_KEYS = ("trim_left", "trim_top", "trim_right", "trim_bottom",
-             "adf_trim_left", "adf_trim_top", "adf_trim_right", "adf_trim_bottom")
-# Config keys the settings form edits (top level and [defaults]).
-SETTING_KEYS = ("interval", "ignore_panel", "multipage", "resolution", "color", "format",
-                "source", "size", "open_after_scan", "filename") + TRIM_KEYS
+           "auto_resolution": str(DEFAULT_AUTO["resolution"]),
+           "auto_format": DEFAULT_AUTO["format"], "auto_size": DEFAULT_AUTO["size"],
+           **{key: "0" for key in TRIM_KEYS}}
+# Keys of the settings form. next_page holds the ticked document types, comma
+# separated (empty = none); the other keys are "" when not set.
+SETTING_KEYS = ("interval", "next_page", "auto_resolution", "auto_format", "auto_size",
+                "open_after_scan", "filename") + TRIM_KEYS
 NUMBER_KEYS = ("interval",) + TRIM_KEYS
 
 
 def settings_values(cfg: Config) -> dict[str, str]:
     """Form values (strings) for the settings of a config; "" = not set."""
-    values = {}
-    for key in SETTING_KEYS:
-        value = getattr(cfg, key)
-        if key == "ignore_panel":
-            values[key] = "1" if value else ""
-        elif key == "open_after_scan":
-            values[key] = "" if value is None else "true" if value else "false"
-        else:
-            values[key] = "" if value is None else f"{value:g}" if isinstance(value, float) else str(value)
+    values = {"interval": "" if cfg.interval is None else f"{cfg.interval:g}",
+              "next_page": ",".join(k for k in DOC_TYPES if k in cfg.next_page_types()),
+              "open_after_scan": ("" if cfg.open_after_scan is None
+                                  else "true" if cfg.open_after_scan else "false"),
+              "filename": cfg.filename or ""}
+    for key in ("resolution", "format", "size"):
+        values[f"auto_{key}"] = str(cfg.auto.get(key, ""))
+    for table in ("trim", "adf_trim"):
+        trim = getattr(cfg, table)
+        for side in TRIM_SIDES:
+            amount = getattr(trim, side) if trim else 0
+            values[f"{table}_{side}"] = f"{amount:g}" if amount else ""
     return values
 
 
 def settings_from_form(form: dict[str, str]) -> dict[str, str]:
     values = {key: form.get(key, "").strip() for key in SETTING_KEYS}
-    values["ignore_panel"] = "1" if form.get("ignore_panel") else ""
-    # A check box cannot say "not set": unticked is saved as false.
+    # Check boxes cannot say "not set": unticked is saved as false or as none.
     values["open_after_scan"] = "true" if form.get("open_after_scan") else "false"
-    # Two check boxes; the browser sends only the ticked ones.
-    values["multipage"] = mode_from_flags(bool(form.get("multipage_document")),
-                                          bool(form.get("multipage_auto")))
+    values["next_page"] = ",".join(k for k in DOC_TYPES if form.get(f"next_page_{k}"))
     return values
 
 
@@ -537,42 +571,49 @@ def check_settings(values: dict[str, str]) -> tuple[Config | None, list[str]]:
     so the allowed values and limits are the same). Returns (Config holding
     only these settings, errors)."""
     top: dict = {}
-    defaults: dict = {}
+    auto: dict = {}
     advanced: dict = {}
+    trims: dict[str, dict] = {"trim": {}, "adf_trim": {}}
     for key, text in values.items():
+        if key == "next_page":
+            top["next_page"] = [k for k in text.split(",") if k]
+            continue
         if not text:
             continue
-        value: object = text
+        number: float | None = None
         if key in NUMBER_KEYS:
             try:
-                value = float(text)
+                number = float(text)
             except ValueError:
                 return None, [f'{key}: "{text}" is not a number']
-        elif key == "resolution" and text.isdigit():
-            value = int(text)
-        elif key == "ignore_panel":
-            value = True
+        if key == "interval":
+            advanced[key] = number
+        elif key in TRIM_KEYS:
+            table = "adf_trim" if key.startswith("adf_trim_") else "trim"
+            trims[table][key[len(table) + 1:]] = number
+        elif key == "auto_resolution":
+            auto["resolution"] = int(text) if text.isdigit() else text
+        elif key in ("auto_format", "auto_size"):
+            auto[key[len("auto_"):]] = text
         elif key == "open_after_scan":
-            value = text == "true"
-        if key == "multipage":
-            modes = MULTIPAGE_MODES.get(text)
-            if modes is None:
-                return None, [f'multipage: "{text}" must be one of: '
-                              + ", ".join(MULTIPAGE_MODES)]
-            for kind in ("document", "auto"):
-                defaults[kind] = {"multipage": kind in modes}
-        elif key in ("interval", "ignore_panel") or key in TRIM_KEYS:
-            advanced[key] = value
-        else:
-            defaults[key] = value
-    if defaults:
-        top["defaults"] = defaults
+            top[key] = text == "true"
+        elif key == "filename":
+            top[key] = text
+    if auto:
+        top["auto"] = auto
+    for table, sides in trims.items():
+        if sides:
+            advanced[table] = sides
     if advanced:
         top["advanced"] = advanced
     try:
-        return parse_config(top, "settings"), []
+        cfg = parse_config(top, "settings")
     except ConfigError as exc:
         return None, [str(exc)]
+    # A trim of 0 mm on every side is no trim.
+    cfg.trim = cfg.trim or None
+    cfg.adf_trim = cfg.adf_trim or None
+    return cfg, []
 
 
 def apply_settings(ctx: WebContext, values: dict[str, str]) -> list[str]:
@@ -585,7 +626,8 @@ def apply_settings(ctx: WebContext, values: dict[str, str]) -> list[str]:
     if errors:
         return errors
     cfg = read_config(ctx)
-    for key in SETTING_KEYS:
+    for key in ("interval", "next_page", "auto", "open_after_scan", "filename", "trim",
+                "adf_trim"):
         setattr(cfg, key, getattr(new, key))
     write_config(ctx.config_path, dump_config(cfg))
     return []
@@ -604,32 +646,43 @@ def read_config_text(ctx: WebContext) -> str:
 
 def check_raw_config(ctx: WebContext, new: Config, disk: Config) -> list[str]:
     """What the raw editor must not change: the web page gets no file access
-    beyond the output directory. `disk` is the file as it is now."""
+    beyond the base folder. `disk` is the file as it is now.
+
+    The LOCKED_FIELDS of Config must stay as they are (printer and folder may
+    also be set to the value in use), and every folder of every target must
+    pass check_web_folder unless it is a read-only target that kept exactly
+    its folders. Everything else is checked by the config parser."""
     errors = []
-    if new.output != disk.output and (new.output is None or Path(new.output) != Path(ctx.output)):
-        errors.append('"output" cannot be changed on the web page, only in the file '
-                      "itself or by the environment.")
-    if new.printer != disk.printer and new.printer != ctx.printer:
-        errors.append('"printer" cannot be changed on the web page, only in the file '
-                      "itself or by the environment.")
-    # [web] decides who can reach this page and which file holds the password:
-    # changing it from here could expose the page or point the password at a
-    # file with known content.
-    web_keys = ("web_enabled", "web_bind", "web_port", "web_password_file")
-    if any(getattr(new, k) != getattr(disk, k) for k in web_keys):
-        errors.append('The [web] table cannot be changed on the web page, only in the '
-                      "file itself or with pushscan2folder setup.")
-    locked = locked_specs(disk, ctx.output)
+    for key in LOCKED_FIELDS:
+        old, value = getattr(disk, key), getattr(new, key)
+        if value == old:
+            continue
+        if key == "folder" and value is not None and Path(value) == Path(ctx.folder):
+            continue
+        if key == "printer" and value == ctx.printer:
+            continue
+        if key in WEB_FIELDS:
+            # [web] decides who can reach this page and which file holds the
+            # password: changing it from here could expose the page or point
+            # the password at a file with known content.
+            message = ("The [web] table cannot be changed on the web page, only in the "
+                       "file itself or with pushscan2folder setup.")
+        else:
+            message = (f'"{key}" cannot be changed on the web page, only in the file '
+                       "itself or by the environment.")
+        if message not in errors:
+            errors.append(message)
+    locked = locked_specs(disk, ctx.folder)
     for spec in new.targets:
-        if web_editable(spec, ctx.output):
+        problems = folder_problems(spec, ctx.folder)
+        if not problems:
             continue
         old = locked.get(spec.name)
-        if old is not None and old.output == spec.output:
+        if old is not None and all(getattr(old, f) == getattr(spec, f) for f in FOLDER_FIELDS):
             continue                      # unchanged read-only target
-        errors.append(f'Target "{spec.name}": the output folder '
-                      f'{spec.output or safe_dirname(spec.name)!r} must be a relative path '
-                      f"inside the output directory {str(ctx.output)!r}. Absolute paths and "
-                      '".." can only be set by editing the file itself.')
+        errors.append(f'Target "{spec.name}": {"; ".join(problems)}. Every folder must be a '
+                      f"relative path inside the base folder {str(ctx.folder)!r}. Absolute "
+                      'paths and ".." can only be set by editing the file itself.')
     return errors
 
 
@@ -637,9 +690,9 @@ def apply_raw_config(ctx: WebContext, text: str, base_hash: str) -> tuple[list[s
     """Validate and write the config text from the raw editor. Returns
     (errors, current_text): current_text is set instead of errors when the
     file changed on disk since the form was shown. Nothing is written on an
-    error. Targets are handed to the service (not with PUSHSCAN_TARGETS or
-    without targets in the file); the service reads the rest of the changed
-    file before its next poll cycle, except [web], which needs a restart. Raises
+    error. Targets are handed to the service (not without targets in the
+    file); the service reads the rest of the changed file before its next
+    poll cycle, except [web], which needs a restart. Raises
     OSError/UnicodeDecodeError."""
     disk_text = read_config_text(ctx)
     if text_hash(disk_text) != base_hash:
@@ -657,13 +710,13 @@ def apply_raw_config(ctx: WebContext, text: str, base_hash: str) -> tuple[list[s
     errors = check_raw_config(ctx, new, disk)
     if errors:
         return errors, None
-    targets = new.build_targets(ctx.output, ctx.multipage_mode)
+    targets = new.build_targets(ctx.folder)
     try:
         warnings = check_targets(targets)
     except ValueError as exc:
         return [str(exc)], None
     write_config(ctx.config_path, text)
-    if targets and not ctx.targets_from_env:
+    if targets:
         ctx.service.request_targets(targets)
     for w in warnings:
         log.warning(w)
@@ -771,6 +824,7 @@ label { display:block; margin:8px 0 3px; font-size:.9rem; }
 label.check { display:flex; gap:8px; align-items:center; margin:10px 0 2px; font-size:1rem; }
 .fields { display:grid; grid-template-columns:1fr; gap:0 24px; }
 @media (min-width: 700px) { .fields { grid-template-columns:1fr 1fr; } }
+details.group summary { cursor:pointer; font-weight:600; margin:6px 0; }
 .card.locked { background:var(--soft); }
 .card.locked .locked-info { color:var(--muted); }
 .locked-info p { margin:.4rem 0; }
@@ -920,15 +974,35 @@ def _fmt_time(ts: float) -> str:
     return time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(ts))
 
 
-def _preset_summary(preset: dict) -> str:
-    parts = []
+def _preset_summary(preset: dict, base: dict | None = None) -> str:
+    """Text for the auto scan settings of a target (ScanSettings fields).
+    `base`: the global auto values (config names) that apply where the
+    target sets none."""
+    auto = dict(base or {})
     if "resolution" in preset:
-        parts.append(f"{preset['resolution']} dpi")
+        auto["resolution"] = preset["resolution"]
     if "fmt" in preset:
-        parts.append(preset["fmt"])
+        auto["format"] = preset["fmt"]
     if "width" in preset or "height" in preset:
-        parts.append(size_name(preset) or f"{preset.get('width')}x{preset.get('height')}")
+        auto["size"] = size_name(preset) or f"{preset.get('width')}x{preset.get('height')}"
+    parts = []
+    if "resolution" in auto:
+        parts.append(f"{auto['resolution']} dpi")
+    parts += [str(auto[k]) for k in ("format", "size") if k in auto]
     return ", ".join(parts) or "panel settings"
+
+
+def _next_page_text(types) -> str:
+    names = [kind.capitalize() for kind in DOC_TYPES if kind in types]
+    return ", ".join(names) if names else "none"
+
+
+def _global_auto(ctx: WebContext) -> dict:
+    """The auto settings in use: built-in values and the config file."""
+    try:
+        return read_config(ctx).auto_values()
+    except (ConfigError, OSError, UnicodeDecodeError, AttributeError):
+        return dict(DEFAULT_AUTO)
 
 
 def render_login(message: str = "") -> bytes:
@@ -969,21 +1043,23 @@ def render_status(ctx: WebContext, csrf: str) -> bytes:
         parts.append('<p class="warn">Target changes are pending; they are applied '
                      'before the next poll cycle.</p>')
 
-    modes = MULTIPAGE_MODES.get(ctx.multipage_mode, frozenset())
+    base_auto = _global_auto(ctx)
     rows = []
     long_names = False
     for t in snap["targets"]:
-        eff = frozenset(t.multipage) if t.multipage is not None else modes
-        mp = (f'Document: {"yes" if "document" in eff else "no"}, '
-              f'Auto: {"yes" if "auto" in eff else "no"}')
+        eff = ctx.next_page if t.multipage is None else frozenset(t.multipage)
         long = len(t.name) > VISIBLE_NAME_CHARS
         long_names = long_names or long
-        rows.append(f"<tr><td>{esc(t.name)}{' *' if long else ''}</td><td>{esc(t.outdir)}</td>"
+        folders = esc(t.outdir) + "".join(
+            f'<br><span class="muted">{esc(kind.capitalize())}: {esc(path)}</span>'
+            for kind, path in t.type_dirs)
+        rows.append(f"<tr><td>{esc(t.name)}{' *' if long else ''}</td><td>{folders}</td>"
                     f'<td><span class="pill {"ok" if t.registered else "bad"}">'
                     f'{"yes" if t.registered else "no"}</span></td>'
-                    f"<td>{esc(_preset_summary(t.preset))}</td><td>{esc(mp)}</td></tr>")
+                    f"<td>{esc(_preset_summary(t.preset, base_auto))}</td>"
+                    f"<td>{esc(_next_page_text(eff))}</td></tr>")
     parts.append('<h2>Targets</h2><section class="scroll"><table><thead><tr><th>Name</th><th>Folder</th>'
-                 "<th>Registered</th><th>Auto scan preset</th><th>Multi-page</th></tr></thead><tbody>"
+                 "<th>Registered</th><th>Auto scan settings</th><th>Next page</th></tr></thead><tbody>"
                  + ("".join(rows) or '<tr><td colspan="5">none</td></tr>') + "</tbody></table></section>")
     if long_names:
         parts.append(f'<p class="muted">* The printer panel shows only the first '
@@ -1063,22 +1139,29 @@ def _card_foot(i: int, row: Row, disabled: bool) -> str:
             + "</div>")
 
 
-def _locked_row_html(i: int, count: int, row: Row, spec: TargetSpec, global_mode: str) -> str:
-    """A target whose folder is outside the output directory: read-only."""
-    shown = row_from_spec(spec, global_mode)
-    folder = spec.output if spec.output else f"(default: {safe_dirname(spec.name)})"
+def _locked_row_html(i: int, count: int, row: Row, spec: TargetSpec, global_next_page: frozenset,
+                     base_auto: dict) -> str:
+    """A target with a folder outside the base folder: read-only."""
+    shown = row_from_spec(spec, global_next_page)
+    folder = spec.folder if spec.folder else f"(default: {safe_dirname(spec.name)})"
+    others = "".join(f"<p>{esc(kind.capitalize())} folder: <code>{esc(path)}</code></p>"
+                     for kind, path in spec.type_folders.items())
+    auto = {"resolution": spec.auto.get("resolution", base_auto.get("resolution")),
+            "format": spec.auto.get("format", base_auto.get("format")),
+            "size": spec.auto.get("size", base_auto.get("size"))}
+    auto_text = ", ".join([f"{auto['resolution']} dpi", str(auto["format"]), str(auto["size"])])
     return (
         '<section class="card locked">' + _card_head(esc(spec.name), _tools(i, count, row)) +
         f'<input type="hidden" name="existing_{i}" value="1">'
         f'<input type="hidden" name="orig_{i}" value="{esc(spec.name)}">'
         '<div class="locked-info">'
-        f'<p>Output folder: <code>{esc(folder)}</code></p>'
-        f'<p>This folder is outside the output directory. It is set in the '
+        f'<p>Folder: <code>{esc(folder)}</code></p>{others}'
+        f'<p>At least one folder is outside the base folder. It is set in the '
         f"config file and can only be changed there; the web page keeps this target "
         f"unchanged.</p>"
         f"<p>Open after a scan: {esc(_yes_no(spec.open_after_scan) or 'default')}. "
-        f"Auto scan preset: {esc(_preset_summary(spec.preset))}. Multi-page dialog: "
-        f'Document {"yes" if shown.docmp else "no"}, Auto scan {"yes" if shown.automp else "no"}.</p>'
+        f"Auto scan settings: {esc(auto_text)}. Next page dialog: "
+        f"{esc(_next_page_text(shown.next_page))}.</p>"
         "</div>" + _card_foot(i, row, False) + "</section>")
 
 
@@ -1089,7 +1172,7 @@ def _row_html(i: int, count: int, row: Row, disabled: bool,
     defaults = defaults or {}
 
     def keep(key: str, suffix: str = "") -> list[tuple[str, str]]:
-        return [("", f"Default ({defaults.get(key, BUILTIN[key])}{suffix})")]
+        return [("", f"Default ({defaults.get(key, BUILTIN.get(key, ''))}{suffix})")]
 
     def label(text: str, name: str) -> str:
         return f'<label for="{name}_{i}">{text}</label>'
@@ -1098,8 +1181,20 @@ def _row_html(i: int, count: int, row: Row, disabled: bool,
         return _select(f"{name}_{i}", current, options, disabled).replace(
             "<select ", f'<select id="{name}_{i}" ', 1)
 
+    def text_input(name: str, value: str) -> str:
+        return (f'<input type="text" id="{name}_{i}" name="{name}_{i}" value="{esc(value)}" '
+                f'maxlength="{MAX_FOLDER_CHARS}"{off}>')
+
     off = " disabled" if disabled else ""
     title = esc(row.name) if row.name else "New target"
+    type_boxes = "".join(
+        _check(f"np_{kind}_{i}", kind in row.next_page, DOC_TYPE_LABELS[kind], disabled)
+        for kind in DOC_TYPES)
+    type_folders = "".join(
+        label(f"{esc(DOC_TYPE_LABELS[kind])}: folder", TYPE_FOLDER_KEYS[kind])
+        + text_input(TYPE_FOLDER_KEYS[kind], row.type_folders.get(kind, ""))
+        for kind in DOC_TYPES)
+    open_type_folders = " open" if row.type_folders else ""
     return (
         '<section class="card">' + _card_head(title, _tools(i, count, row)) +
         f'<input type="hidden" name="existing_{i}" value="{"1" if row.existing else "0"}">'
@@ -1107,24 +1202,36 @@ def _row_html(i: int, count: int, row: Row, disabled: bool,
         + '<div class="fields"><div class="group"><h3>Panel name and folder</h3>'
         + label("Name (panel entry)", "name")
         + f'<input type="text" id="name_{i}" name="name_{i}" value="{esc(row.name)}" maxlength="31"{off}>'
-        + label("Output folder below the output directory (empty = default)", "output")
-        + f'<input type="text" id="output_{i}" name="output_{i}" value="{esc(row.output)}" '
-        f'maxlength="{MAX_FOLDER_CHARS}"{off}>'
+        + label("Folder below the base folder (empty = the name of the entry)", "folder")
+        + text_input("folder", row.folder)
+        + '<p class="hint">Date fields such as <code>{now:%Y}</code> are allowed.</p>'
         + label("Open after a scan (desktop PC only)", "open")
         + sel("open", row.opened, keep("open_after_scan")
               + [("yes", "Yes"), ("no", "No")])
-        + '</div><div class="group"><h3>Auto scan preset</h3><p class="hint">Empty = the default of the '
+        + '</div><div class="group"><h3>Auto scan settings</h3><p class="hint">For the panel '
+        'document type "Auto". Empty = the default of the '
         '<a href="/settings">Settings</a> page.</p>'
         + label("Resolution", "res")
-        + sel("res", row.res, keep("resolution", " dpi") + [(str(r), f"{r} dpi") for r in RESOLUTIONS])
+        + sel("res", row.res, keep("auto_resolution", " dpi") + [(str(r), f"{r} dpi") for r in RESOLUTIONS])
         + label("Format", "fmt")
-        + sel("fmt", row.fmt, keep("format") + [("pdf", "pdf"), ("jpeg", "jpeg")])
+        + sel("fmt", row.fmt, keep("auto_format") + [(f, f) for f in FORMATS])
         + label("Size", "size")
-        + sel("size", row.size, keep("size") + [(s, s) for s in panel.REGIONS])
-        + '</div></div><div class="group"><h3>Multi-page dialog</h3><div class="checks">'
-        + _check(f"docmp_{i}", row.docmp, 'Multi-page dialog for "Document"', disabled)
-        + _check(f"automp_{i}", row.automp, 'Multi-page dialog for "Auto scan"', disabled)
-        + "</div></div>" + _card_foot(i, row, disabled) + "</section>")
+        + sel("size", row.size, keep("auto_size") + [(s, s) for s in panel.REGIONS])
+        + '</div></div><div class="group"><h3>Next page dialog</h3><p class="hint">'
+        "For these panel document types a glass scan asks for further pages.</p>"
+        '<div class="checks">' + type_boxes + "</div></div>"
+        + f'<details class="group"{open_type_folders}><summary>Other folder per document type'
+        "</summary><p class=\"hint\">Empty = the folder above. Same rules as the folder above.</p>"
+        '<div class="fields">' + type_folders + "</div></details>"
+        + _card_foot(i, row, disabled) + "</section>")
+
+
+def _defaults_for_rows(cfg: Config) -> dict[str, str]:
+    """Texts of the "Default (...)" entries: the file's values, else built-in."""
+    auto = cfg.auto_values()
+    return {"auto_resolution": str(auto["resolution"]), "auto_format": auto["format"],
+            "auto_size": auto["size"],
+            "open_after_scan": "yes" if cfg.open_after_scan else "no"}
 
 
 def render_targets(ctx: WebContext, csrf: str, rows: list[Row] | None = None,
@@ -1145,11 +1252,11 @@ def render_targets(ctx: WebContext, csrf: str, rows: list[Row] | None = None,
 
     parts.append(f'<p class="muted">Source: config file <code>{esc(ctx.config_path)}</code>'
                  + ("" if ctx.config_path.exists() else " (does not exist yet; saving creates it)")
-                 + ". Only targets are edited here; the scan defaults and other settings are "
+                 + ". Only targets are edited here; the global settings are "
                  'on the <a href="/settings">Settings</a> page. Saving rewrites the file and '
                  "<strong>comments in it are not preserved</strong>. Folders typed here are always created below the "
-                 f"output directory <code>{esc(ctx.output)}</code> (<code>.</code> means the "
-                 "output directory itself); absolute paths and "
+                 f"base folder <code>{esc(ctx.folder)}</code> (<code>.</code> means the "
+                 "base folder itself); absolute paths and "
                  "<code>..</code> can only be set in the config file. Allowed name characters: "
                  f"{esc(PANEL_CHARS)} (max. 31).</p>")
     try:
@@ -1159,14 +1266,13 @@ def render_targets(ctx: WebContext, csrf: str, rows: list[Row] | None = None,
                      f"{esc(exc)}</section>")
         return _page("Targets", "".join(parts), nav=_nav(ctx, csrf, "targets"))
     if rows is None:
-        rows = [row_from_spec(s, ctx.multipage_mode) for s in cfg.targets]
+        rows = [row_from_spec(s, cfg.next_page_types()) for s in cfg.targets]
         if not rows:
-            rows = [blank_row(ctx.multipage_mode)]
-    locked = locked_specs(cfg, ctx.output)
+            rows = [blank_row(ctx.next_page)]
+    locked = locked_specs(cfg, ctx.folder)
     claims = claim_locked(rows, locked)
     n = len(rows)
-    defaults = {k: ctx.default_label(k, BUILTIN[k])
-                for k in ("resolution", "color", "format", "size", "open_after_scan")}
+    defaults = _defaults_for_rows(cfg)
     # Pressing Enter in a text field "clicks" the first submit button of the form, so
     # the first button must be Save (visually hidden, the visible one is in the bar below).
     dirty_attr = ' data-dirty="1"' if dirty else ""
@@ -1175,8 +1281,9 @@ def render_targets(ctx: WebContext, csrf: str, rows: list[Row] | None = None,
             f'value="{esc(csrf)}"><input type="hidden" name="rows" value="{n}">'
             '<button type="submit" name="op" value="save" class="sr-only" tabindex="-1" '
             'aria-hidden="true">Save</button>']
-    form += [_locked_row_html(i, n, r, locked[c], ctx.multipage_mode) if c is not None
-             else _row_html(i, n, r, False, defaults) for i, (r, c) in enumerate(zip(rows, claims))]
+    form += [_locked_row_html(i, n, r, locked[c], cfg.next_page_types(), cfg.auto_values())
+             if c is not None else _row_html(i, n, r, False, defaults)
+             for i, (r, c) in enumerate(zip(rows, claims))]
     form.append('<div class="savebar"><button type="submit" name="op" value="save">Save</button>'
                 '<span id="unsaved" class="badge" hidden>Unsaved changes</span>'
                 '<button type="submit" name="op" value="add" class="secondary">Add target</button>'
@@ -1187,15 +1294,10 @@ def render_targets(ctx: WebContext, csrf: str, rows: list[Row] | None = None,
 
 # --- settings and raw config pages ---------------------------------------------------
 
-def _field(label: str, control: str, key: str, help_text: str, ctx: WebContext) -> str:
-    note = ""
-    if key in ctx.overrides:
-        note = (f'<p class="override">Overridden by {esc(ctx.overrides[key])}. In use: '
-                f'<code>{esc(ctx.effective.get(key, "?"))}</code>. The value saved here has '
-                "no effect while that is set.</p>")
+def _field(label: str, control: str, key: str, help_text: str) -> str:
     control = control.replace(f'name="{key}"', f'name="{key}" id="f-{key}"', 1)
     return (f'<div><label for="f-{key}">{esc(label)}</label>{control}'
-            f'<p class="hint">{esc(help_text)}</p>{note}</div>')
+            f'<p class="hint">{esc(help_text)}</p></div>')
 
 
 def _text_input(name: str, value: str, placeholder: str, numeric: bool = True) -> str:
@@ -1209,17 +1311,17 @@ def _setting_select(key: str, value: str, options: list[tuple[str, str]]) -> str
     return _select(key, value, unset + options, False)
 
 
-def _multipage_field(mode: str, ctx: WebContext) -> str:
-    """Two check boxes, one per panel document type ([defaults.document] and
-    [defaults.auto] multipage). An unset mode shows the built-in one."""
-    modes = MULTIPAGE_MODES.get(mode or BUILTIN["multipage"], frozenset())
-    boxes = (_check("multipage_document", "document" in modes, 'Document type "Document"', False)
-             + _check("multipage_auto", "auto" in modes, 'Document type "Auto"', False))
-    field = _field("Multi-page dialog", boxes, "multipage",
+def _next_page_field(types: str) -> str:
+    """One check box per panel document type. `types`: the ticked ones, comma separated."""
+    ticked = set(types.split(","))
+    boxes = "".join(_check(f"next_page_{kind}", kind in ticked,
+                           f'Document type "{DOC_TYPE_LABELS[kind]}"', False)
+                    for kind in DOC_TYPES)
+    field = _field("Next page dialog", boxes, "next_page",
                    "For these panel document types a glass scan asks for further pages "
-                   '(one multi-page PDF). "Photo" never asks. Targets can override it.', ctx)
+                   "(one multi-page file). Targets can set their own list.")
     # no single control to point the label at: name the group instead
-    return field.replace('<label for="f-multipage">', '<label id="f-multipage">', 1)
+    return field.replace('<label for="f-next_page">', '<label id="f-next_page">', 1)
 
 
 def _printer_html(ctx: WebContext, csrf: str, scanners: list | None) -> str:
@@ -1298,9 +1400,9 @@ def render_settings(ctx: WebContext, csrf: str, values: dict[str, str] | None = 
                  "directly</a> keeps comments.</p>")
 
     ro = [_printer_html(ctx, csrf, scanners)]
-    note = (f' Overridden by {esc(ctx.overrides["output"])}.' if "output" in ctx.overrides
+    note = (f' Overridden by {esc(ctx.overrides["folder"])}.' if "folder" in ctx.overrides
             else "")
-    ro.append(f'<p class="ro">Output folder: <code>{esc(ctx.output)}</code></p>'
+    ro.append(f'<p class="ro">Base folder: <code>{esc(ctx.folder)}</code></p>'
               f'<p class="hint">Not editable here. Change it in the config file.{note}</p>')
     try:
         disk = read_config(ctx)
@@ -1318,57 +1420,48 @@ def render_settings(ctx: WebContext, csrf: str, values: dict[str, str] | None = 
 
     sel = _setting_select
     scan = [
-        _field("Resolution", sel("resolution", v("resolution"),
-                                 [(str(r), f"{r} dpi") for r in RESOLUTIONS]), "resolution",
-               "Used where the printer panel sends no resolution, and always with "
-               '"Ignore panel". Higher is sharper but makes bigger files.', ctx),
-        _field("Colour", sel("color", v("color"), [(c, c) for c in COLORS]), "color",
-               "Colour mode, only used with \"Ignore panel\" (or if the panel sends none), "
-               "because the panel always sends the colour of the start button.", ctx),
-        _field("Format", sel("format", v("format"), [(f, f) for f in FORMATS]), "format",
-               "File type of the scan (pdf or jpeg), same rule as the resolution.", ctx),
-        _field("Source", sel("source", v("source"), [(x, x) for x in SOURCES]), "source",
-               "Where the paper is: auto uses the document feeder if paper is loaded, "
-               "else the glass (platen).", ctx),
-        _field("Paper size", sel("size", v("size"), [(n, n) for n in panel.REGIONS]), "size",
-               "Scanned area, used where the panel sends no size.", ctx),
+        _field("Resolution", sel("auto_resolution", v("auto_resolution"),
+                                 [(str(r), f"{r} dpi") for r in RESOLUTIONS]), "auto_resolution",
+               "Higher is sharper but makes bigger files."),
+        _field("Format", sel("auto_format", v("auto_format"), [(f, f) for f in FORMATS]),
+               "auto_format", "File type of the scan (pdf or jpeg)."),
+        _field("Paper size", sel("auto_size", v("auto_size"), [(n, n) for n in panel.REGIONS]),
+               "auto_size", "Scanned area."),
     ]
     trims = [
         _field(f"Trim {side} (mm)", _text_input(f"trim_{side}", v(f"trim_{side}"), "0"),
                f"trim_{side}", f"Cuts this border off by scanning a smaller area, 0 to "
                f"{TRIM_MAX_MM:g} mm. Glass only; the document feeder has its own fields "
-               "below.", ctx)
-        for side in ("left", "top", "right", "bottom")]
+               "below.")
+        for side in TRIM_SIDES]
     adf_trims = [
         _field(f"Trim {side} (mm)", _text_input(f"adf_trim_{side}", v(f"adf_trim_{side}"), "0"),
                f"adf_trim_{side}", "Cuts this border off feeder scans by scanning a smaller "
-               f"area, 0 to {TRIM_MAX_MM:g} mm.", ctx)
-        for side in ("left", "top", "right", "bottom")]
+               f"area, 0 to {TRIM_MAX_MM:g} mm.")
+        for side in TRIM_SIDES]
     behaviour = [
-        _multipage_field(v("multipage"), ctx),
-        _field("Poll interval (seconds)", _text_input("interval", v("interval"), "4"),
+        _next_page_field(v("next_page")),
+        _field("Poll interval (seconds)", _text_input("interval", v("interval"), BUILTIN["interval"]),
                "interval", "How often the printer is asked for scan requests. Must be "
-               "greater than 0.", ctx),
+               "greater than 0."),
         _field("File name", _text_input("filename", v("filename"), DEFAULT_FILENAME, numeric=False),
                "filename", "Name of a scan without extension. Fields: {name} (panel "
                "name), {date} (2026-11-22), {time} (183000) and {now:...} with strftime "
                "codes. An existing file is never overwritten, a -1, -2 ... is added. "
-               "Targets can set their own in the config file.", ctx),
+               "Targets can set their own in the config file."),
         _field("Open after scan", _check("open_after_scan", v("open_after_scan") == "true",
                                          "Open the folder after each scan", False),
                "open_after_scan", "On Windows the new file is selected in Explorer. Only "
                "works when the program runs on a desktop PC with a logged-in user, not in "
-               "Docker or on a server. Targets can override it.", ctx),
-        _field("Ignore panel", _check("ignore_panel", bool(v("ignore_panel")),
-                                      "Always use the values above", False),
-               "ignore_panel", "Off: the choices made on the printer panel (colour, size, "
-               "format, ...) are used. On: they are ignored.", ctx),
+               "Docker or on a server. Targets can override it."),
     ]
     dirty_attr = " data-dirty=\"1\"" if dirty else ""
     form = (f'<form id="settings-form" method="post" action="/settings" data-warn-unsaved'
             f'{dirty_attr}><input type="hidden" name="csrf" value="{esc(csrf)}">'
-            '<h2>Scan defaults</h2><section><p class="muted">Used when neither the printer '
-            "panel nor the target (Auto scan preset) sets a value.</p>"
+            '<h2>Auto scan settings</h2><section><p class="muted">For the panel document '
+            'type "Auto", where the printer panel sends only the type, the colour and the '
+            'source. With "Document" and "Photo" the panel sets size, format and '
+            "resolution. Targets can set their own values.</p>"
             '<div class="fields">' + "".join(scan) + "</div></section>"
             "<h2>Trim</h2><section>" '<div class="fields">' + "".join(trims) + "</div></section>"
             "<h2>Trim, document feeder (ADF)</h2><section>" '<div class="fields">'
@@ -1408,9 +1501,9 @@ def render_config(ctx: WebContext, csrf: str, text: str | None = None,
                  '<a href="/targets">Targets</a> and <a href="/settings">Settings</a> forms '
                  "rewrite the file and drop comments. The file is checked like at startup "
                  "and nothing is written if it is invalid.</p>"
-                 '<p class="muted">Rules for the web page: "output" and "printer" cannot be '
-                 "changed here. A target folder must be a relative path inside the output "
-                 f"directory <code>{esc(ctx.output)}</code>; a target with an absolute path or "
+                 '<p class="muted">Rules for the web page: "folder" and "printer" cannot be '
+                 "changed here. Every folder of a target must be a relative path inside the "
+                 f"base folder <code>{esc(ctx.folder)}</code>; a target with an absolute path or "
                  '".." can only stay as it is in the file. Changes apply within a poll '
                  "cycle, except the [web] table, which needs a restart. The size limit is "
                  f"{MAX_BODY // 1024} KB. Press Escape, then Tab, to leave the text field "
@@ -1882,7 +1975,7 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(400, render_targets(
                     ctx, csrf, rows=rows, dirty=True,
                     errors=[f"At most {MAX_ROWS} targets are possible."]))
-            rows.append(blank_row(ctx.multipage_mode))
+            rows.append(blank_row(ctx.next_page))
         elif match:
             kind, i = match.group(1), int(match.group(2))
             if i >= len(rows):

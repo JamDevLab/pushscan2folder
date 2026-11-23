@@ -19,7 +19,7 @@ RUN_KEY = r"HKCU\Software\Microsoft\Windows\CurrentVersion\Run"
 VALUE_NAME = "pushscan2folder"
 # Options whose value is a path; made absolute because the autostart entry
 # does not run in the current directory.
-PATH_OPTIONS = ("--config", "--log-file", "--output")
+PATH_OPTIONS = ("--config", "--log-file", "--folder")
 COMMANDS = ("run", "probe", "scan", "start")
 # Marks a start from the logon entry: its console must never wait for Enter.
 NO_PAUSE = "--no-pause"

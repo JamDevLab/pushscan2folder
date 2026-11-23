@@ -9,14 +9,31 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 from pushscan2folder import escl, protocol
+from pushscan2folder.config import Config, TargetSpec
 from pushscan2folder.client import ChmpClient
 from pushscan2folder.escl import EsclClient, ScanSettings
 from pushscan2folder.service import (PushScanService, Target, Trim, check_targets, save_files,
-                                     render_filename, check_filename,
-                                     parse_trim,
-                                    parse_targets, safe_dirname)
+                                     render_filename, check_filename, render_folder,
+                                     check_folder, parse_trim, safe_dirname)
+from pushscan2folder.native import NativeScanner
 
 SESSION = 0x2DB
+
+
+def parse_targets(spec, base):
+    """"a,b" -> two targets with the folders base/a and base/b."""
+    return [Target(n.strip(), Path(base) / safe_dirname(n.strip())) for n in spec.split(",")]
+
+
+def panel_bytes(doc_type=1, color=1, source=1, size=1, fmt=3, res=3):
+    """32 bytes of interrupt data (see docs/PROTOCOL.md): offset 6 is the
+    document type (1 document, 2 photo, 3 auto)."""
+    data = bytearray(32)
+    data[4] = data[5] = 1
+    data[6], data[7], data[8] = doc_type, color, source
+    if doc_type != 3:
+        data[10], data[11], data[12], data[13], data[14], data[15] = size, fmt, res, 1, 1, 1
+    return bytes(data)
 
 
 class FakePrinter(BaseHTTPRequestHandler):
@@ -314,6 +331,48 @@ class ServiceTests(unittest.TestCase):
         self.assertFalse((base / "scan1").exists())
         self.assertFalse((base / "archiv").exists())
 
+    def scan_with(self, target, interrupt):
+        service = self.make_service([target])
+        FakePrinter.state.update(pending=True, interrupt=interrupt)
+        service.step()
+        return service
+
+    def test_scan_goes_into_the_folder_of_its_document_type(self):
+        base = Path(self.tmp.name)
+        target = Target("A", base / "main", type_dirs={"photo": base / "pics",
+                                                      "document": base / "docs"})
+        for doc_type, folder in ((1, "docs"), (2, "pics"), (3, "main")):
+            self.scan_with(target, panel_bytes(doc_type, size=8))
+            self.assertEqual(len(list((base / folder).iterdir())), 1, folder)
+        self.assertEqual(sorted(p.name for p in base.iterdir() if p.is_dir()),
+                         ["docs", "main", "pics"])
+
+    def test_outdir_is_used_without_type_folder_or_panel(self):
+        base = Path(self.tmp.name)
+        target = Target("A", base / "main", type_dirs={"photo": base / "pics"})
+        self.scan_with(target, panel_bytes(1))
+        self.assertEqual(len(list((base / "main").iterdir())), 1)
+        self.assertFalse((base / "pics").exists())
+        service = self.scan_with(target, bytes(32))   # no document type in the panel data
+        self.assertEqual(len(list((base / "main").iterdir())), 2)
+        service.use_panel = False
+        FakePrinter.state.update(pending=True, interrupt=panel_bytes(2, size=8))
+        service.step()
+        self.assertFalse((base / "pics").exists())
+
+    def test_folder_template_creates_the_year_folder(self):
+        base = Path(self.tmp.name)
+        self.scan_with(Target("A", base / "A" / "{now:%Y}"), panel_bytes(1))
+        year = str(datetime.now().year)
+        self.assertEqual(len(list((base / "A" / year).iterdir())), 1)
+        self.assertEqual([p.name for p in (base / "A").iterdir()], [year])
+
+    def test_type_folder_template(self):
+        base = Path(self.tmp.name)
+        target = Target("A", base / "A", type_dirs={"photo": base / "{name}_{now:%Y}"})
+        self.scan_with(target, panel_bytes(2, size=8))
+        self.assertEqual(len(list((base / f"A_{datetime.now().year}").iterdir())), 1)
+
     def test_multiple_targets_all_released(self):
         service = self.make_service(parse_targets("a,b", Path(self.tmp.name)))
         service.step()
@@ -323,56 +382,30 @@ class ServiceTests(unittest.TestCase):
         self.assertEqual(sorted(released), [SESSION, SESSION + 1])
 
 
-class TargetParsingTests(unittest.TestCase):
-    def test_names_and_dirs(self):
-        base = Path("/scans")
-        t = parse_targets(" scan1 , paperless=consume ,archiv=/data/archiv,Mein Ordner", base)
+class TargetTests(unittest.TestCase):
+    def test_build_targets_names_and_dirs(self):
+        cfg = Config(targets=[TargetSpec("scan1"), TargetSpec("paperless", folder="consume"),
+                              TargetSpec("archiv", folder="/data/archiv"),
+                              TargetSpec("Mein Ordner")])
+        t = cfg.build_targets(Path("/scans"))
         self.assertEqual([x.name for x in t], ["scan1", "paperless", "archiv", "Mein Ordner"])
         self.assertEqual([x.outdir for x in t],
                          [Path(p) for p in ("/scans/scan1", "/scans/consume", "/data/archiv",
                                             "/scans/Mein_Ordner")])
 
-    def test_invalid(self):
-        for spec in ("", " , ", "a,a", "=dir", "x" * 32):
-            with self.assertRaises(ValueError, msg=spec):
-                parse_targets(spec, Path("/s"))
-
-    def test_presets(self):
-        t = parse_targets("scan1, paperless=/consume@300dpi, archiv@600dpi+JPEG+10x15+mp:both,"
-                          "Mein Ordner@mp:off", Path("/scans"))
-        self.assertEqual([x.name for x in t], ["scan1", "paperless", "archiv", "Mein Ordner"])
-        self.assertEqual(t[1].outdir, Path("/consume"))
-        self.assertEqual(t[2].outdir, Path("/scans/archiv"))
-        self.assertEqual(t[0].preset, {})
-        self.assertIsNone(t[0].multipage)
-        self.assertEqual(t[1].preset, {"resolution": 300})
-        self.assertEqual(t[2].preset, {"resolution": 600, "fmt": "jpeg", "width": 1181, "height": 1772})
-        self.assertEqual(t[2].multipage, frozenset({"document", "auto"}))
-        self.assertEqual(t[3].multipage, frozenset())
-
-    def test_invalid_names(self):
-        for spec in ("a.b", "Müller", "x&y=dir"):
-            with self.assertRaises(ValueError, msg=spec):
-                parse_targets(spec, Path("/s"))
-
     def test_clashing_folders(self):
         with self.assertRaises(ValueError) as cm:
-            check_targets(parse_targets("Mein Ordner,Mein_Ordner", Path("/s")))
+            check_targets(Config(targets=[TargetSpec("Mein Ordner"), TargetSpec("Mein_Ordner")])
+                          .build_targets(Path("/s")))
         self.assertIn("both use the folder", str(cm.exception))
         with self.assertRaises(ValueError):
-            check_targets(parse_targets("a=x,b=x", Path("/s")))
-        self.assertEqual(check_targets(parse_targets("a,b=x", Path("/s"))), [])
+            check_targets([Target("a", Path("/s/x")), Target("b", Path("/s/x"))])
+        self.assertEqual(check_targets([Target("a", Path("/s/a")), Target("b", Path("/s/x"))]), [])
 
     def test_long_name_warning(self):
-        warnings = check_targets(parse_targets("y" * 26, Path("/s")))
+        warnings = check_targets([Target("y" * 26, Path("/s"))])
         self.assertEqual(len(warnings), 1)
         self.assertIn("panel shows only the start", warnings[0])
-
-    def test_invalid_presets(self):
-        for spec in ("a@200dpi", "a@blue", "a@mp:never", "a=/x@y/z", "a@", "a@gray", "a@color",
-                     "a@gray+300dpi", "x" * 32 + "@300dpi"):
-            with self.assertRaises(ValueError, msg=spec):
-                parse_targets(spec, Path("/s"))
 
     def test_safe_dirname(self):
         self.assertEqual(safe_dirname("../etc"), "etc")
@@ -385,6 +418,47 @@ class TargetParsingTests(unittest.TestCase):
             self.assertEqual(safe_dirname(name), expected, name)
 
 
+class RenderFolderTests(unittest.TestCase):
+    NOW = datetime(2026, 11, 22, 18, 30, 5)
+
+    def test_fields(self):
+        self.assertEqual(render_folder("/s/{now:%Y}/{now:%m}", "x", self.NOW), Path("/s/2026/11"))
+        self.assertEqual(render_folder("Docs/{name}/{date}/{time}", "My PC", self.NOW),
+                         Path("Docs/My_PC/2026-11-22/183005"))
+        self.assertEqual(render_folder("{now:%Y-%m}", "x", self.NOW), Path("2026-11"))
+
+    def test_no_braces_is_unchanged(self):
+        for text in ("/scans/a", "rel/dir", "a b/ü", "../up", "."):
+            self.assertEqual(render_folder(text, "x", self.NOW), Path(text))
+        self.assertEqual(render_folder(Path("/s/a"), "x", self.NOW), Path("/s/a"))
+
+    def test_windows_path_is_kept(self):
+        # the separators and the drive colon of the template itself stay
+        self.assertEqual(str(render_folder("C:\\Scans\\{now:%Y}", "x", self.NOW)),
+                         str(Path("C:\\Scans\\2026")))
+        self.assertEqual(str(render_folder("C:\\Scans\\plain", "x", self.NOW)),
+                         str(Path("C:\\Scans\\plain")))
+
+    def test_a_field_cannot_add_path_parts(self):
+        for fmt in ("../x", "..", ".", "a/b", "a\\b", "..\\..\\x"):
+            out = render_folder("/base/{now:%s}" % fmt, "x", self.NOW)
+            self.assertEqual(out.parent, Path("/base"), fmt)
+            self.assertNotIn("..", out.parts)
+        self.assertEqual(render_folder("/base/{now:../x}", "x", self.NOW), Path("/base/_x"))
+        self.assertEqual(render_folder("/base/{now:..}", "x", self.NOW).parent, Path("/base"))
+        self.assertNotEqual(render_folder("/base/{now:..}", "x", self.NOW), Path("/"))
+        self.assertEqual(render_folder("/base/{name}", "../..", self.NOW).parent, Path("/base"))
+
+    def test_bad_fields(self):
+        for bad in ("{foo}", "{0}", "{}", "{now.__class__}", "{now:{x}}", "{", "}", "{name[0]}"):
+            with self.assertRaises(ValueError, msg=bad):
+                render_folder("/s/" + bad, "x", self.NOW)
+            with self.assertRaises(ValueError, msg=bad):
+                check_folder("/s/" + bad)
+        check_folder("/s/{name}/{now:%Y}")
+        check_folder("/plain")
+
+
 class PresetPrecedenceTests(unittest.TestCase):
     AUTO_COLOR = bytes.fromhex("0000000001010301010000000000000000000000000000000000000000000000")
     AUTO_GRAY = bytes.fromhex("0000000001010302010000000000000000000000000000000000000000000000")
@@ -393,14 +467,14 @@ class PresetPrecedenceTests(unittest.TestCase):
     def setUp(self):
         self.service = PushScanService(None, None, [], ScanSettings(resolution=300),
                                        auto_source=False)
-        self.target = parse_targets("p@150dpi+jpeg", Path("/s"))[0]
+        self.target = Target("p", Path("/s"), preset={"resolution": 150, "fmt": "jpeg"})
 
     def test_auto_scan_uses_preset_over_panel(self):
         s = self.service.settings_for(self.AUTO_COLOR, self.target)
         self.assertEqual((s.color, s.resolution, s.fmt), ("color", 150, "jpeg"))
 
     def test_auto_scan_keeps_panel_colour(self):
-        target = parse_targets("p@600dpi", Path("/s"))[0]
+        target = Target("p", Path("/s"), preset={"resolution": 600})
         s = self.service.settings_for(self.AUTO_GRAY, target)
         self.assertEqual((s.color, s.resolution), ("gray", 600))
         s = self.service.settings_for(self.AUTO_COLOR, target)
@@ -415,16 +489,54 @@ class PresetPrecedenceTests(unittest.TestCase):
         self.assertEqual((s.color, s.resolution, s.fmt), ("color", 150, "jpeg"))
 
     def test_target_without_preset_uses_global(self):
-        s = self.service.settings_for(self.AUTO_COLOR, parse_targets("x", Path("/s"))[0])
+        s = self.service.settings_for(self.AUTO_COLOR, Target("x", Path("/s")))
         self.assertEqual((s.color, s.resolution, s.fmt), ("color", 300, "pdf"))
 
     def test_target_multipage_overrides_global(self):
-        from pushscan2folder.native import NativeScanner
         svc = PushScanService(None, None, [], ScanSettings(), auto_source=False,
                               native=NativeScanner("127.0.0.1"))
-        t = parse_targets("a@mp:auto", Path("/s"))[0]
+        t = Target("a", Path("/s"), multipage=frozenset({"auto"}))
         self.assertTrue(svc.use_native(svc.settings_for(self.AUTO_COLOR, t), self.AUTO_COLOR, t))
         self.assertFalse(svc.use_native(svc.settings_for(self.DOC_COLOR_300, t), self.DOC_COLOR_300, t))
+
+
+class NativeChoiceTests(unittest.TestCase):
+    PHOTO_AUTO = panel_bytes(2, size=0x0B)
+    PHOTO_MULTI = panel_bytes(2, size=0x0C)
+    PHOTO_10X15 = panel_bytes(2, size=8)
+    DOCUMENT = panel_bytes(1)
+
+    def use_native(self, next_page, interrupt, target=None):
+        svc = PushScanService(None, None, [], ScanSettings(), auto_source=False,
+                              native=NativeScanner("127.0.0.1"), multipage=next_page)
+        return svc.use_native(svc.settings_for(interrupt, target), interrupt, target)
+
+    def test_photo_with_auto_size_never_uses_native(self):
+        everything = frozenset({"document", "auto", "photo"})
+        self.assertFalse(self.use_native(everything, self.PHOTO_AUTO))
+        self.assertFalse(self.use_native(everything, self.PHOTO_MULTI))
+        target = Target("A", Path("/s"), multipage=everything)
+        self.assertFalse(self.use_native(frozenset(), self.PHOTO_AUTO, target))
+
+    def test_photo_with_fixed_size_uses_native_when_listed(self):
+        self.assertTrue(self.use_native(frozenset({"photo"}), self.PHOTO_10X15))
+        self.assertFalse(self.use_native(frozenset({"document"}), self.PHOTO_10X15))
+        target = Target("A", Path("/s"), multipage=frozenset({"photo"}))
+        self.assertTrue(self.use_native(frozenset(), self.PHOTO_10X15, target))
+
+    def test_target_list_replaces_the_global_one(self):
+        target = Target("A", Path("/s"), multipage=frozenset())
+        self.assertFalse(self.use_native(frozenset({"document"}), self.DOCUMENT, target))
+        self.assertTrue(self.use_native(frozenset({"document"}), self.DOCUMENT,
+                                        Target("B", Path("/s"))))
+
+    def test_no_native_scanner_or_no_panel(self):
+        svc = PushScanService(None, None, [], ScanSettings(), auto_source=False,
+                              multipage=frozenset({"document"}))
+        self.assertFalse(svc.use_native(svc.settings_for(self.DOCUMENT), self.DOCUMENT))
+        svc = PushScanService(None, None, [], ScanSettings(), auto_source=False, use_panel=False,
+                              native=NativeScanner("127.0.0.1"))
+        self.assertFalse(svc.use_native(svc.settings_for(self.DOCUMENT), self.DOCUMENT))
 
 
 class HelperTests(unittest.TestCase):

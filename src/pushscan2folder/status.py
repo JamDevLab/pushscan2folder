@@ -34,6 +34,7 @@ class TargetState:
     registered: bool
     preset: dict = field(default_factory=dict)
     multipage: tuple[str, ...] | None = None
+    type_dirs: tuple[tuple[str, str], ...] = ()   # (document type, folder) pairs
 
 
 class ServiceStatus:
@@ -57,7 +58,8 @@ class ServiceStatus:
 
     def set_targets(self, targets) -> None:
         states = tuple(TargetState(t.name, str(t.outdir), t.session is not None, dict(t.preset),
-                                   tuple(sorted(t.multipage)) if t.multipage is not None else None)
+                                   tuple(sorted(t.multipage)) if t.multipage is not None else None,
+                                   tuple((kind, str(path)) for kind, path in t.type_dirs.items()))
                        for t in targets)
         with self._lock:
             self._targets = states

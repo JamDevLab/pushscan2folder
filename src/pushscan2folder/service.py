@@ -130,6 +130,37 @@ def check_filename(template: str) -> None:
     render_filename(template, "scan", datetime(2026, 1, 2, 3, 4, 5))
 
 
+class _FolderFormatter(_FilenameFormatter):
+    """Like file names, but every field value becomes one safe path part:
+    no separator, no "." or "..", so a field can never change which folders
+    a path goes through ({now:../x} gives "_x")."""
+
+    def format_field(self, value, format_spec):
+        text = re.sub(r'[<>:"/\\|?*\x00-\x1f\x7f]', "_",
+                      super().format_field(value, format_spec)).strip(" .")
+        return text or "_"
+
+
+def render_folder(path: Path | str, name: str, now: datetime) -> Path:
+    """The folder of a scan: `path` with the fields of render_filename
+    filled in ({name}, {date}, {time}, {now:FORMAT}). A path without
+    braces is returned unchanged. Raises ValueError."""
+    text = str(path)
+    if "{" not in text and "}" not in text:
+        return Path(path)
+    try:
+        return Path(_FolderFormatter().format(
+            text, name=safe_dirname(name), date=now.strftime("%Y-%m-%d"),
+            time=now.strftime("%H%M%S"), now=now))
+    except (ValueError, IndexError, KeyError) as exc:
+        raise ValueError(f"folder {text!r}: {exc}") from None
+
+
+def check_folder(path: str) -> None:
+    """Raise ValueError if the fields in folder `path` cannot be used."""
+    render_folder(path, "scan", datetime(2026, 1, 2, 3, 4, 5))
+
+
 def _publish(tmp: Path, final: Path) -> None:
     """Give the finished temp file its final name. Raises FileExistsError if
     the name is taken (a dangling symlink counts), so nothing is replaced or
@@ -196,13 +227,10 @@ def safe_dirname(name: str) -> str:
     return cleaned or "scan"
 
 
-# Which panel document types get the "next page" dialog on platen scans.
-MULTIPAGE_MODES = {
-    "document": frozenset({"document"}),
-    "auto": frozenset({"auto"}),
-    "both": frozenset({"document", "auto"}),
-    "off": frozenset(),
-}
+# Panel document types, and those that get the "next page" dialog on platen
+# scans unless the config says otherwise.
+DOC_TYPES = ("document", "auto", "photo")
+DEFAULT_NEXT_PAGE = frozenset({"document"})
 
 RESOLUTIONS = (75, 150, 300, 600)
 
@@ -211,6 +239,9 @@ RESOLUTIONS = (75, 150, 300, 600)
 class Target:
     """One entry on the printer panel and the folder its scans go to.
 
+    outdir: the folder; may contain the fields of render_folder.
+    type_dirs: another folder for some panel document types
+    ("document", "auto", "photo"), same rules as outdir.
     preset: ScanSettings fields set for this target (resolution, fmt, width,
     height). They replace the global fallback, and with document type
     "auto scan" they also win over the panel.
@@ -221,64 +252,9 @@ class Target:
     session: int | None = None
     preset: dict = field(default_factory=dict)
     multipage: frozenset[str] | None = None
+    type_dirs: dict[str, Path] = field(default_factory=dict)
     filename: str | None = None  # file name template; None = the global one
     open_after_scan: bool | None = None   # None = the global one
-
-
-def parse_preset(text: str) -> tuple[dict, frozenset[str] | None]:
-    """Parse "300dpi+jpeg+a4+mp:auto" into ScanSettings fields and a
-    multi-page mode. Unknown tokens raise ValueError."""
-    preset: dict = {}
-    multipage = None
-    for token in text.split("+"):
-        tok = token.strip().lower()
-        m = re.fullmatch(r"(\d+)dpi", tok)
-        if m and int(m.group(1)) in RESOLUTIONS:
-            preset["resolution"] = int(m.group(1))
-        elif tok in ("pdf", "jpeg"):
-            preset["fmt"] = tok
-        elif tok in panel.REGIONS:
-            preset["width"], preset["height"] = panel.REGIONS[tok]
-        elif tok.startswith("mp:") and tok[3:] in MULTIPAGE_MODES:
-            multipage = MULTIPAGE_MODES[tok[3:]]
-        else:
-            raise ValueError(
-                f"unknown target option {token!r} (use e.g. 300dpi, pdf, "
-                f"jpeg, a4, letter, legal, 10x15, 13x18, mp:document|auto|both|off; "
-                f"dpi: {', '.join(map(str, RESOLUTIONS))})")
-    return preset, multipage
-
-
-def parse_targets(spec: str, base: Path) -> list[Target]:
-    """Parse "scan1,paperless=/data/consume@300dpi+pdf,archiv@600dpi".
-
-    Entries are separated by commas. "NAME" stores into base/NAME (sanitised),
-    "NAME=DIR" stores into DIR (relative paths are resolved against base).
-    An optional "@OPTION+OPTION..." suffix sets a preset (see parse_preset).
-    """
-    targets: list[Target] = []
-    seen: set[str] = set()
-    for part in spec.split(","):
-        part = part.strip()
-        if not part:
-            continue
-        preset, multipage = {}, None
-        if "@" in part:
-            part, _, options = part.rpartition("@")
-            preset, multipage = parse_preset(options)
-        name, sep, directory = part.partition("=")
-        name = name.strip()
-        if not name:
-            raise ValueError(f"empty target name in {part!r}")
-        check_name(name)
-        if name in seen:
-            raise ValueError(f"duplicate target name {name!r}")
-        seen.add(name)
-        outdir = base / (directory.strip() if sep and directory.strip() else safe_dirname(name))
-        targets.append(Target(name, outdir, preset=preset, multipage=multipage))
-    if not targets:
-        raise ValueError("no targets given")
-    return targets
 
 
 def check_targets(targets: list[Target]) -> list[str]:
@@ -287,10 +263,11 @@ def check_targets(targets: list[Target]) -> list[str]:
     warnings = []
     folders: dict[Path, str] = {}
     for t in targets:
+        # Compared as written: two templates that render alike are not found.
         key = t.outdir.resolve()
         if key in folders:
             raise ValueError(f"targets {folders[key]!r} and {t.name!r} both use the folder "
-                             f"{t.outdir}; give one of them its own folder (NAME=DIR)")
+                             f"{t.outdir}; give one of them its own folder")
         folders[key] = t.name
         if len(t.name) > VISIBLE_NAME_CHARS:
             warnings.append(f"target name {t.name!r} is longer than {VISIBLE_NAME_CHARS} "
@@ -302,7 +279,7 @@ class PushScanService:
     def __init__(self, chmp: ChmpClient, escl: EsclClient, targets: list[Target],
                  settings: ScanSettings, interval: float = 4.0, auto_source: bool = True,
                  use_panel: bool = True, native: NativeScanner | None = None,
-                 multipage: frozenset[str] = frozenset({"document"}),
+                 multipage: frozenset[str] = DEFAULT_NEXT_PAGE,
                  trim: Trim | None = None, open_after_scan: bool = False,
                  filename: str = DEFAULT_FILENAME, adf_trim: Trim | None = None):
         self.trim = trim or Trim()
@@ -477,7 +454,13 @@ class PushScanService:
         if self.native is None or settings.source != "platen" or not interrupt:
             return False
         modes = self.multipage if target is None or target.multipage is None else target.multipage
-        return self.use_panel and panel.decode(interrupt).doc_type in modes
+        if not self.use_panel:
+            return False
+        p = panel.decode(interrupt)
+        if p.doc_type == "photo" and p.size in panel.AUTO_SIZES:
+            # The whole glass is scanned and the photos are cut out (eSCL).
+            return False
+        return p.doc_type in modes
 
     def cut_mode(self, settings: ScanSettings, interrupt: bytes) -> str | None:
         """"single" or "multi" when the photos are to be cut out of the scan:
@@ -584,7 +567,9 @@ class PushScanService:
 
     def _scan_to(self, target: Target, event: int, interrupt: bytes) -> list[Path]:
         log.info("scan requested: event=0x%x interrupt=%s", event, interrupt.hex())
-        outdir = target.outdir
+        now = datetime.now()
+        doc_type = panel.decode(interrupt).doc_type if interrupt and self.use_panel else None
+        outdir = render_folder(target.type_dirs.get(doc_type, target.outdir), target.name, now)
         settings = self.settings_for(interrupt, target)
         native = self.use_native(settings, interrupt, target)
         cut = None if native else self.cut_mode(settings, interrupt)
@@ -618,7 +603,7 @@ class PushScanService:
         # A page that could not be made a PDF stays a JPEG (see _photo_pdf, scan_native).
         files = [(d, "jpeg" if settings.fmt == "pdf" and not d.startswith(b"%PDF")
                   else settings.fmt) for d in complete]
-        paths = save_files(outdir, files, datetime.now(),
+        paths = save_files(outdir, files, now,
                            target.filename or self.filename, target.name)
         for path in paths:
             log.info("saved %s", path)

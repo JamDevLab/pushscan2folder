@@ -13,6 +13,7 @@ import sys
 import time
 import traceback
 import webbrowser
+from datetime import datetime
 from pathlib import Path
 
 from . import (SOURCE_URL, __version__, autostart, background, desktop, discovery, panel, protocol,
@@ -23,9 +24,8 @@ from .escl import EsclClient, ScanSettings
 from .native import NativeScanner
 from .platform_support import (default_config_path, default_log_path, default_output,
                                default_state_dir, is_windows)
-from .service import (DEFAULT_FILENAME, MULTIPAGE_MODES, PushScanService, Target, Trim,
-                      check_filename, check_targets,
-                      parse_targets, parse_trim)
+from .service import (DEFAULT_FILENAME, RESOLUTIONS, PushScanService, Target, Trim,
+                      check_targets, render_folder)
 from .status import LogBuffer
 
 
@@ -54,13 +54,6 @@ def env_switch(name: str) -> bool:
     if word in ("0", "false", "no", "off"):
         return False
     raise ValueError(f"invalid PUSHSCAN_{name} {value!r}: use 1 or 0")
-
-
-def multipage_env(fallback: str | None = None) -> str:
-    value = env("MULTIPAGE", fallback or "document").strip().lower()
-    aliases = {"1": "document", "true": "document", "yes": "document",
-               "0": "off", "false": "off", "no": "off"}
-    return aliases.get(value, value)
 
 
 def create_example_config(path: Path) -> bool:
@@ -106,7 +99,8 @@ def find_config(argv=None) -> Config:
     return load_config(path) if path.is_file() else Config()
 
 
-COMMANDS = ("run", "probe", "scan", "setup", "start", "stop", "status", "uninstall", "health")
+COMMANDS = ("run", "probe", "scan", "setup", "start", "stop", "status", "uninstall", "health",
+            "check")
 # Global options (before the subcommand): name -> takes a value.
 GLOBAL_OPTIONS = {"--config": True, "--printer": True, "--name": True, "--log-file": True,
                   "--verbose": False, "-v": False, "--install-autostart": False,
@@ -168,23 +162,6 @@ def with_default_command(argv: list[str]) -> list[str]:
     return front + ["run"] + rest
 
 
-def _trim_arg(text: str) -> Trim:
-    try:
-        return parse_trim(text)
-    except ValueError as exc:
-        raise argparse.ArgumentTypeError(str(exc)) from None
-
-
-def _trim_default(cfg: Config, adf: bool = False) -> Trim:
-    """PUSHSCAN_TRIM / PUSHSCAN_ADF_TRIM (replaces the file values as a whole)
-    or the config file. An invalid env value is reported by argparse when it
-    is applied as a default."""
-    value = env("ADF_TRIM" if adf else "TRIM")
-    if value is not None:
-        return value
-    return cfg.adf_trim() if adf else cfg.trim()
-
-
 def build_parser(cfg: Config | None = None) -> argparse.ArgumentParser:
     """Precedence of each default: environment variable > config file > built-in.
     (Command line options override all of these via argparse.)"""
@@ -211,60 +188,17 @@ def build_parser(cfg: Config | None = None) -> argparse.ArgumentParser:
     p.add_argument("--remove-autostart", action="store_true",
                    help="Windows only: remove the logon entry, then exit")
     sub = p.add_subparsers(dest="cmd", required=True,
-                           metavar="{run,start,stop,status,probe,scan,setup,uninstall,health}",
+                           metavar="{run,start,stop,status,probe,scan,setup,check,uninstall,health}",
                            description="without a subcommand, run is used")
-    output_default = env("OUTPUT") or cfg.output or default_output()
+    folder_default = env("FOLDER") or cfg.folder or default_output()
 
     def add_run_options(opts: argparse.ArgumentParser) -> None:
-        opts.add_argument("--output", default=output_default, type=Path,
+        opts.add_argument("--folder", default=folder_default, type=Path,
                          help="base folder for scans (default: ./scans; on Windows and "
                               "macOS Documents/Scans in your home folder)")
-        opts.add_argument("--interval", type=float, default=float(env("INTERVAL", cfg.interval or 4)))
-        opts.add_argument("--format", choices=["pdf", "jpeg"], default=env("FORMAT", cfg.format or "pdf"))
-        opts.add_argument("--color", choices=["color", "gray"], default=env("COLOR", cfg.color or "color"))
-        opts.add_argument("--resolution", type=int, default=int(env("RESOLUTION", cfg.resolution or 300)))
-        opts.add_argument("--source", choices=["auto", "platen", "adf"],
-                         default=env("SOURCE", cfg.source or "auto"))
-        opts.add_argument("--trim", type=_trim_arg, default=_trim_default(cfg), metavar="SIDES",
-                         help="cut off a border by scanning a smaller area (platen only), "
-                              "e.g. right=1,bottom=2 (keys left/top/right/bottom, mm, 0 to 50); "
-                              "replaces the four trim_* values of the config file")
-        opts.add_argument("--adf-trim", type=_trim_arg, default=_trim_default(cfg, adf=True),
-                         metavar="SIDES",
-                         help="cut off a border of document feeder (ADF) scans by scanning a "
-                              "smaller area, same syntax as --trim; replaces the four "
-                              "adf_trim_* values of the config file")
-        opts.add_argument("--targets", default=env("TARGETS"),
-                         help='several panel entries, e.g. "scan1,paperless=consume@300dpi,archiv@600dpi"; '
-                              "each scans into its own folder below --output, optional preset after @. "
-                              "Replaces the targets of the config file")
-        opts.add_argument("--ignore-panel", action="store_true",
-                         default=env_bool("IGNORE_PANEL", cfg.ignore_panel),
-                         help="ignore the settings chosen on the printer panel and always "
-                              "use --format/--color/--resolution/--source")
-        opts.add_argument("--multipage", choices=sorted(MULTIPAGE_MODES),
-                         default=multipage_env(cfg.multipage),
-                         help="document types for which platen scans offer further pages "
-                              "on the panel (default: document)")
         opts.add_argument("--heartbeat-file", default=env("HEARTBEAT_FILE"), metavar="PATH",
                           help="touch this file after every successful contact with the "
                                "printer, for `pushscan2folder health` (the Docker image sets it)")
-        opts.add_argument("--filename", default=env("FILENAME", cfg.filename or DEFAULT_FILENAME),
-                          metavar="TEMPLATE",
-                          help="file name of a scan without extension, with the fields "
-                               "{name}, {date}, {time} and {now:STRFTIME} (default: "
-                               "scan_{now:%%Y%%m%%d_%%H%%M%%S}); a target can set its own")
-        # A valid environment value is turned into a bool here; a bad one stays
-        # text and check_run_options reports it. The option itself is checked
-        # by argparse and turned into a bool by check_run_options.
-        open_env = env("OPEN_AFTER_SCAN")
-        open_default = bool(cfg.open_after_scan) if open_env is None else (
-            open_env if desktop.parse_open(open_env) is None else desktop.parse_open(open_env))
-        opts.add_argument("--open-after-scan",
-                          choices=desktop.OPEN_TRUE + desktop.OPEN_FALSE,
-                          default=open_default, metavar="true|false",
-                          help="desktop PC only: open the folder (Windows: with the new file "
-                               "selected) after each scan (default: false)")
 
         opts.add_argument("--web", action="store_true", default=env_bool("WEB", cfg.web_enabled),
                          help="serve the optional web page (status, log, target editor); "
@@ -289,6 +223,7 @@ def build_parser(cfg: Config | None = None) -> argparse.ArgumentParser:
     uninstall_p.add_argument("--purge", action="store_true",
                              help="with --yes: also delete the settings and log folders")
     sub.add_parser("setup", help="ask a few questions and write the config file")
+    sub.add_parser("check", help="check the config file and show what it does")
     health = sub.add_parser("health", help="exit 0 if a running instance reached the printer "
                                            "recently (Docker healthcheck)")
     health.add_argument("--heartbeat-file", default=env("HEARTBEAT_FILE"), metavar="PATH",
@@ -300,13 +235,16 @@ def build_parser(cfg: Config | None = None) -> argparse.ArgumentParser:
     probe.add_argument("--keep", action="store_true", help="do not release the session")
 
     scan = sub.add_parser("scan", help="scan once via eSCL without the panel")
-    scan.add_argument("--output", default=output_default, type=Path)
+    scan.add_argument("--folder", default=folder_default, type=Path)
     scan.add_argument("--format", choices=["pdf", "jpeg"], default="pdf")
-    scan.add_argument("--source", choices=["auto", "platen", "adf"], default="auto")
+    scan.add_argument("--color", choices=["color", "gray"], default="color")
+    scan.add_argument("--resolution", type=int, choices=RESOLUTIONS, default=300)
+    scan.add_argument("--source", choices=["auto", "platen", "adf"], default="auto",
+                      help="auto: the feeder when paper is in it, else the glass")
     return p
 
 
-NO_CONFIG_COMMANDS = ("setup", "stop", "status", "uninstall", "health")
+NO_CONFIG_COMMANDS = ("setup", "stop", "status", "uninstall", "health", "check")
 
 
 def parse_args(argv=None) -> tuple[argparse.Namespace, Config]:
@@ -329,41 +267,28 @@ def default_web_bind(cfg: Config) -> str:
 
 
 def fallback_settings(args: argparse.Namespace, cfg: Config) -> ScanSettings:
-    kwargs = dict(fmt=args.format)
-    if args.cmd == "run":
-        kwargs.update(color=args.color, resolution=args.resolution)
-    if cfg.size:
-        kwargs["width"], kwargs["height"] = panel.REGIONS[cfg.size]
-    return ScanSettings(source="platen" if args.source == "auto" else args.source, **kwargs)
+    """Settings where the panel sends none: document type "Auto" (the auto
+    table of the config) and the `scan` command (its options)."""
+    if args.cmd == "scan":
+        return ScanSettings(fmt=args.format, color=args.color, resolution=args.resolution,
+                            source="platen" if args.source == "auto" else args.source)
+    auto = cfg.auto_values()
+    width, height = panel.REGIONS[auto["size"]]
+    return ScanSettings(fmt=auto["format"], resolution=auto["resolution"],
+                        width=width, height=height)
 
 
 def resolve_targets(args: argparse.Namespace, cfg: Config, name: str) -> list[Target]:
-    """--targets/PUSHSCAN_TARGETS replace the config targets; without either,
-    a single target called `name`. Raises ValueError."""
-    spec = getattr(args, "targets", None)
-    if spec:
-        return parse_targets(spec, args.output)
+    """The targets of the config file; without any, a single target called
+    `name` that scans straight into the base folder."""
     if cfg.targets:
-        return cfg.build_targets(args.output, getattr(args, "multipage", "off"))
-    return [Target(name, args.output)]
+        return cfg.build_targets(args.folder)
+    return [Target(name, args.folder)]
 
 
-# Settings the web form shows: config key -> (environment variable, option).
-# A key set by either of them wins over the config file.
-OVERRIDABLE = {
-    "printer": ("PRINTER", "--printer"), "output": ("OUTPUT", "--output"),
-    "interval": ("INTERVAL", "--interval"),
-    "ignore_panel": ("IGNORE_PANEL", "--ignore-panel"),
-    "multipage": ("MULTIPAGE", "--multipage"),
-    "resolution": ("RESOLUTION", "--resolution"), "color": ("COLOR", "--color"),
-    "format": ("FORMAT", "--format"), "source": ("SOURCE", "--source"),
-    "open_after_scan": ("OPEN_AFTER_SCAN", "--open-after-scan"),
-    "filename": ("FILENAME", "--filename"),
-    "trim_left": ("TRIM", "--trim"), "trim_top": ("TRIM", "--trim"),
-    "trim_right": ("TRIM", "--trim"), "trim_bottom": ("TRIM", "--trim"),
-    "adf_trim_left": ("ADF_TRIM", "--adf-trim"), "adf_trim_top": ("ADF_TRIM", "--adf-trim"),
-    "adf_trim_right": ("ADF_TRIM", "--adf-trim"), "adf_trim_bottom": ("ADF_TRIM", "--adf-trim"),
-}
+# Config keys the command line or the environment can override:
+# key -> (environment variable, option).
+OVERRIDABLE = {"printer": ("PRINTER", "--printer"), "folder": ("FOLDER", "--folder")}
 
 
 def _option_given(argv: list[str], option: str) -> bool:
@@ -378,11 +303,9 @@ def _option_given(argv: list[str], option: str) -> bool:
     return False
 
 
-def web_overrides(args: argparse.Namespace, cfg: Config,
-                  argv: list[str] | None = None) -> tuple[dict[str, str], dict[str, str]]:
-    """For the web settings page: (overrides, effective). overrides maps a
-    config key to what overrides the file value ("environment variable X" or
-    "command line option --x"); effective maps keys to the value in use."""
+def web_overrides(args: argparse.Namespace, argv: list[str] | None = None) -> dict[str, str]:
+    """For the web settings page: config key -> what overrides the file value
+    ("environment variable X" or "command line option --x")."""
     argv = list(sys.argv[1:] if argv is None else argv)
     overrides = {}
     for key, (var, option) in OVERRIDABLE.items():
@@ -390,51 +313,21 @@ def web_overrides(args: argparse.Namespace, cfg: Config,
             overrides[key] = f"command line option {option}"
         elif env(var) is not None:
             overrides[key] = f"environment variable PUSHSCAN_{var}"
-    trim = getattr(args, "trim", None) or Trim()
-    adf_trim = getattr(args, "adf_trim", None) or Trim()
-    effective = {
-        "printer": args.printer, "output": str(args.output), "interval": f"{args.interval:g}",
-        "ignore_panel": "yes" if args.ignore_panel else "no", "multipage": args.multipage,
-        "resolution": str(args.resolution), "color": args.color, "format": args.format,
-        "source": args.source, "size": cfg.size or "a4",
-        "open_after_scan": "yes" if args.open_after_scan else "no",
-        "filename": args.filename,
-        "trim_left": f"{trim.left:g}", "trim_top": f"{trim.top:g}",
-        "trim_right": f"{trim.right:g}", "trim_bottom": f"{trim.bottom:g}",
-        "adf_trim_left": f"{adf_trim.left:g}", "adf_trim_top": f"{adf_trim.top:g}",
-        "adf_trim_right": f"{adf_trim.right:g}", "adf_trim_bottom": f"{adf_trim.bottom:g}",
-    }
-    return overrides, effective
-
-
-def check_run_options(args: argparse.Namespace) -> None:
-    """Check the option values the parser does not check itself. Normalizes
-    open_after_scan. Raises ValueError with the message for the user."""
-    if getattr(args, "multipage", "off") not in MULTIPAGE_MODES:
-        raise ValueError(f"invalid PUSHSCAN_MULTIPAGE {args.multipage!r}")
-    open_flag = desktop.parse_open(getattr(args, "open_after_scan", False))
-    if open_flag is None:
-        raise ValueError(f"invalid PUSHSCAN_OPEN_AFTER_SCAN {args.open_after_scan!r}: use "
-                         "true or false (also yes/no, 1/0, on/off)")
-    args.open_after_scan = open_flag
-    try:
-        check_filename(getattr(args, "filename", DEFAULT_FILENAME))
-    except ValueError as exc:
-        raise ValueError(f"--filename/PUSHSCAN_FILENAME: {exc}") from None
+    return overrides
 
 
 def service_options(args: argparse.Namespace, cfg: Config) -> dict:
     """The PushScanService options from the parsed command line and config
     (at startup and when the config file changes)."""
+    scan = args.cmd == "scan"
     return dict(settings=fallback_settings(args, cfg),
-                interval=getattr(args, "interval", 4.0),
-                auto_source=(args.source == "auto"),
-                use_panel=not getattr(args, "ignore_panel", True),
-                multipage=MULTIPAGE_MODES.get(getattr(args, "multipage", "off"), frozenset()),
-                trim=getattr(args, "trim", None) or Trim(),
-                adf_trim=getattr(args, "adf_trim", None) or Trim(),
-                open_after_scan=bool(getattr(args, "open_after_scan", False)),
-                filename=getattr(args, "filename", DEFAULT_FILENAME))
+                interval=cfg.interval or 4.0,
+                auto_source=not scan or args.source == "auto",
+                multipage=cfg.next_page_types(),
+                trim=cfg.trim or Trim(),
+                adf_trim=cfg.adf_trim or Trim(),
+                open_after_scan=bool(cfg.open_after_scan),
+                filename=cfg.filename or DEFAULT_FILENAME)
 
 
 # Options that a changed config file cannot change in a running service.
@@ -484,7 +377,6 @@ class ConfigWatcher:
         self.last = stamp
         try:
             args, cfg = parse_args(self.argv)
-            check_run_options(args)
             if not args.printer:
                 raise ValueError("no printer is set")
             name = args.name or default_name()
@@ -508,9 +400,9 @@ class ConfigWatcher:
         service.request_targets(targets)
         if self.ctx is not None:
             ctx = self.ctx
-            ctx.printer, ctx.output, ctx.multipage_mode = args.printer, args.output, args.multipage
-            ctx.targets_from_env = bool(args.targets)
-            ctx.overrides, ctx.effective = web_overrides(args, cfg, self.argv)
+            ctx.printer, ctx.folder = args.printer, args.folder
+            ctx.next_page = cfg.next_page_types()
+            ctx.overrides = web_overrides(args, self.argv)
             ctx.printer_pending = None
         self.args = args
         logging.info("%s changed, the new settings are in use", self.path)
@@ -780,7 +672,6 @@ def start_main(raw: list[str], hints: bool = True, popen=subprocess.Popen,
     """`start`: launch the background instance with the given options, return."""
     try:
         args, cfg = parse_args(replace_command(raw, "run"))
-        check_run_options(args)   # the same checks as the background process
         if args.web:
             config_path = Path(args.config) if args.config else default_config_path()
             logging.disable(logging.CRITICAL)   # the background process logs these
@@ -861,10 +752,10 @@ def uninstall_main(args: argparse.Namespace, argv: list[str],
     protected: list[Path] = []
     try:
         cfg = find_config(argv)
-        base = Path(env("OUTPUT") or cfg.output or default_output())
-        protected = [base] + [t.outdir for t in cfg.build_targets(base, "off")]
+        base = Path(env("FOLDER") or cfg.folder or default_output())
+        protected = [base] + [base / f for spec in cfg.targets for f in spec.folders()]
     except ConfigError:
-        protected = [Path(env("OUTPUT") or default_output())]
+        protected = [Path(env("FOLDER") or default_output())]
     config_dir = default_config_path().parent
     windows = is_windows()
     exe = Path(sys.executable) if getattr(sys, "frozen", False) else None
@@ -875,6 +766,75 @@ def uninstall_main(args: argparse.Namespace, argv: list[str],
 
 
 HEALTH_MAX_AGE = 120.0  # seconds; the printer drops a name after about 60 s
+
+
+def check_lines(cfg: Config, config_path: Path | None, printer: str | None, folder: Path,
+                now=None) -> list[str]:
+    """What `check` prints for a valid config: the values in use and, per
+    target, its folders (with today's date filled in)."""
+    now = now or datetime.now()
+    auto = cfg.auto_values()
+    trim, adf_trim = cfg.trim or Trim(), cfg.adf_trim or Trim()
+
+    def sides(t: Trim) -> str:
+        return ", ".join(f"{k} {getattr(t, k):g} mm" for k in ("left", "top", "right", "bottom")
+                         if getattr(t, k)) or "none"
+
+    def types(kinds) -> str:
+        return ", ".join(k for k in ("document", "auto", "photo") if k in kinds) or "none"
+
+    lines = [f"config file: {config_path if config_path else 'none (built-in defaults)'}",
+             f"printer: {printer or 'NOT SET (--printer, PUSHSCAN_PRINTER or printer =)'}",
+             f"base folder: {folder}",
+             f"file names: {cfg.filename or DEFAULT_FILENAME}",
+             f"next page dialog: {types(cfg.next_page_types())}",
+             f"document type Auto: {auto['resolution']} dpi, {auto['format']}, {auto['size']}",
+             f"trim: glass {sides(trim)}; feeder {sides(adf_trim)}",
+             f"open after scan: {'yes' if cfg.open_after_scan else 'no'}",
+             f"poll interval: {cfg.interval or 4:g} s"]
+    targets = cfg.build_targets(folder) if cfg.targets else []
+    if not targets:
+        lines.append("targets: none in the file; one entry named after this PC "
+                     f"scans into {folder}")
+    for spec, t in zip(cfg.targets, targets):
+        lines.append(f"target {t.name!r}:")
+        lines.append(f"  folder: {render_folder(t.outdir, t.name, now)}")
+        for kind, path in t.type_dirs.items():
+            lines.append(f"  {kind} scans: {render_folder(path, t.name, now)}")
+        if spec.next_page is not None:
+            lines.append(f"  next page dialog: {types(spec.next_page)}")
+        if spec.auto:
+            merged = {**auto, **spec.auto}
+            lines.append(f"  document type Auto: {merged['resolution']} dpi, "
+                         f"{merged['format']}, {merged['size']}")
+        if spec.filename:
+            lines.append(f"  file names: {spec.filename}")
+        if spec.open_after_scan is not None:
+            lines.append(f"  open after scan: {'yes' if spec.open_after_scan else 'no'}")
+    return lines
+
+
+def check_main(argv: list[str]) -> int:
+    """`check`: load the config file like `run` does, report an error or
+    show what the file does. Exit 0 if it can be used, 2 otherwise."""
+    try:
+        cfg = find_config(argv)
+        args = build_parser(cfg).parse_args(with_default_command(
+            replace_command(argv, "run")))
+        targets = resolve_targets(args, cfg, default_name())
+        warnings = check_targets(targets)
+    except (ConfigError, ValueError) as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
+    explicit = args.config or env("CONFIG")
+    path = Path(explicit) if explicit else default_config_path()
+    for line in check_lines(cfg, path if path.is_file() else None, args.printer,
+                            args.folder):
+        print(line)
+    for warning in warnings:
+        print(f"warning: {warning}")
+    print("OK" if args.printer else "The file is valid, but no printer is set.")
+    return 0 if args.printer else 2
 
 
 def health_main(args: argparse.Namespace, now: float | None = None) -> int:
@@ -1127,13 +1087,10 @@ def _main(argv=None) -> int:
         return status_main()
     if args.cmd == "uninstall":
         return uninstall_main(args, raw)
+    if args.cmd == "check":
+        return check_main(raw)
     if args.cmd == "health":
         return health_main(args)
-    try:
-        check_run_options(args)
-    except ValueError as exc:
-        print(f"error: {exc}", file=sys.stderr)
-        return 2
     try:
         setup_logging(args.verbose, args.log_file)
     except OSError as exc:
@@ -1237,12 +1194,10 @@ def _main(argv=None) -> int:
     # Web page: records the log, runs in a daemon thread next to the poll loop.
     log_buffer = LogBuffer()
     logging.getLogger().addHandler(log_buffer)
-    overrides, effective = web_overrides(args, cfg, argv)
-    ctx = web.WebContext(service, log_buffer, args.printer, args.output,
-                         multipage_mode=args.multipage,
+    ctx = web.WebContext(service, log_buffer, args.printer, args.folder,
+                         next_page=cfg.next_page_types(),
                          config_path=config_path,
-                         targets_from_env=bool(args.targets),
-                         overrides=overrides, effective=effective,
+                         overrides=web_overrides(args, argv),
                          discover_fn=discovery.discover)
     watcher.ctx = ctx
     try:

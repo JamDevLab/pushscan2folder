@@ -193,7 +193,7 @@ class AutostartTests(unittest.TestCase):
 
     def test_paths_become_absolute(self):
         args = autostart.absolute_args(["--config", "c.toml", "--log-file=p.log", "-v",
-                                        "run", "--output", "out"])
+                                        "run", "--folder", "out"])
         self.assertEqual(args[1], os.path.abspath("c.toml"))
         self.assertEqual(args[2], "--log-file=" + os.path.abspath("p.log"))
         self.assertEqual(args[-1], os.path.abspath("out"))
@@ -270,7 +270,7 @@ class AutostartMainTests(unittest.TestCase):
             cfg = Path(d) / "c.toml"
             cfg.write_text('printer = "192.0.2.1"\n')
             code, err, run = self.run_main(["--install-autostart", "--config", str(cfg),
-                                            "--output", str(Path(d) / "s")], "win32")
+                                            "--folder", str(Path(d) / "s")], "win32")
         self.assertEqual(code, 0, err)
         self.assertEqual(run.call_args[0][0][:2], [windows_program("reg.exe"), "add"])
 

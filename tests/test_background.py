@@ -15,7 +15,7 @@ from unittest import mock
 
 from pushscan2folder import __main__ as cli
 from pushscan2folder import autostart, background, desktop, uninstall, wizard, web
-from pushscan2folder.config import ConfigError, dump_config, load_config_text
+from pushscan2folder.config import Config, ConfigError, dump_config, load_config_text
 from pushscan2folder.platform_support import windows_program
 from pushscan2folder.escl import ScanSettings
 from pushscan2folder.service import PushScanService, Target
@@ -350,13 +350,13 @@ class LaunchTests(TempDirCase):
         inst = self.instance()
 
         def popen(*args, **kwargs):
-            kwargs["stderr"].write(b"error: invalid PUSHSCAN_MULTIPAGE 'x'\n")
+            kwargs["stderr"].write(b"error: invalid PUSHSCAN_FOLDER 'x'\n")
             return FakeProc(2)
         ok, message = background.start_instance(["run"], inst, popen=popen,
                                                 sleep=lambda s: None)
         self.assertFalse(ok)
         self.assertIn("exit code 2", message)
-        self.assertIn("invalid PUSHSCAN_MULTIPAGE", message)
+        self.assertIn("invalid PUSHSCAN_FOLDER", message)
 
     def test_child_that_never_reports(self):
         inst = self.instance()
@@ -403,13 +403,13 @@ class CliCommandTests(TempDirCase):
 
     def test_command_line_of_the_background_process(self):
         code, out, err, popen = self.run_start(["--printer", "192.0.2.1", "--config",
-                                                "rel.toml", "start", "--output", "scans"])
+                                                "rel.toml", "start", "--folder", "scans"])
         # rel.toml does not exist: an explicit missing config is an error
         self.assertEqual(code, 2)
         popen.assert_not_called()
         cfg = self.dir / "c.toml"
         cfg.write_text('printer = "192.0.2.1"\n', encoding="utf-8")
-        code, out, err, popen = self.run_start(["--config", str(cfg), "start", "--output", "scans"])
+        code, out, err, popen = self.run_start(["--config", str(cfg), "start", "--folder", "scans"])
         self.assertEqual(code, 0, err)
         cmd = popen.call_args[0][0]
         self.assertEqual(cmd[-len(cmd) + len(autostart.program_command()):][:3],
@@ -418,7 +418,7 @@ class CliCommandTests(TempDirCase):
                          str(self.dir / "state" / "pushscan2folder" / "pushscan2folder.log"))
         self.assertIn("run", cmd)
         self.assertNotIn("start", cmd)
-        self.assertEqual(cmd[cmd.index("--output") + 1], os.path.abspath("scans"))
+        self.assertEqual(cmd[cmd.index("--folder") + 1], os.path.abspath("scans"))
         self.assertEqual(cmd[cmd.index("--config") + 1], str(cfg))
         self.assertIn("pushscan2folder stop", out)
 
@@ -525,7 +525,7 @@ class BackgroundRunTests(TempDirCase):
                 mock.patch("pushscan2folder.__main__.pause_before_exit"), \
                 mock.patch("pushscan2folder.__main__.greeting", return_value=None):
             code = cli.main(["--printer", "192.0.2.1", "--background", "--no-pause",
-                             "--output", str(self.dir / "o")])
+                             "--folder", str(self.dir / "o")])
         self.assertEqual(code, 0)
         self.assertTrue(seen["running"])
         self.assertIsNotNone(seen["check"])
@@ -556,7 +556,7 @@ class BackgroundRunTests(TempDirCase):
                     mock.patch("pushscan2folder.__main__.install_signal_handlers"), \
                     mock.patch("pushscan2folder.__main__.pause_before_exit"), \
                     mock.patch("pushscan2folder.__main__.greeting", return_value=None):
-                code = cli.main(["--printer", "192.0.2.1", "--output", str(self.dir / "o")])
+                code = cli.main(["--printer", "192.0.2.1", "--folder", str(self.dir / "o")])
         self.assertEqual(code, 2)
         run.assert_not_called()
 
@@ -666,7 +666,7 @@ class UninstallTests(TempDirCase):
 
     def test_cli_uninstall_protects_configured_scan_folders(self):
         cfg = self.config_dir / "config.toml"
-        cfg.write_text(f'printer = "192.0.2.1"\noutput = "{(self.config_dir / "s").as_posix()}"\n',
+        cfg.write_text(f'printer = "192.0.2.1"\nfolder = "{(self.config_dir / "s").as_posix()}"\n',
                        encoding="utf-8")
         (self.config_dir / "s").mkdir()
         env = {"XDG_CONFIG_HOME": str(self.dir / "cfg"), "APPDATA": str(self.dir / "cfg"),
@@ -800,98 +800,34 @@ class DesktopTests(unittest.TestCase):
 
 
 class OpenAfterScanConfigTests(unittest.TestCase):
-    def parse(self, argv, toml=None):
-        cfg = load_config_text(toml) if toml else None
-        with clean_env():
-            return cli.build_parser(cfg).parse_args(cli.with_default_command(
-                ["--printer", "192.0.2.1"] + argv))
-
     def test_builtin_is_off(self):
-        self.assertIs(self.parse([]).open_after_scan, False)
+        cfg = Config()
+        args = cli.build_parser(cfg).parse_args(["--printer", "192.0.2.1", "run"])
+        self.assertIs(cli.service_options(args, cfg)["open_after_scan"], False)
 
-    def test_config_file(self):
-        args = self.parse([], '[defaults]\nopen_after_scan = true\n')
-        self.assertIs(args.open_after_scan, True)
+    def test_config_file_reaches_the_service_options(self):
+        cfg = load_config_text('open_after_scan = true\n')
+        args = cli.build_parser(cfg).parse_args(["--printer", "x", "run"])
+        self.assertIs(cli.service_options(args, cfg)["open_after_scan"], True)
 
-    def test_env_beats_config_and_cli_beats_env(self):
-        toml = '[defaults]\nopen_after_scan = false\n'
-        with mock.patch.dict(os.environ, {"PUSHSCAN_OPEN_AFTER_SCAN": "yes"}):
-            cfg = load_config_text(toml)
-            parser = cli.build_parser(cfg)
-            self.assertEqual(parser.parse_args(["--printer", "x", "run"]).open_after_scan,
-                             True)
-            self.assertEqual(parser.parse_args(["--printer", "x", "run", "--open-after-scan",
-                                                "no"]).open_after_scan, "no")
-            args = parser.parse_args(["--printer", "x", "run", "--open-after-scan", "no"])
-            cli.check_run_options(args)
-            self.assertIs(args.open_after_scan, False)
+    def test_target_can_override(self):
+        cfg = load_config_text('open_after_scan = true\n[[target]]\nname = "A"\n'
+                               'open_after_scan = false\n')
+        self.assertIs(cfg.targets[0].open_after_scan, False)
+        self.assertIs(cfg.build_targets(Path("."))[0].open_after_scan, False)
 
-    def test_env_accepts_the_usual_words_and_the_old_ones(self):
-        for word, expected in (("true", True), ("yes", True), ("1", True), ("on", True),
-                               ("folder", True), ("file", True), ("false", False),
-                               ("no", False), ("0", False), ("OFF", False)):
-            with mock.patch.dict(os.environ, {"PUSHSCAN_OPEN_AFTER_SCAN": word}):
-                args = cli.build_parser(None).parse_args(["--printer", "x", "run"])
-                cli.check_run_options(args)
-                self.assertIs(args.open_after_scan, expected, word)
-
-    def test_cli_rejects_unknown_value(self):
-        with redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
-            self.parse(["--open-after-scan", "always"])
-
-    def test_invalid_env_is_an_error(self):
-        err = io.StringIO()
-        with clean_env(), mock.patch.dict(os.environ, {"PUSHSCAN_OPEN_AFTER_SCAN": "bogus",
-                                                       "PUSHSCAN_PRINTER": "192.0.2.1"}), \
-                mock.patch("pushscan2folder.__main__.pause_before_exit"), \
-                mock.patch("pushscan2folder.__main__.greeting", return_value=None), \
-                redirect_stderr(err):
-            self.assertEqual(cli.main(["run"]), 2)
-        self.assertIn("PUSHSCAN_OPEN_AFTER_SCAN", err.getvalue())
-
-    def test_env_value_is_case_insensitive(self):
-        with clean_env(), mock.patch.dict(os.environ, {"PUSHSCAN_OPEN_AFTER_SCAN": "Folder"}), \
-                mock.patch("pushscan2folder.__main__.pause_before_exit"), \
-                mock.patch("pushscan2folder.__main__.greeting", return_value=None), \
-                mock.patch.object(cli.PushScanService, "run") as run, \
-                mock.patch("pushscan2folder.__main__.install_signal_handlers"):
-            self.assertEqual(cli.main(["--printer", "192.0.2.1", "run"]), 0)
-        run.assert_called_once()
+    def test_removed_environment_variable_is_ignored(self):
+        cfg = Config()
+        with clean_env(), mock.patch.dict(os.environ, {"PUSHSCAN_OPEN_AFTER_SCAN": "yes"}):
+            args = cli.build_parser(cfg).parse_args(["--printer", "x", "run"])
+        self.assertIs(cli.service_options(args, cfg)["open_after_scan"], False)
 
     def test_config_validation_and_roundtrip(self):
         with self.assertRaises(ConfigError):
-            load_config_text('[defaults]\nopen_after_scan = "always"\n')
-        cfg = load_config_text('[defaults]\nopen_after_scan = true\n')
+            load_config_text('open_after_scan = "always"\n')
+        cfg = load_config_text('open_after_scan = true\n')
         self.assertIn("open_after_scan = true", dump_config(cfg))
         self.assertIs(load_config_text(dump_config(cfg)).open_after_scan, True)
-
-    def test_web_settings(self):
-        self.assertIn("open_after_scan", web.SETTING_KEYS)
-        new, errors = web.check_settings({"open_after_scan": "true"})
-        self.assertEqual((errors, new.open_after_scan), ([], True))
-        # an unticked check box is saved as false, not as "not set"
-        for form, expected in (({}, "false"), ({"open_after_scan": "1"}, "true")):
-            values = web.settings_from_form(form)
-            self.assertEqual(values["open_after_scan"], expected)
-        new, _ = web.check_settings(web.settings_from_form({}))
-        self.assertIs(new.open_after_scan, False)
-        values = web.settings_values(load_config_text('[defaults]\nopen_after_scan = true\n'))
-        self.assertEqual(values["open_after_scan"], "true")
-
-    def test_web_page_shows_a_check_box_with_hint(self):
-        with tempfile.TemporaryDirectory() as d:
-            ctx = web.WebContext(object(), LogBuffer(), "192.0.2.1", Path(d),
-                                 config_path=Path(d) / "c.toml")
-            page = web.render_settings(ctx, "tok").decode()
-        self.assertIn('type="checkbox" name="open_after_scan"', page)
-        self.assertIn("desktop PC", page)
-
-    def test_web_override_is_reported(self):
-        with clean_env(), mock.patch.dict(os.environ, {"PUSHSCAN_OPEN_AFTER_SCAN": "file"}):
-            args, cfg = cli.parse_args(["--printer", "x"])
-            overrides, effective = cli.web_overrides(args, cfg, ["--printer", "x"])
-        self.assertIn("PUSHSCAN_OPEN_AFTER_SCAN", overrides["open_after_scan"])
-        self.assertEqual(effective["open_after_scan"], "yes")
 
 
 class WizardBackgroundTests(TempDirCase):
