@@ -6,6 +6,7 @@ out), so the flow can be tested without a console or a network."""
 from __future__ import annotations
 
 import getpass
+import ipaddress
 import os
 import shutil
 from pathlib import Path
@@ -15,10 +16,11 @@ from . import platform_support, protocol
 from .config import (SAME_FOLDER, Config, ConfigError, TargetSpec, dump_config, load_config,
                      safe_dirname, write_config)
 from .escl import EsclClient
-from .web import MIN_PASSWORD_LENGTH
+from .terminal import link
+from .web import MIN_PASSWORD_LENGTH, is_loopback
 
 EXAMPLE_PASSWORD = "change-me-please"  # placeholder in docker-compose.yml
-DEFAULT_PORT = 8080
+DEFAULT_PORT = 8737
 DEFAULT_BIND = "127.0.0.1"
 PASSWORD_FILE_NAME = "web_password.txt"
 EXISTING_CHOICES = {"1": "use", "2": "change", "3": "new"}
@@ -35,6 +37,18 @@ def password_problem(password: str) -> str | None:
         return f"the web password must have at least {MIN_PASSWORD_LENGTH} characters"
     if password == EXAMPLE_PASSWORD:
         return "replace the example web password with your own"
+    return None
+
+
+def bind_problem(address: str) -> str | None:
+    """Why `address` cannot be the bind address of the web page, or None.
+    Only IP addresses and "localhost" (a host name would need DNS at every start)."""
+    if address == "localhost":
+        return None
+    try:
+        ipaddress.ip_address(address)
+    except ValueError:
+        return "enter an IP address such as 127.0.0.1 or 0.0.0.0 (no port)"
     return None
 
 
@@ -68,6 +82,7 @@ class Setup:
                  probe_fn: Callable[[str], tuple[bool, str]] | None = None,
                  autostart_fn: Callable[[list[str]], int] | None = None,
                  start_fn: Callable[[list[str]], int] | None = None,
+                 discover_fn: Callable[[], list] | None = None,
                  out: Callable[..., None] = print, default_name: str = "scan"):
         self.path = Path(config_path)
         # looked up here, not as default values, so tests can replace them
@@ -76,6 +91,7 @@ class Setup:
         self.probe = probe_fn or probe_printer
         self.autostart_fn, self.out, self.default_name = autostart_fn, out, default_name
         self.start_fn = start_fn
+        self.discover_fn = discover_fn  # None: no network search (tests)
         self.background_started = False  # True after a successful background start
 
     # --- small prompts ---------------------------------------------------------
@@ -99,11 +115,40 @@ class Setup:
 
     # --- questions -------------------------------------------------------------
 
-    def ask_printer(self, current: str | None) -> str:
+    def pick_scanner(self) -> str | None:
+        """Search the network and let the user pick a scanner by number, type
+        an address, or search again ("s"). None: no address given."""
         while True:
-            host = self.ask("Printer IP address or host name", current)
+            self.out("Searching the network for scanners (eSCL, about 5 seconds) ...")
+            try:
+                found = self.discover_fn()
+            except Exception as exc:  # the search is only a help
+                self.out(f"The search failed: {exc}")
+                return None
+            if found:
+                for number, scanner in enumerate(found, 1):
+                    label = scanner.model or scanner.name
+                    self.out(f"  {number}  {scanner.address}  {label}")
+                answer = self.ask("Number of your printer, its IP address, or s to search "
+                                  "again", "1")
+            else:
+                self.out("No scanner answered. The IP address of the printer is shown in "
+                         "the network settings on the printer panel.")
+                answer = self.ask("Printer IP address, or s to search again", "s")
+            if answer.strip().lower() == "s":
+                continue
+            if found and answer.isdigit() and 1 <= int(answer) <= len(found):
+                return found[int(answer) - 1].address
+            return answer or None
+
+    def ask_printer(self, current: str | None) -> str:
+        host = self.pick_scanner() if not current and self.discover_fn is not None else None
+        while True:
+            if host is None:
+                host = self.ask("Printer IP address or host name", current)
             if not host:
                 self.out("The printer is required.")
+                host = None
                 continue
             self.out(f"Checking {host} ...")
             ok, text = self.probe(host)
@@ -112,6 +157,7 @@ class Setup:
                 return host
             if self.yes_no("Use this address anyway?", False):
                 return host
+            host = None
 
     def ask_name(self, current: str) -> str:
         self.out("The panel name is what you pick on the printer under Scan to PC.")
@@ -149,9 +195,21 @@ class Setup:
                 cfg.web_port = int(port)
                 break
             self.out("Enter a port number from 1 to 65535.")
+        old_bind = cfg.web_bind if cfg.web_bind and not is_loopback(cfg.web_bind) else None
+        if not self.yes_no("Should other devices (phone, tablet) reach the web page?",
+                           old_bind is not None):
+            # Only this PC: no password needed. An old password file stays (login stays).
+            cfg.web_bind = DEFAULT_BIND
+            return
         self.out("Bind address: 127.0.0.1 means only this PC can open the page. "
                  "0.0.0.0 makes it reachable from your whole network.")
-        cfg.web_bind = self.ask("Bind address", cfg.web_bind or DEFAULT_BIND)
+        while True:
+            bind = self.ask("Bind address", old_bind or "0.0.0.0")
+            problem = bind_problem(bind)
+            if problem is None:
+                cfg.web_bind = bind
+                break
+            self.out(f"Error: {problem}")
         existing = Path(cfg.web_password_file) if cfg.web_password_file else None
         if existing is not None and existing.is_file() \
                 and self.yes_no("Keep the existing web password?", True):
@@ -167,10 +225,8 @@ class Setup:
         """Windows only: open the folder after each scan."""
         if not platform_support.is_windows():
             return
-        if self.yes_no("Open the folder after each scan?", cfg.open_after_scan != "off"):
-            cfg.open_after_scan = "file" if cfg.open_after_scan == "file" else "folder"
-        else:
-            cfg.open_after_scan = "off"
+        cfg.open_after_scan = self.yes_no("Open the folder after each scan?",
+                                          cfg.open_after_scan is not False)
 
     def offer_start(self, log_path: Path) -> bool:
         """Ask how to start now. True: run in the foreground now. On Windows the
@@ -190,7 +246,7 @@ class Setup:
 
     def show(self, cfg: Config) -> None:
         base = Path(cfg.output or platform_support.default_output())
-        self.out(f"Found the config file {self.path}")
+        self.out(f"Found the config file {link(self.path)}")
         self.out(f"  printer: {cfg.printer or 'not set'}")
         for spec in cfg.targets:
             self.out(f"  panel name {spec.name!r} -> {target_folder(base, spec)}")
@@ -221,6 +277,10 @@ class Setup:
     def backup(self) -> None:
         """Keep a copy of the old file before it is replaced."""
         backup = self.path.with_name(self.path.name + ".bak")
+        number = 1
+        while backup.exists():  # never overwrite an older copy
+            number += 1
+            backup = self.path.with_name(f"{self.path.name}.{number}.bak")
         shutil.copy2(self.path, backup)
         self.out(f"The old file is kept as {backup}")
 
@@ -234,7 +294,7 @@ class Setup:
             try:
                 cfg = load_config(self.path)
             except ConfigError as exc:
-                self.out(f"The config file {self.path} has an error: {exc}")
+                self.out(f"The config file {link(self.path)} has an error: {exc}")
                 if not self.yes_no("Start over with a new configuration?", False):
                     raise  # a broken file is never overwritten without asking
                 self.backup()
@@ -250,7 +310,7 @@ class Setup:
                 else:
                     self.out("Comments in the file are not kept when it is saved again.")
         else:
-            self.out(f"The config file will be {self.path}")
+            self.out(f"The config file will be {link(self.path)}")
 
         cfg.printer = self.ask_printer(cfg.printer)
         if cfg.targets:
@@ -284,17 +344,17 @@ class Setup:
         out = self.out
         out("")
         out("Setup done.")
-        out(f"  Config file: {self.path}")
+        out(f"  Config file: {link(self.path)}")
         out(f"  Printer:     {cfg.printer}")
         base = Path(cfg.output or platform_support.default_output())
         for spec in cfg.targets:
-            out(f"  Scans of '{spec.name}' go to: {target_folder(base, spec)}")
+            out(f"  Scans of '{spec.name}' go to: {link(target_folder(base, spec))}")
         if cfg.web_enabled:
             host = "127.0.0.1" if cfg.web_bind in (None, "0.0.0.0") else cfg.web_bind
             out(f"  Web page:    http://{host}:{cfg.web_port or DEFAULT_PORT}")
         else:
             out("  Web page:    off")
         if autostart:
-            out(f"  Autostart:   on, log file {log_path}")
+            out(f"  Autostart:   on, log file {link(log_path)}")
         out("To change something later, edit the config file or run "
             "'pushscan2folder setup' again.")

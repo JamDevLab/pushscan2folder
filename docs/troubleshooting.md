@@ -21,8 +21,9 @@ GitHub ask for the details. To report a new printer model, see
 - Protocol details and open questions are in [PROTOCOL.md](PROTOCOL.md).
 - Panel names: 31 characters, about 25 visible, ASCII letters, digits, space,
   `-`, `_`, `@` only. See [Panel names](configuration.md#panel-names).
-- The tool contacts only the printer. Discovery is not implemented, so you must
-  give the printer address.
+- The tool contacts only the printer. Only `pushscan2folder setup` searches the
+  network (mDNS), and only to suggest an address. For `run` you must give the
+  printer address.
 
 ## Known behaviour
 
@@ -35,8 +36,8 @@ GitHub ask for the details. To report a new printer model, see
   check it before the next multi-page scan.
 - Multi-page scans are verified with A4 at 300 dpi. Other resolutions and
   sizes use the same parameters but have not been tested yet.
-- The border trim values for the TR8550 (3 mm right, 2 mm bottom) are still
-  to be verified.
+- Tested border trim values for the TR8550: `trim_right = 1` and
+  `trim_bottom = 2` (mm), see [Trimming a border](configuration.md#trimming-a-border).
 - Selecting a name on the panel without starting a scan triggers nothing.
 - The printer drops a registration after roughly 60 s without polls. The tool
   polls every 5 s during long scans and registers again automatically, see
@@ -46,6 +47,33 @@ GitHub ask for the details. To report a new printer model, see
 
 ## Common problems
 
+- Setup finds no printer: the search uses mDNS (Bonjour), which a firewall,
+  a VPN, a guest network or a router setting can block, and it works only in
+  the same network. Enter the IP address, it is shown in the network settings
+  on the printer panel. On Windows, the firewall may ask once to allow the
+  program, see [Finding the printer](windows.md#finding-the-printer).
+- The web page's "Search the network" finds no printer: the search needs
+  multicast, which Docker's default bridge network does not pass on, and a
+  firewall or VPN can block it too. Set the address in the config file or in
+  `PUSHSCAN_PRINTER`. There is no button while `PUSHSCAN_PRINTER` or `--printer`
+  is set.
+- A changed config file has no effect: the log shows why. An invalid file is
+  logged once as an error and the running settings stay. The `[web]` options,
+  the log file, the debug log and the heartbeat file need a restart, see
+  [Changing the file while running](configuration.md#changing-the-file-while-running).
+- `pushscan2folder stop` seems to hang: a scan is running. It waits up to 10
+  minutes for the scan to finish and save, and prints that it does.
+- The container shows `unhealthy` in `docker ps`: the printer was not
+  reachable for 2 minutes, for example because it is switched off or the
+  network is down. See [Healthcheck](docker.md#healthcheck).
+- A foreground `run` refuses to start because the background instance runs:
+  both would register the same panel names. Run `pushscan2folder stop` first,
+  see [Run in the background](windows.md#run-in-the-background).
+- The log shows an address like `172.x.x.1` for web logins in Docker: see
+  [Client address in the log](docker.md#client-address-in-the-log).
+- The scan has an unexpected file name: see [File names](configuration.md#file-names).
+  A target's own `filename` wins over `[defaults]`, and `PUSHSCAN_FILENAME` or
+  `--filename` win over the config file.
 - The name does not show up on the panel: names with characters other than
   letters, digits, space, `-`, `_` and `@` are rejected, see
   [Panel names](configuration.md#panel-names). After a printer restart the

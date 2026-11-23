@@ -1,5 +1,6 @@
 """Background instance (start, stop, status), uninstall, open after scan and the
 icon writer. Everything is mocked: no real process, registry or explorer."""
+import base64
 import io
 import os
 import struct
@@ -114,6 +115,59 @@ class StopTests(TempDirCase):
                                           clock=lambda: now[0],
                                           kill=lambda pid: runner.release())
         self.assertEqual(result, background.TERMINATED)
+
+    def test_waits_longer_while_a_scan_runs(self):
+        runner, caller = self.instance(), self.instance()
+        runner.claim()
+        runner.set_busy(True)
+        now = [0.0]
+        told = []
+
+        def sleep(seconds):
+            now[0] += seconds
+            if now[0] >= 100:          # the scan ends and the loop stops
+                runner.set_busy(False)
+                runner.release()
+
+        kill = mock.Mock()
+        result = background.stop_instance(caller, timeout=3, poll=1, sleep=sleep,
+                                          clock=lambda: now[0], kill=kill,
+                                          on_wait_for_scan=lambda: told.append(1))
+        self.assertEqual(result, background.STOPPED)
+        self.assertEqual(told, [1])
+        kill.assert_not_called()
+
+    def test_terminated_when_the_scan_never_ends(self):
+        runner, caller = self.instance(), self.instance()
+        runner.claim()
+        runner.set_busy(True)
+        now = [0.0]
+
+        def kill(pid):
+            self.assertGreaterEqual(now[0], 20)
+            runner.release()
+
+        result = background.stop_instance(caller, timeout=3, poll=1,
+                                          sleep=lambda s: now.__setitem__(0, now[0] + s),
+                                          clock=lambda: now[0], kill=kill, scan_timeout=20)
+        self.assertEqual(result, background.TERMINATED)
+        self.assertFalse(caller.busy_path.exists())
+
+    def test_release_clears_the_busy_mark(self):
+        inst = self.instance()
+        inst.claim()
+        inst.set_busy(True)
+        self.assertTrue(inst.is_busy())
+        inst.release()
+        self.assertFalse(inst.is_busy())
+
+    def test_claim_clears_a_stale_busy_mark(self):
+        inst = self.instance()
+        inst.dir.mkdir(parents=True, exist_ok=True)
+        inst.busy_path.write_text("scan\n")
+        self.assertTrue(inst.claim())
+        self.assertFalse(inst.is_busy())
+        inst.release()
 
     def test_failed_if_nothing_helps(self):
         runner, caller = self.instance(), self.instance()
@@ -242,6 +296,18 @@ class LaunchTests(TempDirCase):
                                                 sleep=lambda s: None)
         self.assertFalse(ok)
         self.assertIn("exit code 3", message)
+
+    def test_error_output_of_a_dying_child_is_shown(self):
+        inst = self.instance()
+
+        def popen(*args, **kwargs):
+            kwargs["stderr"].write(b"error: invalid PUSHSCAN_MULTIPAGE 'x'\n")
+            return FakeProc(2)
+        ok, message = background.start_instance(["run"], inst, popen=popen,
+                                                sleep=lambda s: None)
+        self.assertFalse(ok)
+        self.assertIn("exit code 2", message)
+        self.assertIn("invalid PUSHSCAN_MULTIPAGE", message)
 
     def test_child_that_never_reports(self):
         inst = self.instance()
@@ -431,6 +497,21 @@ class BackgroundRunTests(TempDirCase):
         run.assert_not_called()
 
 
+    def test_foreground_run_refuses_while_background_runs(self):
+        env = {"XDG_STATE_HOME": str(self.dir), "LOCALAPPDATA": str(self.dir)}
+        with clean_env(), mock.patch.dict(os.environ, env):
+            runner = background.Instance()
+            self.addCleanup(runner.release)
+            self.assertTrue(runner.claim())
+            with mock.patch.object(cli.PushScanService, "run") as run, \
+                    mock.patch("pushscan2folder.__main__.install_signal_handlers"), \
+                    mock.patch("pushscan2folder.__main__.pause_before_exit"), \
+                    mock.patch("pushscan2folder.__main__.greeting", return_value=None):
+                code = cli.main(["--printer", "192.0.2.1", "--output", str(self.dir / "o")])
+        self.assertEqual(code, 2)
+        run.assert_not_called()
+
+
 class SummaryHintTests(unittest.TestCase):
     def test_foreground_hint(self):
         with clean_env():
@@ -585,26 +666,31 @@ class DesktopTests(unittest.TestCase):
     def test_windows_folder_selects_the_file(self):
         popen = mock.Mock()
         with mock.patch.object(sys, "platform", "win32"):
-            self.assertTrue(desktop.open_saved("folder", [Path("C:/s/a.pdf"), Path("C:/s/b.pdf")],
+            self.assertTrue(desktop.open_saved(True, [Path("C:/s/a.pdf"), Path("C:/s/b.pdf")],
                                                popen=popen))
-        popen.assert_called_once_with(f'explorer.exe /select,"{Path("C:/s/a.pdf")}"')
+        args, kwargs = popen.call_args
+        self.assertEqual(args[0][0], "powershell.exe")
+        self.assertEqual(kwargs["env"]["PUSHSCAN_SELECT"], str(Path("C:/s/a.pdf")))
+        self.assertEqual(kwargs["creationflags"], desktop.CREATE_NO_WINDOW)
+        script = base64.b64decode(args[0][-1]).decode("utf-16-le")
+        self.assertEqual(script, desktop.SELECT_SCRIPT)
+        self.assertIn("Shell.Application", script)
 
-    def test_windows_file_uses_startfile_once(self):
-        paths = [Path("C:/s/a.pdf"), Path("C:/s/b.pdf")]
-        with mock.patch.object(sys, "platform", "win32"), \
-                mock.patch.object(os, "startfile", create=True) as startfile:
-            self.assertTrue(desktop.open_saved("file", paths, popen=mock.Mock()))
-        startfile.assert_called_once_with(paths[0])
+    def test_windows_folder_without_powershell(self):
+        popen = mock.Mock(side_effect=[FileNotFoundError("powershell.exe"), None])
+        with mock.patch.object(sys, "platform", "win32"):
+            self.assertTrue(desktop.open_saved(True, [Path("C:/my scans/a.pdf")],
+                                               popen=popen))
+        self.assertEqual(popen.call_args[0][0], f'explorer.exe /select,"{Path("C:/my scans/a.pdf")}"')
 
     def test_linux_and_macos(self):
         path = Path("/home/u/Scans/a.pdf")
         for platform, opener in (("linux", "xdg-open"), ("darwin", "open")):
-            for mode, target in (("folder", "/home/u/Scans"), ("file", str(path))):
-                popen = mock.Mock()
-                with mock.patch.object(sys, "platform", platform), \
-                        mock.patch.dict(os.environ, {"DISPLAY": ":0"}):
-                    self.assertTrue(desktop.open_saved(mode, [path], popen=popen))
-                self.assertEqual(popen.call_args[0][0], [opener, str(Path(target))])
+            popen = mock.Mock()
+            with mock.patch.object(sys, "platform", platform), \
+                    mock.patch.dict(os.environ, {"DISPLAY": ":0"}):
+                self.assertTrue(desktop.open_saved(True, [path], popen=popen))
+            self.assertEqual(popen.call_args[0][0], [opener, str(Path("/home/u/Scans"))])
 
     def test_linux_without_desktop_does_nothing(self):
         popen = mock.Mock()
@@ -612,41 +698,41 @@ class DesktopTests(unittest.TestCase):
         with mock.patch.object(sys, "platform", "linux"), \
                 mock.patch.dict(os.environ, env, clear=True), \
                 self.assertLogs("pushscan2folder.desktop", "WARNING"):
-            self.assertFalse(desktop.open_saved("folder", [Path("/x/a.pdf")], popen=popen))
+            self.assertFalse(desktop.open_saved(True, [Path("/x/a.pdf")], popen=popen))
         popen.assert_not_called()
 
     def test_off_and_empty(self):
         popen = mock.Mock()
-        self.assertFalse(desktop.open_saved("off", [Path("a.pdf")], popen=popen))
-        self.assertFalse(desktop.open_saved("folder", [], popen=popen))
+        self.assertFalse(desktop.open_saved(False, [Path("a.pdf")], popen=popen))
+        self.assertFalse(desktop.open_saved(True, [], popen=popen))
         popen.assert_not_called()
 
     def test_failure_is_only_a_warning(self):
         with mock.patch.object(sys, "platform", "linux"), \
                 mock.patch.dict(os.environ, {"DISPLAY": ":0"}), \
                 self.assertLogs("pushscan2folder.desktop", "WARNING") as logs:
-            result = desktop.open_saved("folder", [Path("/x/a.pdf")],
+            result = desktop.open_saved(True, [Path("/x/a.pdf")],
                                         popen=mock.Mock(side_effect=FileNotFoundError("xdg-open")))
         self.assertFalse(result)
         self.assertIn("could not open", logs.output[0])
 
     def test_service_opens_once_per_job(self):
-        service = PushScanService(None, None, [], ScanSettings(), open_after_scan="folder")
+        service = PushScanService(None, None, [], ScanSettings(), open_after_scan=True)
         paths = [Path("a_01.pdf"), Path("a_02.pdf")]
         with mock.patch.object(service, "_scan_to", return_value=paths), \
                 mock.patch("pushscan2folder.service.desktop.open_saved") as opener:
             service.scan_to(Target("Scan", Path("out")))
-        opener.assert_called_once_with("folder", paths)
+        opener.assert_called_once_with(True, paths)
 
     def test_service_does_not_open_when_nothing_was_saved(self):
-        service = PushScanService(None, None, [], ScanSettings(), open_after_scan="folder")
+        service = PushScanService(None, None, [], ScanSettings(), open_after_scan=True)
         with mock.patch.object(service, "_scan_to", return_value=[]), \
                 mock.patch("pushscan2folder.service.desktop.open_saved") as opener:
             service.scan_to(Target("Scan", Path("out")))
         opener.assert_not_called()
 
     def test_a_failing_opener_never_fails_the_scan(self):
-        service = PushScanService(None, None, [], ScanSettings(), open_after_scan="file")
+        service = PushScanService(None, None, [], ScanSettings(), open_after_scan=True)
         with mock.patch.object(service, "_scan_to", return_value=[Path("a.pdf")]), \
                 mock.patch.object(desktop, "has_desktop", side_effect=RuntimeError("boom")), \
                 self.assertLogs("pushscan2folder.desktop", "WARNING"):
@@ -661,21 +747,33 @@ class OpenAfterScanConfigTests(unittest.TestCase):
                 ["--printer", "192.0.2.1"] + argv))
 
     def test_builtin_is_off(self):
-        self.assertEqual(self.parse([]).open_after_scan, "off")
+        self.assertIs(self.parse([]).open_after_scan, False)
 
     def test_config_file(self):
-        args = self.parse([], '[defaults]\nopen_after_scan = "file"\n')
-        self.assertEqual(args.open_after_scan, "file")
+        args = self.parse([], '[defaults]\nopen_after_scan = true\n')
+        self.assertIs(args.open_after_scan, True)
 
     def test_env_beats_config_and_cli_beats_env(self):
-        toml = '[defaults]\nopen_after_scan = "file"\n'
-        with mock.patch.dict(os.environ, {"PUSHSCAN_OPEN_AFTER_SCAN": "folder"}):
+        toml = '[defaults]\nopen_after_scan = false\n'
+        with mock.patch.dict(os.environ, {"PUSHSCAN_OPEN_AFTER_SCAN": "yes"}):
             cfg = load_config_text(toml)
             parser = cli.build_parser(cfg)
             self.assertEqual(parser.parse_args(["--printer", "x", "run"]).open_after_scan,
-                             "folder")
+                             True)
             self.assertEqual(parser.parse_args(["--printer", "x", "run", "--open-after-scan",
-                                                "off"]).open_after_scan, "off")
+                                                "no"]).open_after_scan, "no")
+            args = parser.parse_args(["--printer", "x", "run", "--open-after-scan", "no"])
+            cli.check_run_options(args)
+            self.assertIs(args.open_after_scan, False)
+
+    def test_env_accepts_the_usual_words_and_the_old_ones(self):
+        for word, expected in (("true", True), ("yes", True), ("1", True), ("on", True),
+                               ("folder", True), ("file", True), ("false", False),
+                               ("no", False), ("0", False), ("OFF", False)):
+            with mock.patch.dict(os.environ, {"PUSHSCAN_OPEN_AFTER_SCAN": word}):
+                args = cli.build_parser(None).parse_args(["--printer", "x", "run"])
+                cli.check_run_options(args)
+                self.assertIs(args.open_after_scan, expected, word)
 
     def test_cli_rejects_unknown_value(self):
         with redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
@@ -703,27 +801,29 @@ class OpenAfterScanConfigTests(unittest.TestCase):
     def test_config_validation_and_roundtrip(self):
         with self.assertRaises(ConfigError):
             load_config_text('[defaults]\nopen_after_scan = "always"\n')
-        cfg = load_config_text('[defaults]\nopen_after_scan = "folder"\n')
-        self.assertIn('open_after_scan = "folder"', dump_config(cfg))
-        self.assertEqual(load_config_text(dump_config(cfg)).open_after_scan, "folder")
+        cfg = load_config_text('[defaults]\nopen_after_scan = true\n')
+        self.assertIn("open_after_scan = true", dump_config(cfg))
+        self.assertIs(load_config_text(dump_config(cfg)).open_after_scan, True)
 
     def test_web_settings(self):
         self.assertIn("open_after_scan", web.SETTING_KEYS)
-        new, errors = web.check_settings({"open_after_scan": "file"})
-        self.assertEqual((errors, new.open_after_scan), ([], "file"))
-        _, errors = web.check_settings({"open_after_scan": "sometimes"})
-        self.assertTrue(errors)
-        values = web.settings_values(load_config_text('[defaults]\nopen_after_scan = "file"\n'))
-        self.assertEqual(values["open_after_scan"], "file")
+        new, errors = web.check_settings({"open_after_scan": "true"})
+        self.assertEqual((errors, new.open_after_scan), ([], True))
+        # an unticked check box is saved as false, not as "not set"
+        for form, expected in (({}, "false"), ({"open_after_scan": "1"}, "true")):
+            values = web.settings_from_form(form)
+            self.assertEqual(values["open_after_scan"], expected)
+        new, _ = web.check_settings(web.settings_from_form({}))
+        self.assertIs(new.open_after_scan, False)
+        values = web.settings_values(load_config_text('[defaults]\nopen_after_scan = true\n'))
+        self.assertEqual(values["open_after_scan"], "true")
 
-    def test_web_page_shows_an_editable_select_with_hint(self):
+    def test_web_page_shows_a_check_box_with_hint(self):
         with tempfile.TemporaryDirectory() as d:
             ctx = web.WebContext(object(), LogBuffer(), "192.0.2.1", Path(d),
                                  config_path=Path(d) / "c.toml")
             page = web.render_settings(ctx, "tok").decode()
-        self.assertIn('<select name="open_after_scan"', page)
-        for value in ("folder", "file", "off"):
-            self.assertIn(f'value="{value}"', page)
+        self.assertIn('type="checkbox" name="open_after_scan"', page)
         self.assertIn("desktop PC", page)
 
     def test_web_override_is_reported(self):
@@ -731,7 +831,7 @@ class OpenAfterScanConfigTests(unittest.TestCase):
             args, cfg = cli.parse_args(["--printer", "x"])
             overrides, effective = cli.web_overrides(args, cfg, ["--printer", "x"])
         self.assertIn("PUSHSCAN_OPEN_AFTER_SCAN", overrides["open_after_scan"])
-        self.assertEqual(effective["open_after_scan"], "file")
+        self.assertEqual(effective["open_after_scan"], "yes")
 
 
 class WizardBackgroundTests(TempDirCase):
@@ -764,7 +864,7 @@ class WizardBackgroundTests(TempDirCase):
         self.assertIn("pushscan2folder stop", text)
         self.assertIn("pushscan2folder.log", text)
         cfg = load_config_text((self.dir / "cfg" / "config.toml").read_text(encoding="utf-8"))
-        self.assertEqual(cfg.open_after_scan, "folder")
+        self.assertIs(cfg.open_after_scan, True)
 
     def test_declining_both_gives_the_foreground_question(self):
         start = mock.Mock(return_value=0)
@@ -773,7 +873,7 @@ class WizardBackgroundTests(TempDirCase):
         self.assertTrue(foreground)
         start.assert_not_called()
         cfg = load_config_text((self.dir / "cfg" / "config.toml").read_text(encoding="utf-8"))
-        self.assertEqual(cfg.open_after_scan, "off")
+        self.assertIs(cfg.open_after_scan, False)
 
     def test_failed_background_start_falls_back(self):
         _, foreground, text = self.run_setup(self.BASE + ["", "", "", ""],

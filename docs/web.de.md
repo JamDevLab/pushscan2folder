@@ -34,15 +34,15 @@ die Oberfläche ist dort also ebenfalls aus, bis du sie einkommentierst.
 PUSHSCAN_WEB=1 PUSHSCAN_WEB_PASSWORD='a long password' \
 PUSHSCAN_CONFIG=~/pushscan.toml \
 PYTHONPATH=src python3 -m pushscan2folder --printer 192.168.1.50 run
-# web page on http://0.0.0.0:8080
+# web page on http://0.0.0.0:8737
 ```
 
 | Einstellung | Bedeutung |
 |-------------|-----------|
 | `PUSHSCAN_WEB=1` / `--web` | aktivieren (nur `run`) |
-| `PUSHSCAN_WEB_PORT` / `--web-port` | Port, Standard 8080 |
-| `PUSHSCAN_WEB_BIND` / `--web-bind` | Adresse, Standard `0.0.0.0` (mit `127.0.0.1` bleibt sie lokal) |
-| `PUSHSCAN_WEB_PASSWORD` | Passwort, mindestens 8 Zeichen |
+| `PUSHSCAN_WEB_PORT` / `--web-port` | Port, Standard 8737 |
+| `PUSHSCAN_WEB_BIND` / `--web-bind` | Adresse; nicht gesetzt: `0.0.0.0`, wenn ein Passwort gesetzt ist, sonst `127.0.0.1` (nur dieser PC, kein Passwort nötig) |
+| `PUSHSCAN_WEB_PASSWORD` | Passwort, mindestens 8 Zeichen (auf einer Loopback-Adresse optional) |
 | `PUSHSCAN_WEB_PASSWORD_FILE` | Datei mit dem Passwort (z. B. ein Docker-Secret); wird genutzt, wenn die Variable darüber nicht gesetzt ist |
 | `[web] password_file` | Schlüssel der Konfigurationsdatei, wie oben; wird genutzt, wenn beide Variablen fehlen. Relative Pfade gelten relativ zur Konfigurationsdatei |
 | `PUSHSCAN_WEB_SECURE_COOKIE=1` | nur hinter einem HTTPS-Reverse-Proxy: `Secure`-Cookie siehe [HTTPS](#https-hinter-einem-reverse-proxy) |
@@ -56,7 +56,16 @@ neben der Konfigurationsdatei ab. Kommandozeile und Umgebung haben Vorrang vor d
 Tabelle. Die Einstellungsseite zeigt die Tabelle nur an: Die Anmeldung lässt sich
 nicht über die Weboberfläche ändern.
 
-Ohne gültiges Passwort startet das Programm nicht (Exit-Code 2). Es liest das
+Ohne Passwort startet die Seite nur, wenn sie ausschließlich auf diesem PC
+lauscht: Bei der Bind-Adresse `127.0.0.1` (oder einer anderen `127.x.x.x`),
+`::1` oder `localhost` läuft sie dann ohne Anmeldung, das Log sagt "web page
+only on this PC", und die Navigationsleiste zeigt "No login: this page is only
+reachable from this PC." Jede andere Bind-Adresse (auch `0.0.0.0`)
+braucht ein Passwort; ohne startet das Programm nicht (Exit-Code 2). Ein
+konfiguriertes Passwort wird immer benutzt, auch auf einer Loopback-Adresse.
+Wer diesen PC benutzen kann, öffnet eine Seite ohne Anmeldung, setze also auf
+einem gemeinsam genutzten PC ein Passwort. CSRF-Token, Origin-Prüfung und
+Host-Namen-Prüfung bleiben ohne Anmeldung aktiv. Das Programm liest das
 Passwort selbst nie aus der Konfigurationsdatei und schreibt oder zeigt es nie.
 
 ## Passwort-Optionen
@@ -104,17 +113,37 @@ Fehler, damit ein Tippfehler keinen Schutz ausschaltet.
   nächsten Abfragezyklus zur neuen Liste (bis dahin als "pending" angezeigt).
   Die Optionen für *Automatisch* je Ziel zeigen den aktuellen Standardwert,
   etwa "Default (300 dpi)"; er stammt von der Einstellungsseite.
+  Der Editor hat kein Feld für die Dateinamen-Vorlage eines Ziels. Ein
+  `filename`, das ein Ziel in der Konfigurationsdatei hat, bleibt beim Speichern
+  erhalten.
 - Einstellungen (`/settings`) bearbeitet `resolution`, `color`, `format`,
-  `source`, `size`, `open_after_scan` und die vier `trim_*`-Werte aus `[defaults]` sowie
-  `multipage`, `ignore_panel` und `interval`, jeweils mit kurzer Erklärung. Die
+  `source`, `size`, `open_after_scan`, `filename` (angezeigt als "File name",
+  siehe [Dateinamen](configuration.de.md#dateinamen)) und die vier
+  `trim_*`-Werte, `ignore_panel` und `interval` (diese stehen in `[advanced]`)
+  sowie der Mehrseiten-Dialog als zwei Haken, einer für den Dokumenttyp
+  "Dokument" am Panel und einer für "Auto" (wird als `multipage` in
+  `[defaults.document]` und `[defaults.auto]` geschrieben), jeweils mit kurzer Erklärung. Die
   Werte werden mit denselben Regeln wie die Konfigurationsdatei geprüft; ein
-  leeres Feld entfernt den Schlüssel. `printer` und der Basis-Ausgabeordner
-  `output` werden nur angezeigt. Überschreibt eine Umgebungsvariable oder
+  leeres Feld entfernt den Schlüssel. Der Basis-Ausgabeordner `output` wird nur
+  angezeigt. Der Abschnitt "Fixed" zeigt den `printer` mit einem Knopf "Search
+  the network", siehe unten. Überschreibt eine Umgebungsvariable oder
   Kommandozeilenoption einen Wert (etwa `PUSHSCAN_INTERVAL` oder
   `PUSHSCAN_TRIM`), weist die Seite darauf hin und zeigt den verwendeten Wert;
   der gespeicherte Wert wirkt nicht, solange die Überschreibung besteht. Die
-  Einstellungen werden nur in die Datei geschrieben und gelten nach einem
-  Neustart.
+  Einstellungen werden in die Datei geschrieben, und der laufende Dienst
+  übernimmt sie innerhalb eines Abfragezyklus, siehe
+  [Datei im laufenden Betrieb ändern](configuration.de.md#datei-im-laufenden-betrieb-ändern).
+  Nur die `[web]`-Optionen brauchen einen Neustart.
+  Die Druckersuche führt dieselbe mDNS-Suche wie das Setup aus (etwa 5
+  Sekunden) und listet Adresse und Modell jedes gefundenen Scanners, jeweils mit
+  einem Knopf "Use". Der verwendete Drucker ist mit "in use" markiert. "Use"
+  schreibt `printer` in die Konfigurationsdatei und lässt alles andere
+  unverändert; der neue Drucker gilt ab dem nächsten Abfragezyklus. Setzt
+  `PUSHSCAN_PRINTER` oder `--printer` den Drucker (die mitgelieferte
+  Docker-Compose-Datei tut das), gibt es keinen Suchknopf, und die Seite nennt,
+  was ihn überschreibt. In Docker mit dem Standard-Bridge-Netz erreicht
+  Multicast das LAN nicht, die Suche findet dort also nichts. Setze die Adresse
+  dann in der Konfigurationsdatei oder der Umgebung.
 - Konfigurationsdatei (`/config`, von den Einstellungen aus verlinkt) ist ein
   Texteditor für die ganze Datei. Der Text wird unverändert gespeichert,
   Kommentare inklusive, nachdem er wie beim Start geprüft wurde; eine ungültige
@@ -126,8 +155,9 @@ Fehler, damit ein Tippfehler keinen Schutz ausschaltet.
   bereits so in der Datei stehen (etwa `output = "/consume"`), dürfen
   unverändert bleiben. Das Formular enthält einen Hash des Dateitexts: Hat sich
   die Datei inzwischen geändert, wird nichts gespeichert und der neue Inhalt
-  angezeigt. Änderungen an den Zielen werden wie auf der Zielseite übernommen,
-  alles andere nach einem Neustart. Die Größengrenze ist 64 KB.
+  angezeigt. Der laufende Dienst übernimmt die Änderungen innerhalb eines
+  Abfragezyklus, außer den `[web]`-Optionen, die einen Neustart brauchen. Die
+  Größengrenze ist 64 KB.
 
 ## Ziele und Ordner bearbeiten
 
@@ -139,8 +169,12 @@ Ob sich die Ziele bearbeiten lassen, hängt davon ab, woher sie kommen:
   Standardort): editierbar; existiert die Datei noch nicht, legt das erste
   Speichern sie an.
 
+Jede Zielkarte hat außerdem "Open after a scan" (`open_after_scan` des Ziels;
+"Default" nimmt den Wert der Einstellungsseite, "Yes" und "No" entscheiden für dieses Ziel). Auf der Einstellungsseite ist "Open after scan" ein Kontrollkästchen; ohne Haken wird `false` gespeichert, weil ein Kontrollkästchen "nicht gesetzt" nicht ausdrücken kann.
+
 Kommentare in der Konfigurationsdatei gehen beim Speichern über das Ziel- oder
-Einstellungsformular verloren. Die Datei wird neu geschrieben; andere Schlüssel
+Einstellungsformular verloren, bis auf den kurzen Kopf und die auskommentierten
+Beispiele, die neu geschrieben werden. Die Datei wird neu geschrieben; andere Schlüssel
 behalten ihre Werte. Nur der Rohtext-Editor behält Kommentare. Bei jedem
 gespeicherten Ziel werden beide Schalter für mehrseitige Scans ausdrücklich
 geschrieben.
@@ -156,7 +190,8 @@ Weboberfläche zeigt es schreibgeschützt an und behält es beim Speichern bei;
 löschen kannst du es dort trotzdem.
 
 Der Rohtext-Editor lehnt außerdem Änderungen an `output`, `printer` und am
-Abschnitt `[web]` ab. `[web]` legt fest, wer die Seite erreicht und wo das
+Abschnitt `[web]` ab. Den Drucker kannst du nur auf der Einstellungsseite mit
+der Netzwerksuche ändern. `[web]` legt fest, wer die Seite erreicht und wo das
 Passwort liegt; das lässt sich nur in der Datei selbst oder mit
 `pushscan2folder setup` ändern.
 
@@ -180,6 +215,11 @@ Passwort liegt; das lässt sich nur in der Datei selbst oder mit
   und die Seiten senden strikte Header (CSP, kein Framing, kein Caching).
   Ausgeliefert werden nur die Seiten selbst, ein Stylesheet, das Icon und das kleine Skript; die
   Weboberfläche kann keine Dateien lesen oder herunterladen.
+- Die Druckersuche akzeptiert nur eine Adresse aus ihrem eigenen letzten
+  Suchergebnis, niemand kann den Dienst also über die Weboberfläche auf einen
+  anderen Rechner richten. Es läuft nur eine Suche gleichzeitig, und das
+  Formular braucht den CSRF-Token wie jedes andere. Der Rohtext-Editor kann
+  `printer` weiterhin nicht ändern.
 - Browser schicken Cookies an jeden Dienst auf demselben Host, egal auf welchem
   Port. Laufen weitere Weboberflächen auf dem NAS, rufe diese Seite besser über
   einen eigenen Hostnamen auf.
@@ -203,4 +243,7 @@ Konfiguration ein Verzeichnis ein, keine einzelne Datei: Eine einzeln
 eingebundene Datei lässt sich nicht atomar ersetzen, dann schreibt das Programm
 sie direkt neu. Das Verzeichnis muss für den Benutzer
 aus `user:` beschreibbar sein. Setze `PUSHSCAN_TARGETS` nicht, wenn du die
-Ziele auf der Weboberfläche bearbeitest. Mehr unter [Docker](docker.de.md).
+Ziele auf der Weboberfläche bearbeitest. Hinter Docker kann das Log das Gateway
+des Docker-Netzwerks als Client-Adresse zeigen, siehe
+[Client-Adresse im Log](docker.de.md#client-adresse-im-log). Mehr unter
+[Docker](docker.de.md).

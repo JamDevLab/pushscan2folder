@@ -2,6 +2,7 @@
 import tempfile
 import threading
 import unittest
+from unittest import mock
 from datetime import datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -10,6 +11,7 @@ from pushscan2folder import escl, protocol
 from pushscan2folder.client import ChmpClient
 from pushscan2folder.escl import EsclClient, ScanSettings
 from pushscan2folder.service import (PushScanService, Target, Trim, check_targets, output_names,
+                                     render_filename, check_filename,
                                      parse_trim,
                                     parse_targets, safe_dirname)
 
@@ -71,7 +73,8 @@ class FakePrinter(BaseHTTPRequestHandler):
             if st.get("delay"):
                 import time
                 time.sleep(st["delay"])
-            self._send(200, b"%PDF-1.3 cut" if st.get("truncated") else b"%PDF-1.3 fake\n%%EOF\n")
+            self._send(200, b"%PDF-1.3 cut" if st.get("truncated")
+                       else st.get("document", b"%PDF-1.3 fake\n%%EOF\n"))
         else:
             self._send(404)
 
@@ -119,6 +122,36 @@ class ServiceTests(unittest.TestCase):
         self.assertEqual(files[0].read_bytes(), b"%PDF-1.3 fake\n%%EOF\n")
         self.assertIn("<pwg:InputSource>Platen</pwg:InputSource>", FakePrinter.state["settings"])
 
+    def test_target_open_after_scan_wins(self):
+        FakePrinter.state["pending"] = True
+        self.service.open_after_scan = True
+        self.service.targets[0].open_after_scan = False
+        with mock.patch("pushscan2folder.desktop.open_saved") as open_saved:
+            self.service.step()
+        self.assertIs(open_saved.call_args[0][0], False)
+
+    def test_busy_hook_brackets_the_scan(self):
+        FakePrinter.state["pending"] = True
+        calls = []
+        self.service.busy_hook = calls.append
+        self.service.step()
+        self.assertEqual(calls, [True, False])
+
+    def test_busy_hook_is_cleared_after_a_failed_scan(self):
+        calls = []
+        self.service.busy_hook = calls.append
+        target = self.service.targets[0]
+        with mock.patch.object(self.service, "_scan_to", side_effect=OSError("boom")):
+            with self.assertRaises(OSError):
+                self.service.scan_to(target)
+        self.assertEqual(calls, [True, False])
+
+    def test_stop_wanted(self):
+        self.assertFalse(self.service.stop_wanted())
+        self.service.stop_check = lambda: True
+        self.assertTrue(self.service.stop_wanted())
+        self.assertFalse(self.service.stop_event.is_set())
+
     def test_auto_source_uses_adf_when_loaded(self):
         FakePrinter.state.update(pending=True, adf=True)
         self.service.step()
@@ -133,6 +166,26 @@ class ServiceTests(unittest.TestCase):
         self.assertEqual(types[-1], protocol.TYPE_RELEASE)
         self.assertIsNone(self.service.targets[0].session)
 
+
+    def test_heartbeat_after_successful_polls(self):
+        beat = Path(self.tmp.name) / "alive"
+        self.service.heartbeat = beat
+        t = threading.Thread(target=self.service.run)
+        t.start()
+        threading.Timer(0.2, self.service.stop).start()
+        t.join(5)
+        self.assertTrue(beat.is_file())
+
+    def test_no_heartbeat_when_the_printer_is_unreachable(self):
+        beat = Path(self.tmp.name) / "alive"
+        svc = PushScanService(ChmpClient("127.0.0.1", 1), EsclClient("127.0.0.1", 1),
+                              [Target("A", Path(self.tmp.name))], ScanSettings(), interval=0.01)
+        svc.heartbeat = beat
+        t = threading.Thread(target=svc.run)
+        t.start()
+        threading.Timer(0.2, svc.stop).start()
+        t.join(5)
+        self.assertFalse(beat.exists())
 
     def test_long_escl_scan_keeps_registrations_alive(self):
         from pushscan2folder import service as service_module
@@ -382,6 +435,32 @@ class HelperTests(unittest.TestCase):
                              "scan_20261122_000103-1.pdf")
             names = [p.name for p in output_names(Path(d), "jpeg", 2, now)]
             self.assertEqual(names, ["scan_20261122_000103_01.jpg", "scan_20261122_000103_02.jpg"])
+
+    def test_filename_template(self):
+        now = datetime(2026, 11, 22, 18, 30, 5)
+        self.assertEqual(render_filename("scan_{now:%Y%m%d_%H%M%S}", "x", now),
+                         "scan_20261122_183005")
+        self.assertEqual(render_filename("{name}_{date}_{time}", "My PC", now),
+                         "My_PC_2026-11-22_183005")
+        # characters Windows does not allow, and device names
+        self.assertEqual(render_filename("a/b\\c:d", "x", now), "a_b_c_d")
+        self.assertEqual(render_filename("con", "x", now), "_con")
+        self.assertEqual(len(render_filename("x" * 300, "x", now)), 120)
+
+    def test_filename_template_rejects_unsafe_fields(self):
+        for bad in ("{now.__class__}", "{0}", "{}", "{foo}", "{now:{x}}", "{", "  ", "{name[0]}"):
+            with self.assertRaises(ValueError, msg=bad):
+                check_filename(bad)
+        check_filename("{name}")
+
+    def test_output_names_with_template(self):
+        with tempfile.TemporaryDirectory() as d:
+            now = datetime(2026, 11, 22, 0, 1, 3)
+            first = output_names(Path(d), "pdf", 1, now, "{name}", "Rechnung")[0]
+            self.assertEqual(first.name, "Rechnung.pdf")
+            first.write_bytes(b"x")
+            self.assertEqual(output_names(Path(d), "pdf", 1, now, "{name}", "Rechnung")[0].name,
+                             "Rechnung-1.pdf")
 
     def test_job_path(self):
         self.assertEqual(escl.job_path("http://1.2.3.4/eSCL/ScanJobs/x/"), "/eSCL/ScanJobs/x")

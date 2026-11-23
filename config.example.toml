@@ -10,25 +10,43 @@
 
 printer = "192.168.1.50"   # printer IP or host name (--printer)
 output = "/scans"          # base output folder (--output)
-interval = 4               # poll interval in seconds
-verbose = false
-ignore_panel = false       # true: always use [defaults], ignore the panel
-multipage = "document"     # next-page dialog for: document | auto | both | off
 
-# Fallback scan settings (used where the panel sends nothing).
+# Scan settings used where the printer panel sends nothing.
 [defaults]
 resolution = 300           # 75 | 150 | 300 | 600
 color = "color"            # color | gray
 format = "pdf"             # pdf | jpeg
 source = "auto"            # auto | platen | adf
 size = "a4"                # a4 | letter | legal | 10x15 | 13x18
-open_after_scan = "off"    # off | folder | file (desktop PC only: open the result)
+open_after_scan = false    # true: open the folder after a scan (desktop PC only)
+# File name of a scan without extension (--filename / PUSHSCAN_FILENAME).
+# Fields: {name} (panel name), {date} (2026-11-22), {time} (183005) and
+# {now:FORMAT} with strftime codes. Existing files are never overwritten (-1, -2 ...).
+# A [[target]] can set its own filename, it wins over this one.
+# Date and time codes: %Y year, %m month, %d day, %H hour, %M minute, %S second.
+filename = "scan_{now:%Y-%m-%d_%H-%M-%S}"   # e.g. scan_2026-11-22_18-30-05.pdf
+
+# Document type "Document" on the printer panel (Doc. type).
+[defaults.document]
+multipage = true           # ask on the panel for more pages after each one
+
+# Document type "Auto" on the printer panel. The panel sends no size, format
+# or resolution then, so [defaults] and [target.auto] decide. ("Photo" needs
+# no table: the panel sends all of its settings itself.)
+[defaults.auto]
+multipage = false
+
+# Rarely needed.
+[advanced]
+interval = 4               # poll interval in seconds
+verbose = false            # debug log; needs a restart
+ignore_panel = false       # true: always use [defaults], ignore the panel
 # Trim: cut off a border at the glass edge by scanning a smaller area
 # (platen only, not the ADF). In mm, 0 to 50; 0 means no trim.
 trim_left = 0              # mm
 trim_top = 0               # mm
-trim_right = 0             # mm; TR8550: about 3 (to be verified)
-trim_bottom = 0            # mm; TR8550: about 2 (to be verified)
+trim_right = 1             # mm; tested on a TR8550
+trim_bottom = 2            # mm; tested on a TR8550
 
 # Optional web page (status, log, target editor). The password is NOT stored
 # here: put it in a file of its own (`pushscan2folder setup` does this) and
@@ -37,7 +55,7 @@ trim_bottom = 0            # mm; TR8550: about 2 (to be verified)
 # [web]
 # enabled = true
 # bind = "127.0.0.1"         # only this PC; 0.0.0.0 = reachable from the network
-# port = 8080
+# port = 8737
 # password_file = "web_password.txt"   # relative to this config file
 
 # One [[target]] per entry on the printer panel (name: max 31 chars, unique).
@@ -51,7 +69,11 @@ name = "Scans"
 # "Auto scan" (the preset wins over the panel there).
 [[target]]
 name = "Paperless"
-document_multipage = true
+# filename = "archive_{now:%Y%m%d}"   # this target only, e.g. archive_20261122.pdf
+open_after_scan = false   # this target only: never open after a scan
+
+[target.document]
+multipage = true
 
 [target.auto]
 resolution = 300
@@ -61,8 +83,10 @@ multipage = true           # dialog for auto scan too
 # Relative output is resolved against the base output (/scans/archive).
 [[target]]
 name = "Archive"
-output = "archive"
-document_multipage = false
+output = "archive"   # a subfolder of the scan folder (output)
+
+[target.document]
+multipage = false
 
 [target.auto]
 resolution = 600

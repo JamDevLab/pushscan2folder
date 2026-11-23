@@ -21,7 +21,7 @@ jobs:
   image:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Check the tag matches the version
         if: startsWith(github.ref, 'refs/tags/v')
         run: |
@@ -30,11 +30,11 @@ jobs:
             echo "tag $GITHUB_REF_NAME does not match version $version in src/pushscan2folder/__init__.py"
             exit 1
           fi
-      - uses: docker/setup-qemu-action@v3
-      - uses: docker/setup-buildx-action@v3
+      - uses: docker/setup-qemu-action@v4
+      - uses: docker/setup-buildx-action@v4
       - name: Tags and labels
         id: meta
-        uses: docker/metadata-action@v5
+        uses: docker/metadata-action@v6
         with:
           images: ${{ env.IMAGE }}
           tags: |
@@ -44,13 +44,13 @@ jobs:
             latest=auto
       - name: Log in to the GitHub Container Registry
         if: startsWith(github.ref, 'refs/tags/v')
-        uses: docker/login-action@v3
+        uses: docker/login-action@v4
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
       - name: Build (and push on a tag)
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: .
           platforms: linux/amd64,linux/arm64
@@ -61,3 +61,7 @@ jobs:
         run: |
           docker build -t pushscan2folder:test .
           docker run --rm pushscan2folder:test --version
+          # no printer contact yet: the healthcheck must report unhealthy (exit 1)
+          set +e; docker run --rm pushscan2folder:test health; code=$?; set -e
+          test "$code" -eq 1
+          docker inspect --format '{{json .Config.Healthcheck}}' pushscan2folder:test

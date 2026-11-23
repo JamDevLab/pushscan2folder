@@ -10,17 +10,21 @@ import signal
 import socket
 import subprocess
 import sys
+import time
 import traceback
+import webbrowser
 from pathlib import Path
 
-from . import __version__, autostart, background, desktop, panel, protocol, uninstall, web, wizard
+from . import (SOURCE_URL, __version__, autostart, background, desktop, discovery, panel, protocol,
+               terminal, uninstall, web, wizard)
 from .client import ChmpClient
 from .config import Config, ConfigError, load_config
 from .escl import EsclClient, ScanSettings
 from .native import NativeScanner
 from .platform_support import (default_config_path, default_log_path, default_output,
                                default_state_dir, is_windows)
-from .service import (MULTIPAGE_MODES, PushScanService, Target, Trim, check_targets,
+from .service import (DEFAULT_FILENAME, MULTIPAGE_MODES, PushScanService, Target, Trim,
+                      check_filename, check_targets,
                       parse_targets, parse_trim)
 from .status import LogBuffer
 
@@ -80,7 +84,7 @@ def find_config(argv=None) -> Config:
     return load_config(path) if path.is_file() else Config()
 
 
-COMMANDS = ("run", "probe", "scan", "setup", "start", "stop", "status", "uninstall")
+COMMANDS = ("run", "probe", "scan", "setup", "start", "stop", "status", "uninstall", "health")
 # Global options (before the subcommand): name -> takes a value.
 GLOBAL_OPTIONS = {"--config": True, "--printer": True, "--name": True, "--log-file": True,
                   "--verbose": False, "-v": False, "--install-autostart": False,
@@ -182,7 +186,7 @@ def build_parser(cfg: Config | None = None) -> argparse.ArgumentParser:
     p.add_argument("--remove-autostart", action="store_true",
                    help="Windows only: remove the logon entry, then exit")
     sub = p.add_subparsers(dest="cmd", required=True,
-                           metavar="{run,start,stop,status,probe,scan,setup,uninstall}",
+                           metavar="{run,start,stop,status,probe,scan,setup,uninstall,health}",
                            description="without a subcommand, run is used")
     output_default = env("OUTPUT") or cfg.output or default_output()
 
@@ -198,7 +202,7 @@ def build_parser(cfg: Config | None = None) -> argparse.ArgumentParser:
                          default=env("SOURCE", cfg.source or "auto"))
         opts.add_argument("--trim", type=_trim_arg, default=_trim_default(cfg), metavar="SIDES",
                          help="cut off a border by scanning a smaller area (platen only), "
-                              "e.g. right=3,bottom=2 (keys left/top/right/bottom, mm, 0 to 50); "
+                              "e.g. right=1,bottom=2 (keys left/top/right/bottom, mm, 0 to 50); "
                               "replaces the four trim_* values of the config file")
         opts.add_argument("--targets", default=env("TARGETS"),
                          help='several panel entries, e.g. "scan1,paperless=consume@300dpi,archiv@600dpi"; '
@@ -212,19 +216,35 @@ def build_parser(cfg: Config | None = None) -> argparse.ArgumentParser:
                          default=multipage_env(cfg.multipage),
                          help="document types for which platen scans offer further pages "
                               "on the panel (default: document)")
-        opts.add_argument("--open-after-scan", choices=list(desktop.OPEN_MODES),
-                          default=env("OPEN_AFTER_SCAN", cfg.open_after_scan or "off"),
+        opts.add_argument("--heartbeat-file", default=env("HEARTBEAT_FILE"), metavar="PATH",
+                          help="touch this file after every successful contact with the "
+                               "printer, for `pushscan2folder health` (the Docker image sets it)")
+        opts.add_argument("--filename", default=env("FILENAME", cfg.filename or DEFAULT_FILENAME),
+                          metavar="TEMPLATE",
+                          help="file name of a scan without extension, with the fields "
+                               "{name}, {date}, {time} and {now:STRFTIME} (default: "
+                               "scan_{now:%%Y%%m%%d_%%H%%M%%S}); a target can set its own")
+        # A valid environment value is turned into a bool here; a bad one stays
+        # text and check_run_options reports it. The option itself is checked
+        # by argparse and turned into a bool by check_run_options.
+        open_env = env("OPEN_AFTER_SCAN")
+        open_default = bool(cfg.open_after_scan) if open_env is None else (
+            open_env if desktop.parse_open(open_env) is None else desktop.parse_open(open_env))
+        opts.add_argument("--open-after-scan",
+                          choices=desktop.OPEN_TRUE + desktop.OPEN_FALSE,
+                          default=open_default, metavar="true|false",
                           help="desktop PC only: open the folder (Windows: with the new file "
-                               "selected) or the file after each scan (default: off)")
+                               "selected) after each scan (default: false)")
 
         opts.add_argument("--web", action="store_true", default=env_bool("WEB", cfg.web_enabled),
                          help="serve the optional web page (status, log, target editor); "
                               "the password comes from PUSHSCAN_WEB_PASSWORD, "
                               "PUSHSCAN_WEB_PASSWORD_FILE or [web] password_file")
-        opts.add_argument("--web-port", type=int, default=int(env("WEB_PORT", cfg.web_port or 8080)),
-                         help="port of the web page (default: 8080)")
-        opts.add_argument("--web-bind", default=env("WEB_BIND", cfg.web_bind or "0.0.0.0"),
-                         help="address of the web page (default: 0.0.0.0)")
+        opts.add_argument("--web-port", type=int, default=int(env("WEB_PORT", cfg.web_port or 8737)),
+                         help="port of the web page (default: 8737)")
+        opts.add_argument("--web-bind", default=env("WEB_BIND", cfg.web_bind),
+                         help="address of the web page (default: 0.0.0.0 with a "
+                              "password, else 127.0.0.1: this PC only, no login)")
 
     run = sub.add_parser("run", help="register and wait for scan requests")
     add_run_options(run)
@@ -239,6 +259,12 @@ def build_parser(cfg: Config | None = None) -> argparse.ArgumentParser:
     uninstall_p.add_argument("--purge", action="store_true",
                              help="with --yes: also delete the settings and log folders")
     sub.add_parser("setup", help="ask a few questions and write the config file")
+    health = sub.add_parser("health", help="exit 0 if a running instance reached the printer "
+                                           "recently (Docker healthcheck)")
+    health.add_argument("--heartbeat-file", default=env("HEARTBEAT_FILE"), metavar="PATH",
+                        help="the file given to run (default: PUSHSCAN_HEARTBEAT_FILE)")
+    health.add_argument("--max-age", type=float, default=HEALTH_MAX_AGE, metavar="SECONDS",
+                        help=f"older than this is unhealthy (default: {HEALTH_MAX_AGE:g})")
 
     probe = sub.add_parser("probe", help="register, poll once and release (debug)")
     probe.add_argument("--keep", action="store_true", help="do not release the session")
@@ -250,7 +276,7 @@ def build_parser(cfg: Config | None = None) -> argparse.ArgumentParser:
     return p
 
 
-NO_CONFIG_COMMANDS = ("setup", "stop", "status", "uninstall")
+NO_CONFIG_COMMANDS = ("setup", "stop", "status", "uninstall", "health")
 
 
 def parse_args(argv=None) -> tuple[argparse.Namespace, Config]:
@@ -258,7 +284,18 @@ def parse_args(argv=None) -> tuple[argparse.Namespace, Config]:
     argv = with_default_command(list(sys.argv[1:] if argv is None else argv))
     # setup reads its own config; stop, status and uninstall must work with a broken one
     cfg = Config() if command_of(argv) in NO_CONFIG_COMMANDS else find_config(argv)
-    return build_parser(cfg).parse_args(argv), cfg
+    args = build_parser(cfg).parse_args(argv)
+    if hasattr(args, "web_bind") and not args.web_bind:
+        args.web_bind = default_web_bind(cfg)
+    return args, cfg
+
+
+def default_web_bind(cfg: Config) -> str:
+    """No bind address given: the whole network when a password is set, else
+    only this PC, so the page works without a login."""
+    if env("WEB_PASSWORD") or env("WEB_PASSWORD_FILE") or cfg.web_password_file:
+        return "0.0.0.0"
+    return "127.0.0.1"
 
 
 def fallback_settings(args: argparse.Namespace, cfg: Config) -> ScanSettings:
@@ -291,6 +328,7 @@ OVERRIDABLE = {
     "resolution": ("RESOLUTION", "--resolution"), "color": ("COLOR", "--color"),
     "format": ("FORMAT", "--format"), "source": ("SOURCE", "--source"),
     "open_after_scan": ("OPEN_AFTER_SCAN", "--open-after-scan"),
+    "filename": ("FILENAME", "--filename"),
     "trim_left": ("TRIM", "--trim"), "trim_top": ("TRIM", "--trim"),
     "trim_right": ("TRIM", "--trim"), "trim_bottom": ("TRIM", "--trim"),
 }
@@ -326,11 +364,127 @@ def web_overrides(args: argparse.Namespace, cfg: Config,
         "ignore_panel": "yes" if args.ignore_panel else "no", "multipage": args.multipage,
         "resolution": str(args.resolution), "color": args.color, "format": args.format,
         "source": args.source, "size": cfg.size or "a4",
-        "open_after_scan": args.open_after_scan,
+        "open_after_scan": "yes" if args.open_after_scan else "no",
+        "filename": args.filename,
         "trim_left": f"{trim.left:g}", "trim_top": f"{trim.top:g}",
         "trim_right": f"{trim.right:g}", "trim_bottom": f"{trim.bottom:g}",
     }
     return overrides, effective
+
+
+def check_run_options(args: argparse.Namespace) -> None:
+    """Check the option values the parser does not check itself. Normalizes
+    open_after_scan. Raises ValueError with the message for the user."""
+    if getattr(args, "multipage", "off") not in MULTIPAGE_MODES:
+        raise ValueError(f"invalid PUSHSCAN_MULTIPAGE {args.multipage!r}")
+    open_flag = desktop.parse_open(getattr(args, "open_after_scan", False))
+    if open_flag is None:
+        raise ValueError(f"invalid PUSHSCAN_OPEN_AFTER_SCAN {args.open_after_scan!r}: use "
+                         "true or false (also yes/no, 1/0, on/off)")
+    args.open_after_scan = open_flag
+    try:
+        check_filename(getattr(args, "filename", DEFAULT_FILENAME))
+    except ValueError as exc:
+        raise ValueError(f"--filename/PUSHSCAN_FILENAME: {exc}") from None
+
+
+def service_options(args: argparse.Namespace, cfg: Config) -> dict:
+    """The PushScanService options from the parsed command line and config
+    (at startup and when the config file changes)."""
+    return dict(settings=fallback_settings(args, cfg),
+                interval=getattr(args, "interval", 4.0),
+                auto_source=(args.source == "auto"),
+                use_panel=not getattr(args, "ignore_panel", True),
+                multipage=MULTIPAGE_MODES.get(getattr(args, "multipage", "off"), frozenset()),
+                trim=getattr(args, "trim", None) or Trim(),
+                open_after_scan=bool(getattr(args, "open_after_scan", False)),
+                filename=getattr(args, "filename", DEFAULT_FILENAME))
+
+
+# Options that a changed config file cannot change in a running service.
+NOT_RELOADED = (("web", "web page on or off"), ("web_bind", "web bind address"),
+                ("web_port", "web port"), ("log_file", "log file"),
+                ("verbose", "debug log"), ("heartbeat_file", "heartbeat file"))
+
+
+def printer_clients(printer: str):
+    return ChmpClient(printer), EsclClient(printer), NativeScanner(printer)
+
+
+class ConfigWatcher:
+    """Apply a changed config file to the running service, without a restart.
+
+    check() runs in the poll loop before each cycle (never during a scan). It
+    compares the modification time and size of the file. A changed file is
+    read like at startup (command line and environment still win). If it is
+    not valid, the running settings stay and the error is logged once. Scan
+    options, targets and the printer change right away; the web page options,
+    the log file and the heartbeat file need a restart."""
+
+    def __init__(self, path: Path, argv: list[str], args: argparse.Namespace, cfg: Config,
+                 service: PushScanService, ctx=None, clients=printer_clients):
+        self.path = Path(path)
+        self.argv = list(argv)
+        self.started = args           # what the restart-only options are compared with
+        self.started_cfg = cfg
+        self.args = args
+        self.service = service
+        self.ctx = ctx
+        self.clients = clients
+        self.last = self._stamp()
+
+    def _stamp(self):
+        try:
+            st = self.path.stat()
+        except OSError:
+            return None
+        return st.st_mtime_ns, st.st_size
+
+    def check(self) -> bool:
+        """True if a changed file was applied."""
+        stamp = self._stamp()
+        if stamp is None or stamp == self.last:   # a deleted file changes nothing
+            return False
+        self.last = stamp
+        try:
+            args, cfg = parse_args(self.argv)
+            check_run_options(args)
+            if not args.printer:
+                raise ValueError("no printer is set")
+            name = args.name or default_name()
+            protocol.check_name(name)
+            targets = resolve_targets(args, cfg, name)
+        except (ConfigError, ValueError) as exc:
+            logging.error("%s changed but cannot be used, the running settings stay: %s",
+                          self.path, exc)
+            return False
+        except SystemExit:   # argparse rejected a value (it printed why)
+            logging.error("%s changed but cannot be used, the running settings stay",
+                          self.path)
+            return False
+        for warning in check_targets(targets):
+            logging.warning(warning)
+        service = self.service
+        service.update_options(**service_options(args, cfg))
+        if args.printer != self.args.printer:
+            logging.info("printer changed to %s", args.printer)
+            service.change_printer(*self.clients(args.printer))
+        service.request_targets(targets)
+        if self.ctx is not None:
+            ctx = self.ctx
+            ctx.printer, ctx.output, ctx.multipage_mode = args.printer, args.output, args.multipage
+            ctx.targets_from_env = bool(args.targets)
+            ctx.overrides, ctx.effective = web_overrides(args, cfg, self.argv)
+            ctx.printer_pending = None
+        self.args = args
+        logging.info("%s changed, the new settings are in use", self.path)
+        restart = [label for key, label in NOT_RELOADED
+                   if getattr(args, key, None) != getattr(self.started, key, None)]
+        if cfg.web_password_file != self.started_cfg.web_password_file:
+            restart.append("web password file")
+        if restart:
+            logging.warning("restart pushscan2folder to apply: %s", ", ".join(restart))
+        return True
 
 
 EXAMPLE_PASSWORD = wizard.EXAMPLE_PASSWORD
@@ -363,12 +517,27 @@ def read_web_password(check: bool = True, config_file: str | None = None) -> str
     return password
 
 
-def web_password_setup(config_file: str | None = None) -> str | None:
-    """Password for the web page, or None for PUSHSCAN_WEB_AUTH=0 (no login).
-    Logs a warning for each of the two opt-outs. Raises ValueError."""
+def web_password_path(cfg: Config, config_path: Path) -> str | None:
+    """The [web] password_file; a relative path is relative to the config file."""
+    path = cfg.web_password_file
+    if path and not Path(path).is_absolute():
+        return str(config_path.parent / path)
+    return path
+
+
+def web_password_setup(config_file: str | None = None,
+                       bind: str | None = None) -> str | None:
+    """Password for the web page, or None for no login: PUSHSCAN_WEB_AUTH=0, or
+    no password configured while the page listens only on this PC (loopback
+    bind). A configured password is always used. Logs a warning for each of
+    the two opt-outs. Raises ValueError."""
     if not env_switch("WEB_AUTH"):
         if env("WEB_PASSWORD") or env("WEB_PASSWORD_FILE"):
             logging.warning("PUSHSCAN_WEB_AUTH=0: the web password is ignored")
+        return None
+    if not (env("WEB_PASSWORD") or env("WEB_PASSWORD_FILE") or config_file) \
+            and web.is_loopback(bind):
+        logging.info("web page only on this PC (%s), no login needed", bind)
         return None
     check = env_switch("WEB_PASSWORD_CHECK")
     password = read_web_password(check, config_file)
@@ -437,7 +606,7 @@ def autostart_main(argv: list[str]) -> int:
     rest = [a for a in argv if a not in ("--install-autostart", "--remove-autostart")]
     if install:
         try:
-            parse_args(rest if any(a in autostart.COMMANDS for a in rest) else rest + ["run"])
+            parse_args(rest)  # adds `run` in the right place when no subcommand is given
             command = autostart.install_command(rest)
         except ConfigError as exc:
             print(f"error: {exc}", file=sys.stderr)
@@ -484,9 +653,16 @@ def console_process_count() -> int | None:
         return None
 
 
+# Set by the menu when the Windows uninstaller was started: it cannot remove
+# a running exe, so the program must exit at once without waiting for Enter.
+skip_pause = False
+
+
 def pause_before_exit(raw: list[str]) -> None:
     """Keep a console window opened just for this program readable."""
     try:
+        if skip_pause:
+            return
         no_pause = autostart.NO_PAUSE in raw or env_bool("NO_PAUSE", False)
         if not is_windows() or no_pause:
             return
@@ -514,11 +690,17 @@ def summary_lines(args: argparse.Namespace, targets: list[Target], config_path: 
     return lines
 
 
+def install_autostart(args: list[str]) -> int:
+    """Install the logon entry that runs the given options (used by setup)."""
+    return autostart_main(["--install-autostart"] + args)
+
+
 def setup_main(args: argparse.Namespace | None) -> int:
     """`setup`: ask, write the config file, then optionally start."""
     path = Path(args.config) if args and args.config else default_config_path()
-    session = wizard.Setup(path, autostart_fn=autostart_main, default_name=default_name(),
-                           start_fn=lambda a: start_main(a, hints=False))
+    session = wizard.Setup(path, autostart_fn=install_autostart, default_name=default_name(),
+                           start_fn=lambda a: start_main(a, hints=False),
+                           discover_fn=discovery.discover)
     try:
         start = session.run()
     except (EOFError, KeyboardInterrupt):
@@ -561,8 +743,16 @@ def start_main(raw: list[str], hints: bool = True, popen=subprocess.Popen,
                instance: background.Instance | None = None) -> int:
     """`start`: launch the background instance with the given options, return."""
     try:
-        args, _ = parse_args(replace_command(raw, "run"))
-    except ConfigError as exc:
+        args, cfg = parse_args(replace_command(raw, "run"))
+        check_run_options(args)   # the same checks as the background process
+        if args.web:
+            config_path = Path(args.config) if args.config else default_config_path()
+            logging.disable(logging.CRITICAL)   # the background process logs these
+            try:
+                web_password_setup(web_password_path(cfg, config_path), args.web_bind)
+            finally:
+                logging.disable(logging.NOTSET)
+    except (ConfigError, ValueError) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2
     if not args.printer:
@@ -574,19 +764,21 @@ def start_main(raw: list[str], hints: bool = True, popen=subprocess.Popen,
     ok, message = background.start_instance(background_argv(raw, args), inst, popen=popen)
     if not ok:
         print(f"error: {message}", file=sys.stderr)
-        if not message.startswith(background.ALREADY_RUNNING):
+        if not message.startswith(background.ALREADY_RUNNING) and ":\n" not in message:
             for line in background.log_tail(log_path, 5):
                 print(f"  {line}", file=sys.stderr)
         return 1
     print(f"pushscan2folder {message} in the background.")
     if hints:
-        print(f"It keeps running after you close this window. Log file: {log_path}")
+        print(f"It keeps running after you close this window. Log file: {terminal.link(log_path)}")
         print("Stop it with: pushscan2folder stop")
     return 0
 
 
 def stop_main(instance: background.Instance | None = None, **kwargs) -> int:
     inst = instance or background.Instance()
+    kwargs.setdefault("on_wait_for_scan", lambda: print(
+        "A scan is running; it is finished and saved first ...", flush=True))
     result = background.stop_instance(inst, **kwargs)
     if result == background.NOT_RUNNING:
         print("pushscan2folder is not running in the background.")
@@ -646,6 +838,26 @@ def uninstall_main(args: argparse.Namespace, argv: list[str],
         remove_autostart=remove_autostart_message if windows else None, **kwargs)
 
 
+HEALTH_MAX_AGE = 120.0  # seconds; the printer drops a name after about 60 s
+
+
+def health_main(args: argparse.Namespace, now: float | None = None) -> int:
+    """`health`: 0 if the heartbeat file is fresh, 1 otherwise (with a reason)."""
+    if not args.heartbeat_file:
+        print("unhealthy: no heartbeat file (set PUSHSCAN_HEARTBEAT_FILE or --heartbeat-file)")
+        return 1
+    try:
+        age = (time.time() if now is None else now) - os.path.getmtime(args.heartbeat_file)
+    except OSError:
+        print("unhealthy: no contact with the printer yet")
+        return 1
+    if age > args.max_age:
+        print(f"unhealthy: last contact with the printer {age:.0f} s ago")
+        return 1
+    print(f"healthy: last contact with the printer {max(age, 0):.0f} s ago")
+    return 0
+
+
 def manual_start(raw: list[str]) -> bool:
     """Started without any argument by hand, with a console to talk to and
     no settings from the environment."""
@@ -663,10 +875,167 @@ def double_click() -> bool:
     return is_windows() and count is not None and count <= 1
 
 
-def greeting(raw: list[str], instance: background.Instance | None = None) -> int | None:
+def web_url(argv=None) -> str | None:
+    """Address of the web page when it is enabled in the config, else None."""
+    try:
+        cfg = find_config(argv if argv is not None else [])
+    except ConfigError:
+        return None
+    if not cfg.web_enabled:
+        return None
+    try:
+        port = int(env("WEB_PORT") or cfg.web_port or 8737)
+    except ValueError:
+        port = cfg.web_port or 8737
+    host = cfg.web_bind
+    if not host or host in ("0.0.0.0", "::"):
+        host = "127.0.0.1"
+    if ":" in host:
+        host = f"[{host}]"
+    return f"http://{host}:{port}/"
+
+
+def open_url(url: str, browser=None) -> None:
+    if not (browser or webbrowser.open)(url):
+        print(f"Could not open a browser. Open this address yourself: {url}")
+
+
+def open_config_file(opener=None) -> None:
+    path = default_config_path()
+    try:
+        (opener or desktop.open_path)(path)
+    except OSError as exc:
+        print(f"error: cannot open {path}: {exc.strerror or exc}")
+        return
+    print(f"Opened {path}. Changes are used within a few seconds.")
+
+
+def installed_uninstaller() -> Path | None:
+    """The Windows installer's uninstaller, when this is the installed exe."""
+    if not getattr(sys, "frozen", False):
+        return None
+    path = Path(sys.executable).parent / uninstall.UNINSTALLER
+    return path if path.is_file() else None
+
+
+def ask_yes(input_fn, prompt: str, default: bool) -> bool:
+    answer = input_fn(prompt).strip().lower()
+    return default if not answer else answer in ("y", "yes", "j", "ja")
+
+
+def menu_uninstall(instance: background.Instance, input_fn=input, popen=None) -> int:
+    """Uninstall from the menu; offers the Windows uninstaller afterwards.
+    -1: declined."""
+    global skip_pause
+    if not ask_yes(input_fn, "Uninstall pushscan2folder? Your scans are not touched. [y/N]: ",
+                   False):
+        print()
+        return -1
+    code = uninstall_main(argparse.Namespace(yes=False, purge=False), ["uninstall"],
+                          instance=instance, input_fn=input_fn)
+    uninstaller = installed_uninstaller()
+    if uninstaller is not None and ask_yes(
+            input_fn, "Start the Windows uninstaller now? [Y/n]: ", True):
+        try:
+            (popen or subprocess.Popen)([str(uninstaller)])
+            skip_pause = True
+        except OSError as exc:
+            print(f"error: cannot start {uninstaller}: {exc.strerror or exc}")
+    return code
+
+
+def menu(instance: background.Instance, input_fn=input) -> int:
+    """Small numbered menu for a double click. Status, web page, config file,
+    help, start, stop, the settings and a declined uninstall show the menu
+    again. Only quit, Ctrl+C/EOF and a finished uninstall end it."""
+    while True:
+        running = instance.is_running()
+        if running:
+            pid = instance.read_info().pid
+            state = "Running in the background" + (f" (PID {pid})." if pid else ".")
+        else:
+            state = "Not running."
+        print(f"pushscan2folder {__version__}\n{state}\n")
+        url = web_url() if running else None
+        actions = [("Stop", "stop")] if running else [("Start in the background", "start")]
+        actions.append(("Status", "status"))
+        if url:
+            actions.append((f"Open the web page ({url})", "web"))
+        actions += [("Open the config file", "config"), ("Change the settings", "setup"),
+                    ("Help (GitHub)", "help"), ("Uninstall", "uninstall"), ("Quit", "quit")]
+        default = "status" if running else "start"
+        default_number = [name for _, name in actions].index(default) + 1
+        for number, (label, _) in enumerate(actions, 1):
+            print(f"  {number}  {label}")
+        try:
+            answer = input_fn(f"Choice [{default_number}]: ").strip()
+        except (EOFError, KeyboardInterrupt):
+            print()
+            return 0
+        if answer and not (answer.isdigit() and 1 <= int(answer) <= len(actions)):
+            print("Please enter one of the numbers.\n")
+            continue
+        action = actions[int(answer) - 1][1] if answer else default
+        if action in ("start", "stop"):
+            if action == "start":
+                start_main(["start"], instance=instance)
+            else:
+                stop_main(instance)
+            print()
+            continue
+        if action == "status":
+            print()
+            status_main(instance)
+            print()
+            continue
+        if action == "web":
+            open_url(url)
+            print()
+            continue
+        if action == "config":
+            print()
+            open_config_file()
+            print()
+            continue
+        if action == "help":
+            open_url(SOURCE_URL)
+            print()
+            continue
+        if action == "uninstall":
+            print()
+            try:
+                code = menu_uninstall(instance, input_fn)
+            except (EOFError, KeyboardInterrupt):
+                print()
+                return 0
+            if code == -1:   # declined
+                continue
+            return code
+        if action == "quit":
+            return 0
+        if running:
+            print("\nThe background instance must be stopped before the settings change.")
+            try:
+                stop_first = input_fn("Stop it now? [Y/n]: ").strip().lower()
+            except (EOFError, KeyboardInterrupt):
+                print()
+                return 0
+            if stop_first not in ("", "y", "yes", "j", "ja"):
+                print()
+                continue
+            if stop_main(instance) != 0:
+                print()
+                continue
+            print()
+        setup_main(None)
+        print()
+
+
+def greeting(raw: list[str], instance: background.Instance | None = None,
+             input_fn=input) -> int | None:
     """Without arguments: the setup questions if nothing is configured yet;
-    on a Windows double click with a config file, the choice to use it,
-    change it or start over. None: go on with a normal run."""
+    on a Windows double click with a config file, a menu (start, stop,
+    status, settings). None: go on with a normal run."""
     if not manual_start(raw):
         return None
     if not default_config_path().is_file():
@@ -675,15 +1044,7 @@ def greeting(raw: list[str], instance: background.Instance | None = None) -> int
         return setup_main(None)
     if not double_click():
         return None
-    instance = instance or background.Instance()
-    if instance.is_running():
-        pid = instance.read_info().pid
-        print(f"pushscan2folder {__version__} is already running in the background"
-              + (f" (PID {pid})." if pid else ".")
-              + "\nTo change the settings, stop it first: pushscan2folder stop")
-        return 0
-    print(f"pushscan2folder {__version__}\n")
-    return setup_main(None)
+    return menu(instance or background.Instance(), input_fn)
 
 
 def main(argv=None) -> int:
@@ -730,15 +1091,13 @@ def _main(argv=None) -> int:
         return status_main()
     if args.cmd == "uninstall":
         return uninstall_main(args, raw)
-    if getattr(args, "multipage", "off") not in MULTIPAGE_MODES:
-        print(f"error: invalid PUSHSCAN_MULTIPAGE {args.multipage!r}", file=sys.stderr)
+    if args.cmd == "health":
+        return health_main(args)
+    try:
+        check_run_options(args)
+    except ValueError as exc:
+        print(f"error: {exc}", file=sys.stderr)
         return 2
-    open_mode = str(getattr(args, "open_after_scan", "off")).strip().lower()
-    if open_mode not in desktop.OPEN_MODES:
-        print(f"error: invalid PUSHSCAN_OPEN_AFTER_SCAN {args.open_after_scan!r}: use "
-              f"{', '.join(desktop.OPEN_MODES)}", file=sys.stderr)
-        return 2
-    args.open_after_scan = open_mode
     try:
         setup_logging(args.verbose, args.log_file)
     except OSError as exc:
@@ -750,12 +1109,10 @@ def _main(argv=None) -> int:
     web_enabled = args.cmd == "run" and args.web
     web_password = None
     config_path = Path(args.config) if args.config else default_config_path()
-    web_file = cfg.web_password_file
-    if web_file and not Path(web_file).is_absolute():
-        web_file = str(config_path.parent / web_file)  # relative to the config file
+    web_file = web_password_path(cfg, config_path)
     if web_enabled:
         try:
-            web_password = web_password_setup(web_file)
+            web_password = web_password_setup(web_file, args.web_bind)
         except ValueError as exc:
             print(f"error: {exc}", file=sys.stderr)
             return 2
@@ -778,8 +1135,6 @@ def _main(argv=None) -> int:
             print(f"release:  status=0x{x.status:x}")
         return 0
 
-    settings = fallback_settings(args, cfg)
-    source = args.source
     try:
         targets = resolve_targets(args, cfg, name)
         for warning in check_targets(targets):
@@ -787,15 +1142,8 @@ def _main(argv=None) -> int:
     except ValueError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2
-    service = PushScanService(chmp, escl, targets, settings,
-                              interval=getattr(args, "interval", 4.0),
-                              auto_source=(source == "auto"),
-                              use_panel=not getattr(args, "ignore_panel", True),
-                              native=NativeScanner(args.printer),
-                              multipage=MULTIPAGE_MODES.get(getattr(args, "multipage", "off"),
-                                                            frozenset()),
-                              trim=getattr(args, "trim", None),
-                              open_after_scan=open_mode)
+    service = PushScanService(chmp, escl, targets, native=NativeScanner(args.printer),
+                              **service_options(args, cfg))
     if args.cmd == "scan":
         for path in service.scan_to(targets[0]):
             print(path)
@@ -803,17 +1151,28 @@ def _main(argv=None) -> int:
 
     install_signal_handlers(service)
     used_config = config_path if args.config or config_path.is_file() else None
+    if getattr(args, "heartbeat_file", None):
+        service.heartbeat = Path(args.heartbeat_file)
     inst = background.Instance()
     if args.background:
         service.stop_check = inst.stop_requested  # `pushscan2folder stop`
+        service.busy_hook = inst.set_busy          # `stop` waits for a running scan
+    watcher = ConfigWatcher(config_path, raw, args, cfg, service)
+    service.before_step = watcher.check            # apply a changed config file
     try:
         interactive = sys.stdin.isatty()
     except (AttributeError, ValueError):
         interactive = False
 
     def claim() -> bool:
-        """Background mode: become the one instance (False: another runs)."""
+        """Background mode: become the one instance (False: another runs).
+        In the foreground: refuse while the background instance runs, as both
+        would register the same names."""
         if not args.background:
+            if inst.is_running():
+                logging.error("pushscan2folder already runs in the background; stop it "
+                              "first with: pushscan2folder stop")
+                return False
             return True
         try:
             if inst.claim(args.log_file):
@@ -847,7 +1206,9 @@ def _main(argv=None) -> int:
                          multipage_mode=args.multipage,
                          config_path=config_path,
                          targets_from_env=bool(args.targets),
-                         overrides=overrides, effective=effective)
+                         overrides=overrides, effective=effective,
+                         discover_fn=discovery.discover)
+    watcher.ctx = ctx
     try:
         server, thread = web.start_server(ctx, web_password, args.web_bind, args.web_port,
                                           secure_cookie=env_bool("WEB_SECURE_COOKIE", False))
@@ -856,10 +1217,10 @@ def _main(argv=None) -> int:
         print(f"error: web page on {args.web_bind}:{args.web_port}: {exc.strerror or exc}",
               file=sys.stderr)
         return 2
-    if web_password is None:
+    if web_password is None and not web.is_loopback(args.web_bind):
         logging.warning("web page without password: anyone who can reach port %d can "
                         "change targets and settings", server.server_address[1])
-    local = args.web_bind in ("127.0.0.1", "localhost", "::1")
+    local = web.is_loopback(args.web_bind)
     announce(f"http://{args.web_bind}:{server.server_address[1]} "
              + ("(this PC only)" if local else "(reachable from the network)")
              + (" (Secure cookie: use it through an HTTPS reverse proxy)"

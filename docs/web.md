@@ -33,15 +33,15 @@ page is off there too until you uncomment them.
 PUSHSCAN_WEB=1 PUSHSCAN_WEB_PASSWORD='a long password' \
 PUSHSCAN_CONFIG=~/pushscan.toml \
 PYTHONPATH=src python3 -m pushscan2folder --printer 192.168.1.50 run
-# web page on http://0.0.0.0:8080
+# web page on http://0.0.0.0:8737
 ```
 
 | Setting | Meaning |
 |---------|---------|
 | `PUSHSCAN_WEB=1` / `--web` | enable (`run` only) |
-| `PUSHSCAN_WEB_PORT` / `--web-port` | port, default 8080 |
-| `PUSHSCAN_WEB_BIND` / `--web-bind` | address, default `0.0.0.0` (use `127.0.0.1` to keep it local) |
-| `PUSHSCAN_WEB_PASSWORD` | password, at least 8 characters |
+| `PUSHSCAN_WEB_PORT` / `--web-port` | port, default 8737 |
+| `PUSHSCAN_WEB_BIND` / `--web-bind` | address; not set: `0.0.0.0` when a password is set, else `127.0.0.1` (this PC only, no password needed) |
+| `PUSHSCAN_WEB_PASSWORD` | password, at least 8 characters (optional on a loopback bind) |
 | `PUSHSCAN_WEB_PASSWORD_FILE` | file with the password (e.g. a Docker secret); used if the variable above is unset |
 | `[web] password_file` | config file key, same as above; used if both variables are unset. Relative paths are relative to the config file |
 | `PUSHSCAN_WEB_SECURE_COOKIE=1` | only behind an HTTPS reverse proxy: `Secure` cookie, see [HTTPS](#https-behind-a-reverse-proxy) |
@@ -54,7 +54,15 @@ writes it and stores the password in `web_password.txt` next to the config file.
 The command line and the environment win over the table. The Settings page shows
 the table read-only: the login cannot be changed from the web page.
 
-Without a valid password the program refuses to start (exit code 2). It never
+Without a password the page only starts when it listens on this PC alone:
+with a bind address of `127.0.0.1` (or any `127.x.x.x`), `::1` or `localhost`
+it then runs without a login, the log says "web page only on this PC", and
+the navigation bar shows "No login: this page is only reachable from this PC."
+Any other bind address (including `0.0.0.0`) needs a password;
+without one the program refuses to start (exit code 2). A configured password
+is always used, also on a loopback address. Anyone who can use this PC can open
+a page without login, so set a password on a shared PC. CSRF tokens, the Origin
+check and the Host name check stay active without a login. The program never
 reads the password itself from the config file and never logs or shows it.
 
 ## Password options
@@ -97,15 +105,35 @@ error, so a typo cannot turn a protection off.
   service switches to the new list before its next poll cycle (shown as
   "pending" until then). The per-target Auto scan options show the current
   default, for example "Default (300 dpi)", which comes from the Settings page.
+  The editor has no field for the file name template of a target. A `filename`
+  that a target has in the config file is kept when you save.
 - Settings (`/settings`) edits `resolution`, `color`, `format`, `source`,
-  `size`, `open_after_scan` and the four `trim_*` values of `[defaults]`, and `multipage`,
-  `ignore_panel` and `interval`, each with a short explanation. Values are
+  `size`, `open_after_scan`, `filename` (shown as "File name", see
+  [File names](configuration.md#file-names)) and the four `trim_*` values,
+  `ignore_panel` and `interval` (these three groups live in `[advanced]`), and
+  the multi-page dialog as two check boxes, one for the panel document type
+  "Document" and one for "Auto" (written to `multipage` in
+  `[defaults.document]` and `[defaults.auto]`), each
+  with a short explanation. Values are
   validated with the same rules as the config file; an empty field removes the
-  key. `printer` and the base `output` folder are shown read-only. If an
+  key. The base `output` folder is shown read-only. The section "Fixed" shows
+  the `printer` with a "Search the network" button, see below. If an
   environment variable or command line option overrides a value (for example
   `PUSHSCAN_INTERVAL` or `PUSHSCAN_TRIM`), the page says so and shows the
   value in use; the saved value has no effect while the override exists.
-  Settings are written to the file only and take effect after a restart.
+  Settings are written to the file, and the running service applies them
+  within a poll cycle, see
+  [Changing the file while running](configuration.md#changing-the-file-while-running).
+  Only the `[web]` options need a restart.
+  The printer search runs the same mDNS search as setup (about 5 seconds) and
+  lists the address and model of each scanner found, each with a "Use" button.
+  The printer in use is marked "in use". "Use" writes `printer` into the config
+  file and keeps everything else; the new printer is used from the next poll
+  cycle. If `PUSHSCAN_PRINTER` or `--printer` sets the printer (the provided
+  Docker compose file does), there is no search button and the page says what
+  overrides it. In Docker with the default bridge network, multicast does not
+  reach the LAN, so the search finds nothing there. Set the address in the
+  config file or the environment then.
 - Config file (`/config`, linked from Settings) is a text editor for the whole
   config file. It writes the text exactly as given, comments included, after
   checking it like at startup; an invalid file is not written and the error
@@ -115,9 +143,9 @@ error, so a typo cannot turn a protection off.
   folder is not a relative path inside the output directory. Targets already
   in the file with such a folder (for example `output = "/consume"`) may stay
   unchanged. The form carries a hash of the file text: if the file changed on
-  disk meanwhile, nothing is saved and the new content is shown. Target
-  changes are applied like on the Targets page, everything else after a
-  restart. The size limit is 64 KB.
+  disk meanwhile, nothing is saved and the new content is shown. The running
+  service applies the changes within a poll cycle, except the `[web]` options,
+  which need a restart. The size limit is 64 KB.
 
 ## Editing targets and folders
 
@@ -128,8 +156,12 @@ Whether the targets can be edited depends on where they come from:
 - from the config file (`PUSHSCAN_CONFIG`, `--config` or the default location):
   editable; if the file does not exist yet, the first save creates it.
 
+Each target card also has "Open after a scan" (`open_after_scan` of the target;
+"Default" uses the Settings page value, "Yes" and "No" decide for this target). On the Settings page "Open after scan" is a check box; unticked is saved as `false`, because a check box cannot say "not set".
+
 Comments in the config file are lost when saving from the Targets or Settings
-form. The file is rewritten; other keys keep their values. Only the raw editor
+form, except the short header and the commented examples, which are written
+again. The file is rewritten; other keys keep their values. Only the raw editor
 keeps comments. Every saved target gets both
 multi-page switches written explicitly.
 
@@ -143,7 +175,8 @@ file. The web page shows it read-only and keeps it when you save; you can still
 delete it there.
 
 The raw editor also refuses changes to `output`, `printer` and the `[web]`
-table. `[web]` decides who can reach the page and where the password is, so it
+table. The printer can only be changed on the Settings page with the network
+search. `[web]` decides who can reach the page and where the password is, so it
 can only be changed in the file itself or with `pushscan2folder setup`.
 
 ## Security model
@@ -166,6 +199,10 @@ can only be changed in the file itself or with `pushscan2folder setup`.
   pages send strict headers (CSP, no framing, no caching). Only the pages
   themselves, a stylesheet, the icon and the small script are served; the web
   page cannot read or download files.
+- The printer search accepts only an address from its own last search result,
+  so nobody on the web page can point the service at another host. Only one
+  search runs at a time, and the form needs the CSRF token like every other
+  form. The raw editor still cannot change `printer`.
 - Browsers send cookies to every service on the same host regardless of the
   port, so reach the page by its own host name if other web services run on
   the same NAS.
@@ -187,5 +224,7 @@ The provided `docker-compose.yml` is prepared for the web page
 web lines and the port to turn it on. Mount a
 directory for the config, not a single file: a single-file bind mount cannot be
 replaced atomically, so the program would fall back to rewriting it in place. The directory must be writable for the user set in `user:`. Do not set
-`PUSHSCAN_TARGETS` when you edit the targets on the web page. More in
+`PUSHSCAN_TARGETS` when you edit the targets on the web page. Behind Docker, the
+log can show the gateway of the Docker network as the client address, see
+[Client address in the log](docker.md#client-address-in-the-log). More in
 [Docker](docker.md).

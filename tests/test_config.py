@@ -7,7 +7,7 @@ from unittest import mock
 
 from pushscan2folder import __main__ as cli
 from pushscan2folder import panel
-from pushscan2folder.config import (Config, ConfigError, dump_config, load_config,
+from pushscan2folder.config import (Config, TargetSpec, ConfigError, dump_config, load_config,
                                     load_config_text)
 from pushscan2folder.platform_support import default_config_path, default_output
 from pushscan2folder.service import Trim
@@ -81,6 +81,91 @@ class ConfigTestBase(unittest.TestCase):
 
 
 class ParseTests(ConfigTestBase):
+    def test_dump_has_header_and_examples_that_parse(self):
+        cfg = Config(printer="x", targets=[TargetSpec("PC", output="."),
+                                           TargetSpec("Old", open_after_scan=False)])
+        text = dump_config(cfg)
+        self.assertTrue(text.startswith("# pushscan2folder configuration."))
+        self.assertIn("need a restart", text)
+        self.assertIn("# open_after_scan = true", text)
+        self.assertNotIn("{name}", text)
+        self.assertIn("# filename = \"scan_{now:%Y-%m-%d_%H-%M-%S}\"", text)
+        self.assertIn('# output = "Archive"   # a subfolder of the scan folder', text)
+        self.assertEqual(load_config_text(text), cfg)
+        # every example line works once the "#" is removed, in its place
+        body, example = text.rsplit("\n\n", 1)
+        lines = body.splitlines()
+        for i, line in enumerate(lines):
+            if line.startswith("# ") and " = " in line:
+                changed = lines[:i] + [line[2:]] + lines[i + 1:]
+                load_config_text("\n".join(changed))
+        uncommented = [l[2:] for l in example.splitlines()[1:]]
+        self.assertEqual(len(load_config_text(body + "\n" + "\n".join(uncommented)).targets), 3)
+
+    def test_layout_since_0_3(self):
+        cfg = load_config_text(
+            '[defaults]\nresolution = 600\n[defaults.document]\nmultipage = false\n'
+            '[defaults.auto]\nmultipage = true\n'
+            '[advanced]\ninterval = 2\nverbose = true\nignore_panel = true\ntrim_right = 1\n'
+            '[[target]]\nname = "A"\n[target.document]\nmultipage = true\n')
+        self.assertEqual((cfg.multipage, cfg.interval, cfg.verbose, cfg.ignore_panel,
+                          cfg.trim_right), ("auto", 2.0, True, True, 1.0))
+        self.assertTrue(cfg.targets[0].document_multipage)
+        self.assertEqual(cfg.old_keys, [])
+        self.assertEqual(load_config_text(dump_config(cfg)), cfg)
+
+    def test_one_multipage_flag_keeps_the_other_default(self):
+        self.assertEqual(load_config_text('[defaults.auto]\nmultipage = true\n').multipage,
+                         "both")
+        self.assertEqual(load_config_text('[defaults.document]\nmultipage = false\n')
+                         .multipage, "off")
+
+    def test_old_layout_is_read_and_written_new(self):
+        old = ('multipage = "both"\ninterval = 5\n[defaults]\ntrim_bottom = 2\n'
+               '[[target]]\nname = "A"\ndocument_multipage = false\n')
+        cfg = load_config_text(old)
+        self.assertEqual((cfg.multipage, cfg.interval, cfg.trim_bottom), ("both", 5.0, 2.0))
+        self.assertIn("interval -> [advanced] interval", cfg.old_keys)
+        self.assertEqual(len(cfg.old_keys), 4)
+        text = dump_config(cfg)
+        self.assertNotIn("document_multipage", text)
+        again = load_config_text(text)
+        self.assertEqual(again, cfg)
+        self.assertEqual(again.old_keys, [])
+
+    def test_old_and_new_place_at_once_is_an_error(self):
+        with self.assertRaisesRegex(ConfigError, "keep only"):
+            load_config_text('interval = 5\n[advanced]\ninterval = 4\n')
+
+    def test_open_after_scan_per_target(self):
+        cfg = load_config_text('[[target]]\nname = "Archive"\nopen_after_scan = false\n'
+                               '[[target]]\nname = "PC"\n')
+        self.assertEqual([t.open_after_scan for t in cfg.targets], [False, None])
+        targets = cfg.build_targets(Path("/s"), "off")
+        self.assertEqual([t.open_after_scan for t in targets], [False, None])
+        with self.assertRaises(ConfigError):
+            load_config_text('[[target]]\nname = "A"\nopen_after_scan = "always"\n')
+
+    def test_old_open_after_scan_strings_are_read_and_written_as_bool(self):
+        cfg = load_config_text('[defaults]\nopen_after_scan = "file"\n'
+                               '[[target]]\nname = "A"\nopen_after_scan = "off"\n'
+                               '[[target]]\nname = "B"\nopen_after_scan = "folder"\n')
+        self.assertTrue(cfg.open_after_scan)
+        self.assertEqual([t.open_after_scan for t in cfg.targets], [False, True])
+        self.assertEqual(len(cfg.old_keys), 3)
+        self.assertIn('open_after_scan = "file" -> open_after_scan = true', cfg.old_keys[0])
+        text = dump_config(cfg)
+        self.assertIn("open_after_scan = true", text)
+        self.assertNotIn('open_after_scan = "', text)
+        self.assertEqual(load_config_text(text).old_keys, [])
+        with self.assertRaises(ConfigError):
+            load_config_text('[defaults]\nopen_after_scan = "yes"\n')
+
+    def test_color_in_target_auto_explains_the_start_button(self):
+        with self.assertRaises(ConfigError) as cm:
+            load_config_text('[[target]]\nname = "test"\n[target.auto]\ncolor = "gray"\n')
+        self.assertIn("start button", str(cm.exception))
+
     def test_full_example(self):
         cfg = load_config(self.write(FULL))
         self.assertEqual((cfg.printer, cfg.output, cfg.interval), ("192.168.1.50", Path("/scans"), 3.0))
@@ -187,6 +272,24 @@ class TextLoaderTests(ConfigTestBase):
         self.assertEqual(load_config_text(""), Config())
 
 
+class FilenameConfigTests(ConfigTestBase):
+    def test_defaults_and_target(self):
+        cfg = load_config(self.write('[defaults]\nfilename = "{date}_{time}"\n\n'
+                                     '[[target]]\nname = "Bills"\nfilename = "bill_{date}"\n'
+                                     '\n[[target]]\nname = "Other"\n'))
+        self.assertEqual(cfg.filename, "{date}_{time}")
+        targets = cfg.build_targets(self.dir, "off")
+        self.assertEqual([t.filename for t in targets], ["bill_{date}", None])
+        again = load_config(self.write(dump_config(cfg), "again.toml"))
+        self.assertEqual((again.filename, again.targets[0].filename),
+                         ("{date}_{time}", "bill_{date}"))
+
+    def test_invalid_template(self):
+        self.assertError('[defaults]\nfilename = "{now.__class__}"', "filename", "[defaults]")
+        self.assertError('[[target]]\nname = "a"\nfilename = "{x}"', "filename", "target")
+        self.assertError('[defaults]\nfilename = ""', "filename")
+
+
 class TrimConfigTests(ConfigTestBase):
     def test_parse_and_defaults(self):
         cfg = load_config(self.write("[defaults]\ntrim_right = 3\ntrim_bottom = 2.5\n"))
@@ -232,10 +335,10 @@ class TrimConfigTests(ConfigTestBase):
                 cli.parse_args(argv)
             self.assertEqual(cm.exception.code, 2)
 
-    def test_example_has_trim_keys_at_zero(self):
+    def test_example_has_the_tested_trim_values(self):
         cfg = load_config(EXAMPLE)
         self.assertEqual((cfg.trim_left, cfg.trim_top, cfg.trim_right, cfg.trim_bottom),
-                         (0.0, 0.0, 0.0, 0.0))
+                         (0.0, 0.0, 1.0, 2.0))
 
 
 class PrecedenceTests(ConfigTestBase):

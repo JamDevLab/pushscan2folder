@@ -1,6 +1,7 @@
 """Web page: auth, CSRF, headers, target editor and config writing (127.0.0.1 only)."""
 import errno
 import html
+import io
 import re
 import http.client
 import logging
@@ -16,10 +17,13 @@ from urllib.parse import urlencode
 
 from pushscan2folder import __main__ as cli
 from pushscan2folder import web
+from pushscan2folder.discovery import Scanner
 from pushscan2folder.config import Config, TargetSpec, dump_config, load_config, write_config
 from pushscan2folder.service import Target
 from pushscan2folder.status import LogBuffer, ScanRecord, ServiceStatus
 from support import CAN_SYMLINK, assert_mode, needs_symlinks
+
+web.POLL_INTERVAL = 0.02   # fast server shutdown between tests
 
 EXAMPLE = Path(__file__).resolve().parent.parent / "config.example.toml"
 PASSWORD = "correct horse"
@@ -229,7 +233,7 @@ class SecurityTests(WebTestBase):
 
 
 class NoAuthTests(unittest.TestCase):
-    """PUSHSCAN_WEB_AUTH=0: no login, everything else stays."""
+    """PUSHSCAN_WEB_AUTH=0 on a network bind: no login, everything else stays."""
 
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
@@ -241,7 +245,7 @@ class NoAuthTests(unittest.TestCase):
         write_config(self.config_path, dump_config(Config(targets=[TargetSpec("a")])))
         self.ctx = web.WebContext(self.service, LogBuffer(), "192.0.2.1", self.dir / "scans",
                                   config_path=self.config_path)
-        self.server, self.thread = web.start_server(self.ctx, None, "127.0.0.1", 0)
+        self.server, self.thread = web.start_server(self.ctx, None, "0.0.0.0", 0)
         self.addCleanup(web.stop_server, self.server, self.thread)
         self.client = Client(self.server.server_address[1])
 
@@ -288,7 +292,7 @@ class NoAuthTests(unittest.TestCase):
         self.assertEqual(status, 303)
 
     def test_csrf_differs_per_process(self):
-        other = web.start_server(self.ctx, None, "127.0.0.1", 0)
+        other = web.start_server(self.ctx, None, "0.0.0.0", 0)
         self.addCleanup(web.stop_server, *other)
         self.assertNotEqual(Client(other[0].server_address[1]).csrf(), self.client.csrf())
 
@@ -318,6 +322,108 @@ class NoAuthTests(unittest.TestCase):
         data = client.request("GET", "/")[2]
         self.assertIn("Log out", data)
         self.assertNotIn("No password set", data)
+
+
+class LoopbackNoLoginTests(unittest.TestCase):
+    """No password on a loopback bind: no login, a calm note, all checks stay."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.dir = Path(self.tmp.name)
+        self.service = FakeService()
+        self.service.status.set_targets([Target("a", self.dir / "scans" / "a")])
+        self.config_path = self.dir / "cfg" / "config.toml"
+        write_config(self.config_path, dump_config(Config(targets=[TargetSpec("a")])))
+        self.ctx = web.WebContext(self.service, LogBuffer(), "192.0.2.1", self.dir / "scans",
+                                  config_path=self.config_path)
+        with mock.patch.dict(os.environ, {}, clear=True):
+            password = cli.web_password_setup(None, "127.0.0.1")
+        self.assertIsNone(password)
+        self.server, self.thread = web.start_server(self.ctx, password, "127.0.0.1", 0)
+        self.addCleanup(web.stop_server, self.server, self.thread)
+        self.client = Client(self.server.server_address[1])
+
+    def test_page_without_session(self):
+        status, _, data = self.client.request("GET", "/")
+        self.assertEqual(status, 200)
+        self.assertIn("only reachable from this PC", data)
+        self.assertNotIn("No password set", data)
+        self.assertNotIn("Log out", data)
+
+    def test_host_header_still_checked(self):
+        self.assertEqual(self.client.request("GET", "/", headers={"Host": "evil.example.com"})[0],
+                         403)
+
+    def test_only_loopback_host_names(self):
+        for host in ("nas", "pc.local", "192.168.1.5:8737", "evil.example.com"):
+            status = self.client.request("GET", "/", headers={"Host": host})[0]
+            self.assertEqual(status, 403, host)
+        for host in ("localhost:8737", "127.0.0.1:8737", "[::1]:8737", "LOCALHOST"):
+            status = self.client.request("GET", "/", headers={"Host": host})[0]
+            self.assertEqual(status, 200, host)
+
+    def test_post_needs_csrf_token(self):
+        self.assertEqual(self.client.request("POST", "/targets", {"rows": "0"})[0], 403)
+        self.assertEqual(self.client.request("POST", "/targets",
+                                             {"csrf": "wrong", "rows": "0"})[0], 403)
+        self.assertEqual(self.service.requested, [])
+
+    def test_loopback_addresses(self):
+        for address in ("127.0.0.1", "127.0.0.2", "::1", "localhost", "LOCALHOST"):
+            self.assertTrue(web.is_loopback(address), address)
+            with mock.patch.dict(os.environ, {}, clear=True):
+                self.assertIsNone(cli.web_password_setup(None, address), address)
+        for address in ("0.0.0.0", "::", "192.168.1.5", "example.com", "", None):
+            self.assertFalse(web.is_loopback(address), address)
+
+    def test_other_bind_without_password_is_an_error(self):
+        with mock.patch.dict(os.environ, {}, clear=True):
+            for address in ("0.0.0.0", "192.168.1.5", None):
+                with self.assertRaises(ValueError, msg=address):
+                    cli.web_password_setup(None, address)
+
+    def test_password_file_on_loopback_needs_login(self):
+        pw = self.dir / "pw.txt"
+        pw.write_text("a-long-password\n")
+        with mock.patch.dict(os.environ, {}, clear=True):
+            password = cli.web_password_setup(str(pw), "127.0.0.1")
+        self.assertEqual(password, "a-long-password")
+        server, thread = web.start_server(self.ctx, password, "127.0.0.1", 0)
+        self.addCleanup(web.stop_server, server, thread)
+        client = Client(server.server_address[1])
+        status, resp, _ = client.request("GET", "/")
+        self.assertEqual((status, resp.getheader("Location")), (303, "/login"))
+
+    def test_env_password_on_loopback_is_used(self):
+        with mock.patch.dict(os.environ, {"PUSHSCAN_WEB_PASSWORD": "a-long-password"},
+                             clear=True):
+            self.assertEqual(cli.web_password_setup(None, "127.0.0.1"), "a-long-password")
+
+
+class StartChecksWebTests(unittest.TestCase):
+    def test_start_refuses_network_bind_without_password(self):
+        keep = {k: v for k, v in os.environ.items() if not k.startswith("PUSHSCAN_")}
+        popen = mock.Mock()
+        with mock.patch.dict(os.environ, keep, clear=True), \
+                mock.patch("sys.stderr", new_callable=io.StringIO) as err:
+            code = cli.start_main(["--printer", "192.0.2.1", "start", "--web", "--web-bind", "0.0.0.0"],
+                                  popen=popen)
+        self.assertEqual(code, 2)
+        self.assertIn("needs a password", err.getvalue())
+        popen.assert_not_called()
+
+    def test_bind_defaults_to_this_pc_without_password(self):
+        keep = {k: v for k, v in os.environ.items() if not k.startswith("PUSHSCAN_")}
+        with mock.patch.dict(os.environ, keep, clear=True):
+            args, _ = cli.parse_args(["--printer", "192.0.2.1", "run", "--web"])
+            self.assertEqual(args.web_bind, "127.0.0.1")
+            with mock.patch.dict(os.environ, {"PUSHSCAN_WEB_PASSWORD": "x" * 12}):
+                args, _ = cli.parse_args(["--printer", "192.0.2.1", "run", "--web"])
+            self.assertEqual(args.web_bind, "0.0.0.0")
+            args, _ = cli.parse_args(["--printer", "192.0.2.1", "run", "--web",
+                                      "--web-bind", "0.0.0.0"])
+            self.assertEqual(args.web_bind, "0.0.0.0")
 
 
 class NavTests(WebTestBase):
@@ -386,6 +492,21 @@ class TargetEditorTests(WebTestBase):
         form = self.form(csrf, *rows)
         form["op"] = op
         return form
+
+    def test_open_after_scan_per_target(self):
+        self.logged_in()
+        csrf = self.client.csrf()
+        status, _, _ = self.client.request("POST", "/targets", self.ops_form(
+            csrf, "save", {"name": "PC"}, {"name": "Archive", "open": "no"}))
+        self.assertEqual(status, 303)
+        cfg = load_config(self.config_path)
+        self.assertEqual([t.open_after_scan for t in cfg.targets], [None, False])
+        page = self.client.request("GET", "/targets")[2]
+        self.assertIn('<option value="no" selected>', page)
+        status, _, page = self.client.request("POST", "/targets", self.ops_form(
+            csrf, "save", {"name": "PC", "open": "always"}))
+        self.assertEqual(status, 400)
+        self.assertIn("invalid open after scan", page)
 
     def test_fresh_page_has_one_blank_row(self):
         self.logged_in()
@@ -481,6 +602,18 @@ class TargetEditorTests(WebTestBase):
         status, _, data = self.client.request("POST", "/targets", form)
         self.assertEqual(status, 400)
         self.assertIn("At most", data)
+
+    def test_saving_keeps_a_target_file_name(self):
+        self.logged_in()
+        self.config_path.parent.mkdir()
+        self.config_path.write_text('[[target]]\nname = "a"\nfilename = "bill_{date}"\n')
+        csrf = self.client.csrf()
+        status, _, _ = self.client.request("POST", "/targets",
+                                           self.form(csrf, {"name": "a"}, {"name": "b"}))
+        self.assertEqual(status, 303)
+        cfg = load_config(self.config_path)
+        self.assertEqual([(t.name, t.filename) for t in cfg.targets],
+                         [("a", "bill_{date}"), ("b", None)])
 
     def test_explicit_save_op_saves(self):
         self.logged_in()
@@ -833,7 +966,7 @@ output = "inbox"
 class SettingsTests(WebTestBase):
     BASE = {"resolution": "", "color": "", "format": "", "source": "", "size": "",
             "trim_left": "", "trim_top": "", "trim_right": "", "trim_bottom": "",
-            "multipage": "", "interval": ""}
+            "interval": ""}
 
     def post(self, **values):
         csrf = self.client.csrf("/settings")
@@ -845,7 +978,8 @@ class SettingsTests(WebTestBase):
         status, _, page = self.client.request("GET", "/settings")
         self.assertEqual(status, 200)
         for name in ("resolution", "color", "format", "source", "size", "trim_left",
-                     "trim_top", "trim_right", "trim_bottom", "multipage", "interval",
+                     "trim_top", "trim_right", "trim_bottom", "multipage_document",
+                     "multipage_auto", "interval",
                      "ignore_panel"):
             self.assertIn(f'name="{name}"', page)
         self.assertNotIn('name="printer"', page)
@@ -865,7 +999,8 @@ class SettingsTests(WebTestBase):
                                     '[[target]]\nname = "a"\noutput = "/consume"\n')
         status, resp, _ = self.post(resolution="600", color="gray", format="jpeg",
                                     source="adf", size="letter", trim_right="3",
-                                    trim_bottom="2.5", multipage="both", interval="2.5",
+                                    trim_bottom="2.5", multipage_document="1",
+                                    multipage_auto="1", interval="2.5",
                                     ignore_panel="1")
         self.assertEqual((status, resp.getheader("Location")), (303, "/settings?saved=1"))
         cfg = load_config(self.config_path)
@@ -875,13 +1010,22 @@ class SettingsTests(WebTestBase):
         self.assertEqual((cfg.multipage, cfg.interval, cfg.ignore_panel), ("both", 2.5, True))
         self.assertEqual((cfg.printer, cfg.verbose), ("10.0.0.9", True))
         self.assertEqual([(t.name, t.output) for t in cfg.targets], [("a", "/consume")])
-        self.assertEqual(self.service.requested, [])      # settings apply after a restart
+        self.assertEqual(self.service.requested, [])      # the config watcher applies them
         page = self.client.request("GET", "/settings?saved=1")[2]
-        self.assertIn("take effect after a restart", page)
+        self.assertIn("used from the next poll cycle", page)
         self.assertIn('<option value="600" selected>', page)
         self.assertIn('id="f-ignore_panel" value="1" checked', page)
-        self.assertNotIn("take effect after a restart",
+        self.assertNotIn("used from the next poll cycle",
                          self.client.request("GET", "/settings")[2].split("Source:")[0])
+
+    def test_filename_setting(self):
+        self.logged_in()
+        self.assertIn('name="filename"', self.client.request("GET", "/settings")[2])
+        self.assertEqual(self.post(filename="{name}_{date}")[0], 303)
+        self.assertEqual(load_config(self.config_path).filename, "{name}_{date}")
+        status, _, page = self.post(filename="{now.__class__}")
+        self.assertEqual(status, 400)
+        self.assertEqual(load_config(self.config_path).filename, "{name}_{date}")
 
     def test_empty_values_remove_the_keys(self):
         self.logged_in()
@@ -898,13 +1042,23 @@ class SettingsTests(WebTestBase):
         self.assertEqual(load_config(self.config_path).color, "gray")
         assert_mode(self, self.config_path, 0o600)
 
+    def test_multipage_boxes(self):
+        self.logged_in()
+        for boxes, mode in (({}, "off"), ({"multipage_auto": "1"}, "auto"),
+                            ({"multipage_document": "1"}, "document")):
+            self.post(**boxes)
+            self.assertEqual(load_config(self.config_path).multipage, mode, boxes)
+        _, _, page = self.client.request("GET", "/settings")
+        self.assertIn('name="multipage_document" value="1" checked', page)
+        self.assertNotIn('name="multipage_auto" value="1" checked', page)
+
     def test_validation_errors_write_nothing(self):
         self.logged_in()
         self.post(resolution="300")
         before = self.config_path.read_text()
         for bad in ({"resolution": "123"}, {"resolution": "abc"}, {"color": "blue"},
                     {"format": "tiff"}, {"source": "tray"}, {"size": "a0"},
-                    {"multipage": "maybe"}, {"trim_left": "51"}, {"trim_top": "-1"},
+                    {"trim_left": "51"}, {"trim_top": "-1"},
                     {"trim_right": "abc"}, {"trim_bottom": "nan"}, {"interval": "0"},
                     {"interval": "-3"}, {"interval": "fast"}, {"interval": "inf"}):
             status, _, page = self.post(**bad)
@@ -1501,13 +1655,17 @@ class ConfigWriteTests(unittest.TestCase):
 class MainTests(unittest.TestCase):
     def run_main(self, argv, **env):
         keep = {k: v for k, v in os.environ.items() if not k.startswith("PUSHSCAN_")}
+        keep["PUSHSCAN_WEB_PORT"] = "0"   # never the real port if a server starts
         keep.update(env)
         with mock.patch.dict(os.environ, keep, clear=True), \
                 mock.patch("sys.stderr"):
             return cli.main(argv)
 
     def test_password_missing_or_short(self):
-        self.assertEqual(self.run_main(["--printer", "192.0.2.1", "run", "--web"]), 2)
+        self.assertEqual(self.run_main(["--printer", "192.0.2.1", "run", "--web",
+                                        "--web-bind", "0.0.0.0"]), 2)
+        self.assertEqual(self.run_main(["--printer", "192.0.2.1", "run", "--web",
+                                        "--web-bind", "192.168.1.5"]), 2)
         self.assertEqual(self.run_main(["--printer", "192.0.2.1", "run"],
                                        PUSHSCAN_WEB="1", PUSHSCAN_WEB_PASSWORD="short"), 2)
 
@@ -1562,7 +1720,7 @@ class MainTests(unittest.TestCase):
                 self.assertLogs(level="WARNING") as logs:
             code = self.run_main(
                 ["--printer", "192.0.2.1", "--config", str(Path(d) / "c.toml"),
-                 "run", "--web", "--web-port", "0", "--web-bind", "127.0.0.1"],
+                 "run", "--web", "--web-port", "0", "--web-bind", "0.0.0.0"],
                 PUSHSCAN_WEB_AUTH="0", PUSHSCAN_NAME="me")
         self.assertEqual(code, 0)
         self.assertTrue(any("web page without password" in m for m in logs.output))
@@ -1590,6 +1748,103 @@ class MainTests(unittest.TestCase):
                           if isinstance(h, LogBuffer)], [])
         ctx = start.call_args.args[0]
         self.assertFalse(ctx.targets_from_env)
+
+
+class PrinterSearchTests(WebTestBase):
+    def setUp(self):
+        super().setUp()
+        self.searches = 0
+        self.result = [Scanner("192.0.2.7", "Canon TR8500 series", "Canon <TR8500>"),
+                       Scanner("192.0.2.1", "Old", "")]
+
+        def discover():
+            self.searches += 1
+            return list(self.result)
+        self.ctx.discover_fn = discover
+        write_config(self.config_path, dump_config(Config(printer="192.0.2.1", interval=3.0)))
+        self.logged_in()
+
+    def search(self):
+        csrf = self.client.csrf("/settings")
+        return self.client.request("POST", "/printer/search", {"csrf": csrf})
+
+    def test_settings_page_offers_the_search(self):
+        page = self.client.request("GET", "/settings")[2]
+        self.assertIn('action="/printer/search"', page)
+        self.assertEqual(self.searches, 0)   # only on request
+
+    def test_search_lists_scanners_escaped(self):
+        status, _, page = self.search()
+        self.assertEqual(status, 200)
+        self.assertEqual(self.searches, 1)
+        self.assertIn("Canon &lt;TR8500&gt;", page)
+        self.assertNotIn("<TR8500>", page)
+        self.assertIn('name="address" value="192.0.2.7"', page)
+        self.assertNotIn('name="address" value="192.0.2.1"', page)   # the one in use
+        self.assertIn("in use", page)
+
+    def test_nothing_found(self):
+        self.result = []
+        page = self.search()[2]
+        self.assertIn("No scanner answered", page)
+
+    def test_use_writes_the_printer_and_keeps_the_rest(self):
+        self.search()
+        csrf = self.client.csrf("/settings")
+        status, resp, _ = self.client.request("POST", "/printer/use",
+                                              {"csrf": csrf, "address": "192.0.2.7"})
+        self.assertEqual(status, 303)
+        cfg = load_config(self.config_path)
+        self.assertEqual((cfg.printer, cfg.interval), ("192.0.2.7", 3.0))
+        page = self.client.request("GET", resp.getheader("Location"))[2]
+        self.assertIn("The printer 192.0.2.7 is used from the next poll cycle", page)
+
+    def test_only_found_addresses_are_accepted(self):
+        self.search()
+        csrf = self.client.csrf("/settings")
+        for address in ("10.0.0.1", "", "192.0.2.7 "):
+            status, _, page = self.client.request("POST", "/printer/use",
+                                                  {"csrf": csrf, "address": address + "x"})
+            self.assertEqual(status, 400)
+            self.assertIn("Only an address found by the search", page)
+        self.assertEqual(load_config(self.config_path).printer, "192.0.2.1")
+
+    def test_use_without_a_search_is_refused(self):
+        csrf = self.client.csrf("/settings")
+        status, _, _ = self.client.request("POST", "/printer/use",
+                                           {"csrf": csrf, "address": "192.0.2.7"})
+        self.assertEqual(status, 400)
+
+    def test_csrf_is_required(self):
+        for path in ("/printer/search", "/printer/use"):
+            status, _, _ = self.client.request("POST", path, {"csrf": "wrong",
+                                                              "address": "192.0.2.7"})
+            self.assertEqual(status, 403)
+        self.assertEqual(self.searches, 0)
+
+    def test_one_search_at_a_time(self):
+        self.server.search_lock.acquire()
+        try:
+            status, _, page = self.search()
+        finally:
+            self.server.search_lock.release()
+        self.assertEqual(status, 409)
+        self.assertIn("already running", page)
+        self.assertEqual(self.searches, 0)
+
+    def test_overridden_printer_has_no_search(self):
+        self.ctx.overrides["printer"] = "environment variable PUSHSCAN_PRINTER"
+        page = self.client.request("GET", "/settings")[2]
+        self.assertNotIn("/printer/search", page)
+        self.assertIn("PUSHSCAN_PRINTER", page)
+        csrf = self.client.csrf("/settings")
+        self.assertEqual(self.client.request("POST", "/printer/search", {"csrf": csrf})[0], 404)
+
+    def test_without_search_function(self):
+        self.ctx.discover_fn = None
+        page = self.client.request("GET", "/settings")[2]
+        self.assertNotIn("/printer/search", page)
+        self.assertIn("Change it in the config file", page)
 
 
 if __name__ == "__main__":

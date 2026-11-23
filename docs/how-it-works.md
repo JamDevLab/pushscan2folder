@@ -19,7 +19,7 @@ Back to the [README](../README.md).
    panel without starting a scan triggers nothing.
 4. Release. On SIGINT/SIGTERM the tool releases the session.
 
-The tool needs Python >= 3.11 and the standard library only. It makes only
+The tool needs Python >= 3.11 and the standard library. Pillow is optional and is used only to cut out photos. It makes only
 outbound connections to the printer (TCP 80). No inbound ports are needed
 (except for the optional web page), so Docker's default bridge networking
 works.

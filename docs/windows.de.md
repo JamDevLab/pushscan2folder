@@ -10,17 +10,13 @@ Linux und Docker stehen in der README. macOS steht am Ende dieser Seite.
 2. Zur Kontrolle in PowerShell `Get-FileHash pushscan2folder-VERSION-windows-setup.exe` ausführen und mit `SHA256SUMS.txt` vergleichen.
 3. Den Installer starten. Er fragt nach seiner Sprache (Englisch oder Deutsch). Er installiert nur für deinen Benutzer, braucht keine Administratorrechte und legt das Programm in `%LOCALAPPDATA%\Programs\pushscan2folder` ab.
 
-Der Installer legt im Startmenü einen Ordner "pushscan2folder" mit drei Einträgen an:
-
-- "pushscan2folder" startet das Programm normal,
-- "pushscan2folder einrichten" führt die Setup-Fragen aus (`setup`),
-- "pushscan2folder beenden" beendet die Hintergrundinstanz (`stop`).
+Der Installer legt im Startmenü einen Ordner "pushscan2folder" mit einem Eintrag "pushscan2folder" an. Es ist dasselbe Programm für alles: Gibt es eine Konfigurationsdatei, zeigt es ein kleines Menü, um es im Hintergrund zu starten, zu beenden, den Status anzuzeigen, die Weboberfläche oder die Konfigurationsdatei zu öffnen, die Einstellungen zu ändern, die Hilfeseite zu öffnen oder es zu deinstallieren (siehe unten).
 
 Ein Desktop-Symbol ist optional und standardmäßig nicht angehakt. Am Ende bietet der Installer "Set up and start pushscan2folder" an. Das öffnet das Konsolenfenster mit den Setup-Fragen (siehe unten).
 
 Installer und Programm werden von GitHub Actions aus dem getaggten Quellcode gebaut. Der Installer entsteht mit Inno Setup um einen PyInstaller-Ordner-Build. Er ist nicht code-signiert.
 
-Zum Aktualisieren startest du den neueren Installer. Läuft die Hintergrundinstanz, beendet der Installer sie, ersetzt die Dateien und startet sie wieder. Deine Einstellungen bleiben erhalten.
+Zum Aktualisieren startest du den neueren Installer. Läuft die Hintergrundinstanz, beendet der Installer sie (mit `stop`, er wartet also auf einen laufenden Scan), ersetzt die Dateien und startet sie wieder. Deine Einstellungen bleiben erhalten.
 
 ### Warnungen von Virenscannern
 
@@ -32,30 +28,42 @@ Weil der Installer nicht signiert ist, zeigt Windows SmartScreen beim Start even
 
 "pushscan2folder" im Startmenü starten (oder das Desktop-Symbol, oder `pushscan2folder.exe` im Programmordner). Es öffnet sich ein Konsolenfenster. Gibt es noch keine Konfigurationsdatei, begrüßt dich das Programm und stellt ein paar Fragen (das ist der Befehl `setup`):
 
-- IP-Adresse oder Hostname des Druckers (wird sofort geprüft; du kannst neu eingeben oder trotzdem weitermachen),
+- der Drucker: Das Setup sucht zuerst im Netz nach eSCL-Scannern und listet die, die antworten, mit einer Nummer auf (siehe [Den Drucker finden](#den-drucker-finden)); du wählst eine Nummer oder gibst die IP-Adresse oder den Hostnamen ein. Die Adresse wird sofort geprüft; du kannst neu eingeben oder trotzdem weitermachen,
 - der Name, der am Druckerdisplay erscheint (Standard `BENUTZER  PCNAME`),
 - der Ordner für Scans (Standard `Dokumente\Scans`; die Scans landen direkt in diesem Ordner, nicht in einem Unterordner),
-- ob die Weboberfläche an sein soll (Standard nein; wenn ja: Port, Bind-Adresse und ein Passwort, zweimal eingegeben),
+- ob die Weboberfläche an sein soll (Standard nein; wenn ja: der Port und die Frage, ob andere Geräte wie Handy oder Tablet die Seite erreichen sollen. Bei nein (Standard) ist die Seite nur auf diesem PC und braucht kein Passwort. Bei ja: Bind-Adresse und ein Passwort, zweimal eingegeben),
 - ob nach jedem Scan der Ordner geöffnet werden soll (Standard ja, siehe [Ordner nach dem Scan öffnen](#ordner-nach-dem-scan-öffnen)),
 - ob das Programm beim Anmelden automatisch starten soll (Standard ja).
 
 Danach schreibt es `%APPDATA%\pushscan2folder\config.toml`, zeigt, wo alles liegt, und fragt "Run in the background now?" (Standard ja, siehe unten). Bei nein fragt es "Start now?" und läuft im Konsolenfenster. Das Webpasswort steht nicht in `config.toml`, sondern in `web_password.txt` daneben. `%APPDATA%` gehört nur deinem Benutzerkonto.
 
-Beim nächsten Start per Doppelklick oder aus dem Startmenü findet das Programm die Konfigurationsdatei und zeigt die aktuellen Einstellungen: den Drucker, jeden Namen mit seinem Ordner und ob die Weboberfläche an ist. Dann fragt es:
+Beim nächsten Start per Doppelklick oder aus dem Startmenü findet das Programm die Konfigurationsdatei und zeigt ein Menü mit der Version und der Angabe, ob das Programm im Hintergrund läuft:
+
+- Start in the background (nur wenn es nicht läuft; dann der Standard),
+- Stop (nur wenn es läuft),
+- Status (Standard, wenn es läuft; danach kommt das Menü wieder),
+- Open the web page (nur wenn es läuft und die Weboberfläche in der Konfigurationsdatei eingeschaltet ist; öffnet sie im Browser, danach kommt das Menü wieder),
+- Open the config file (im Programm, das Windows für `.toml`-Dateien kennt, sonst im Editor; das Programm übernimmt Änderungen nach wenigen Sekunden; das Menü kommt wieder),
+- Change the settings (läuft es, muss es vorher beendet werden, und das Menü bietet das an),
+- Help (GitHub) (öffnet die Projektseite im Browser; das Menü kommt wieder),
+- Uninstall (fragt vorher nach; entfernt die Ordner mit Einstellungen und Logs, aber nie deine Scans, und bietet danach an, den Windows-Deinstaller zu starten, der das Programm selbst entfernt; das Programm schließt sich sofort, damit der Deinstaller es löschen kann),
+- Quit.
+
+Das Menü ist auf Englisch. "Change the settings" zeigt die aktuellen Einstellungen (den Drucker, jeden Namen mit seinem Ordner und ob die Weboberfläche an ist) und fragt:
 
 - `1` diese Einstellungen verwenden (Standard),
 - `2` sie ändern (die Setup-Fragen, deine Namen und Ordner bleiben erhalten),
-- `3` neu anfangen mit einer neuen Konfiguration. Die alte Datei bleibt als `config.toml.bak` erhalten.
+- `3` neu anfangen mit einer neuen Konfiguration. Die alte Datei bleibt als `config.toml.bak` erhalten. Fängst du noch einmal neu an, bleibt die ältere Kopie bestehen und die nächste heißt `config.toml.2.bak`, danach `config.toml.3.bak` und so weiter.
 
-Ist die Konfigurationsdatei defekt, sagt das Programm das und bietet an, neu anzufangen, ebenfalls mit der `.bak`-Kopie. Läuft das Programm schon im Hintergrund, sagt es das und verweist dich auf `pushscan2folder stop`, bevor du die Einstellungen ändern kannst.
+Ist die Konfigurationsdatei defekt, sagt das Programm das und bietet an, neu anzufangen, ebenfalls mit der `.bak`-Kopie.
 
-Diese Frage kommt nur bei einem Doppelklick. In einer Eingabeaufforderung mit Argumenten läuft das Programm einfach los, ebenso unter Linux und macOS.
+Dieses Menü kommt nur bei einem Doppelklick. In einer Eingabeaufforderung mit Argumenten läuft das Programm einfach los, ebenso unter Linux und macOS.
 
 Bei `1` läuft das Programm. Es zeigt eine kurze Zusammenfassung (Version, Drucker, Konfigurationsdatei, Name und Ordner, Weboberfläche, Logdatei) und "Press Ctrl+C to stop." Das Schließen dieses Fensters beendet das Programm; die Zusammenfassung sagt das auch. Das Log zeigt die Anmeldung. Am Druckerdisplay erscheint unter "Scannen" und "Computer" ein Name wie `BENUTZER  PCNAME`. Auswählen und Start drücken. Mit Strg+C beenden; das Programm gibt den Namen am Drucker vorher frei.
 
 Wurde das Konsolenfenster nur für dieses Programm geöffnet, wartet es vor dem Schließen auf Enter, damit du die letzte Meldung lesen kannst. Das passiert nicht in einem Fenster, das du selbst geöffnet hast, nicht bei nicht interaktiver Eingabe und nicht beim Start über den Anmelde-Eintrag. `--no-pause` (oder `PUSHSCAN_NO_PAUSE=1`) schaltet es ab.
 
-Einstellungen später ändern: Konfigurationsdatei bearbeiten oder die Fragen erneut stellen lassen (auch im Startmenü als "pushscan2folder einrichten"). Hat die Datei schon `[[target]]`-Einträge, bleiben deine Namen und Ordner beim Setup unverändert:
+Einstellungen später ändern: Konfigurationsdatei bearbeiten oder die Fragen erneut stellen lassen (auch im Menü als "Change the settings"). Hat die Datei schon `[[target]]`-Einträge, bleiben deine Namen und Ordner beim Setup unverändert:
 
 ```
 .\pushscan2folder.exe setup
@@ -85,40 +93,52 @@ Ein per Doppelklick gestartetes Programm lebt in seinem Konsolenfenster, und mit
 ```
 
 - `status` sagt, ob die Hintergrundinstanz läuft, nennt PID und Logdatei und zeigt die letzten Logzeilen. Der Exit-Code ist 0, wenn sie läuft, sonst 1.
-- `stop` bittet die Instanz, sich zu beenden. Sie verlässt ihre Schleife nach wenigen Sekunden (ein laufender Scan wird noch fertig) und gibt ihre Namen am Drucker frei, sie verschwinden also vom Display. Ein abgekoppelter Prozess bekommt kein Strg+C, deshalb schreibt `stop` eine Stopp-Anforderungsdatei, die die Instanz etwa einmal pro Sekunde prüft. Ist die Instanz nach 30 Sekunden nicht beendet, wird sie abgebrochen; der Drucker verwirft die Namen dann nach etwa einer Minute.
+- `stop` bittet die Instanz, sich zu beenden. Sie verlässt ihre Schleife nach wenigen Sekunden (ein laufender Scan wird noch fertig) und gibt ihre Namen am Drucker frei, sie verschwinden also vom Display. Ein abgekoppelter Prozess bekommt kein Strg+C, deshalb schreibt `stop` eine Stopp-Anforderungsdatei, die die Instanz etwa einmal pro Sekunde prüft. Ist die Instanz nach 30 Sekunden nicht beendet, wird sie abgebrochen; der Drucker verwirft die Namen dann nach etwa einer Minute. Läuft gerade ein Scan, wartet `stop` stattdessen bis zu 10 Minuten und gibt "A scan is running; it is finished and saved first ..." aus. Ein mehrseitiger Scan vom Vorlagenglas, der auf die nächste Seite wartet, endet sofort mit den bisher gescannten Seiten, und diese werden gespeichert.
 
 Die Instanz hält eine Lock-Datei, eine PID-Datei und die Stopp-Anforderungsdatei in `%LOCALAPPDATA%\pushscan2folder\`. Das Lock hält der laufende Prozess, und Windows gibt es frei, wenn er endet. Eine übrig gebliebene Datei nach einem Absturz oder Neustart blockiert den nächsten `start` deshalb nie.
 
-Ein `run` im Vordergrund gehört nicht dazu. Es nutzt das Lock nicht, `stop` beendet es nicht, und `start` bemerkt es nicht. Beides nicht für denselben Namen gleichzeitig starten.
+Ein `run` im Vordergrund nutzt das Lock nicht, `stop` beendet es nicht, und `start` bemerkt es nicht. Beide würden dieselben Namen am Drucker anmelden, deshalb startet ein `run` im Vordergrund nicht, solange die Hintergrundinstanz läuft. Es sagt das und verweist auf `pushscan2folder stop`.
+
+## Den Drucker finden
+
+Ist noch kein Drucker eingetragen, sucht `pushscan2folder setup` (und der erste Doppelklick) im lokalen Netz mit mDNS (Bonjour, Dienst `_uscan._tcp`) nach eSCL-Scannern. Das dauert etwa 5 Sekunden. Jeder Scanner, der antwortet, wird mit Adresse, Modell und einer Nummer aufgelistet:
+
+```
+Searching the network for scanners (eSCL, about 5 seconds) ...
+  1  192.168.1.50  Canon TR8500 series
+Number of your printer, its IP address, or s to search again [1]:
+```
+
+Gib die Nummer ein, eine IP-Adresse, wenn dein Drucker nicht aufgeführt ist, oder `s`, um noch einmal zu suchen. Antwortet niemand, fragt das Setup nach der IP-Adresse; Enter sucht dort noch einmal. Die Anfrage geht über jeden Netzwerkadapter des PCs hinaus (auch WSL-, Hyper-V- oder VPN-Adapter) und wird dreimal gesendet. Ein Firewall-Filter für Multicast oder ein VPN kann der Grund sein. Die IP-Adresse steht in den Netzwerkeinstellungen am Bedienfeld des Druckers. Die Windows-Firewall fragt für diese Suche eventuell einmal, ob das Programm erlaubt sein soll.
 
 ## Ordner nach dem Scan öffnen
 
-Mit `open_after_scan = "folder"` in `[defaults]` (oder `--open-after-scan folder`, `PUSHSCAN_OPEN_AFTER_SCAN=folder`) öffnet der Explorer nach jedem Scan den Ordner mit markierter neuer Datei. Bei `"file"` öffnet sich der Scan selbst im PDF-Programm. Standard ist `"off"`. Das Setup fragt "Open the folder after each scan?" und schreibt bei ja `"folder"`. Ein Scan mit mehreren Seiten oder Dateien öffnet nur einmal. Schlägt das Öffnen fehl, steht eine Warnung im Log und der Scan bleibt trotzdem erhalten. Die Option steht auch auf der Einstellungsseite der Weboberfläche. Sie braucht einen angemeldeten Desktop-Benutzer und ist daher für einen PC gedacht, nicht für einen Server.
+Mit `open_after_scan = true` in `[defaults]` (oder `--open-after-scan true`, `PUSHSCAN_OPEN_AFTER_SCAN=true`) öffnet der Explorer nach jedem Scan den Ordner mit markierter neuer Datei. Standard ist `false`. Ältere Konfigurationsdateien mit `"folder"`, `"file"` oder `"off"` werden weiter gelesen (`"folder"` und `"file"` bedeuten `true`). Das Setup fragt "Open the folder after each scan?" und schreibt bei ja `true`. Zeigt schon ein Explorer-Fenster den Ordner, wird die neue Datei dort markiert, und es öffnet sich kein weiteres Fenster. Ein Scan mit mehreren Seiten oder Dateien öffnet nur einmal. Ein Ziel kann ein eigenes `open_after_scan` haben, etwa `false` für einen Archivordner, der sich nicht öffnen soll (auch im Ziel-Editor der Webseite). Schlägt das Öffnen fehl, steht eine Warnung im Log und der Scan bleibt trotzdem erhalten. Die Option steht auch auf der Einstellungsseite der Weboberfläche. Sie braucht einen angemeldeten Desktop-Benutzer und ist daher für einen PC gedacht, nicht für einen Server.
 
 ## Firewall
 
 Das Programm baut nur ausgehende Verbindungen zum Drucker auf. Für das Scannen braucht die Windows-Firewall deshalb keine Regel.
 
-Anders ist es bei der optionalen Webseite. Mit `--web` (oder `enabled = true` in der Tabelle `[web]` der Konfigurationsdatei) lauscht das Programm auf einem Port (Standard 8080) und bindet an alle Adressen, wenn du nichts anderes angibst. Die Setup-Fragen schlagen `127.0.0.1` vor. Windows fragt dann einmal, ob das Programm in privaten oder öffentlichen Netzwerken erlaubt sein soll. Damit die Seite nur auf diesem PC erreichbar ist:
+Anders ist es bei der optionalen Webseite. Mit `--web` (oder `enabled = true` in der Tabelle `[web]` der Konfigurationsdatei) lauscht das Programm auf einem Port (Standard 8737) und bindet an alle Adressen, wenn du nichts anderes angibst. Das Setup nimmt `127.0.0.1`, solange andere Geräte die Seite nicht erreichen sollen. Windows fragt dann einmal, ob das Programm in privaten oder öffentlichen Netzwerken erlaubt sein soll. Damit die Seite nur auf diesem PC erreichbar ist:
 
 ```
 .\pushscan2folder.exe --printer 192.168.1.50 --web --web-bind 127.0.0.1
 ```
 
-Dann ist nichts für andere Geräte erreichbar und es ist keine Firewall-Regel nötig. Im Browser http://127.0.0.1:8080 öffnen. Die Webseite braucht ein Passwort, das vor dem Start gesetzt wird, zum Beispiel:
+Dann ist nichts für andere Geräte erreichbar und es ist keine Firewall-Regel nötig. Im Browser http://127.0.0.1:8737 öffnen. Auf dieser Adresse braucht die Seite kein Passwort. Willst du trotzdem eine Anmeldung oder bindest du an eine andere Adresse, setze vor dem Start ein Passwort, zum Beispiel:
 
 ```
 $env:PUSHSCAN_WEB_PASSWORD = "ein langes eigenes Passwort"
 ```
 
-Das Setup legt das Passwort in `web_password.txt` neben der Konfigurationsdatei ab und trägt die Datei in `[web] password_file` ein, was der Autostart braucht. Von Hand nutzt du eine Datei und setzt `PUSHSCAN_WEB_PASSWORD_FILE` oder `password_file` (siehe Dokumentation der Webseite).
+Lässt du andere Geräte auf die Seite zu, legt das Setup das Passwort in `web_password.txt` neben der Konfigurationsdatei ab und trägt die Datei in `[web] password_file` ein, was der Autostart braucht. Von Hand nutzt du eine Datei und setzt `PUSHSCAN_WEB_PASSWORD_FILE` oder `password_file` (siehe Dokumentation der Webseite).
 
 ## Wo liegt was
 
 | Was | Ort |
 | --- | --- |
 | Konfigurationsdatei (vom Setup geschrieben) | `%APPDATA%\pushscan2folder\config.toml` |
-| Webpasswort (wenn die Weboberfläche an ist) | `%APPDATA%\pushscan2folder\web_password.txt` |
+| Webpasswort (nur wenn du eines setzt) | `%APPDATA%\pushscan2folder\web_password.txt` |
 | Programm | `%LOCALAPPDATA%\Programs\pushscan2folder` |
 | Scans | `Dokumente\Scans` im Benutzerordner (`C:\Users\NAME\Documents\Scans`). Das Setup legt ein Ziel an, das direkt dort speichert. |
 | Logdatei | `%LOCALAPPDATA%\pushscan2folder\pushscan2folder.log` für die Hintergrundinstanz und den Autostart; mit `--log-file PFAD` woanders |
@@ -180,9 +200,9 @@ Du siehst den Eintrag auch im Task-Manager auf dem Tab "Autostart-Apps" oder unt
 
 ## Deinstallieren
 
-Über Windows-Einstellungen, Apps, pushscan2folder. Der Deinstaller beendet die Hintergrundinstanz (die Namen verschwinden vom Display), entfernt den Autostart-Eintrag und fragt, ob auch die Einstellungen und das Log gelöscht werden sollen (Standard nein). Deine Scans werden nie gelöscht.
+Über Windows-Einstellungen, Apps, pushscan2folder. Der Deinstaller beendet die Hintergrundinstanz mit `stop` (er wartet auf einen laufenden Scan, und die Namen verschwinden vom Display), entfernt den Autostart-Eintrag und fragt, ob auch die Einstellungen und das Log gelöscht werden sollen (Standard nein). Deine Scans werden nie gelöscht.
 
-`pushscan2folder uninstall` räumt von der Kommandozeile aus genauso auf. Es beendet die Hintergrundinstanz, entfernt den Autostart-Eintrag und listet dann den Konfigurationsordner (`%APPDATA%\pushscan2folder\`, mit `config.toml` und `web_password.txt`) sowie den Log- und Statusordner (`%LOCALAPPDATA%\pushscan2folder\`) auf. Es fragt, ob sie gelöscht werden sollen, Standard nein. Deine Scans werden nie gelöscht, und ein Ordner, der deinen Scan-Ordner enthält, bleibt erhalten. Bei einer installierten Kopie endet es mit dem Hinweis, das Programm unter Einstellungen, Apps zu entfernen. Bei einer Kopie ohne Installer (zum Beispiel von pip oder aus dem Quellcode) erinnert es dich, das Programm selbst zu entfernen, denn Windows kann ein laufendes Programm nicht löschen.
+`pushscan2folder uninstall` räumt von der Kommandozeile aus genauso auf. Es beendet die Hintergrundinstanz (und wartet dabei wie `stop` auf einen laufenden Scan), entfernt den Autostart-Eintrag und listet dann den Konfigurationsordner (`%APPDATA%\pushscan2folder\`, mit `config.toml` und `web_password.txt`) sowie den Log- und Statusordner (`%LOCALAPPDATA%\pushscan2folder\`) auf. Es fragt, ob sie gelöscht werden sollen, Standard nein. Deine Scans werden nie gelöscht, und ein Ordner, der deinen Scan-Ordner enthält, bleibt erhalten. Bei einer installierten Kopie endet es mit dem Hinweis, das Programm unter Einstellungen, Apps zu entfernen. Bei einer Kopie ohne Installer (zum Beispiel von pip oder aus dem Quellcode) erinnert es dich, das Programm selbst zu entfernen, denn Windows kann ein laufendes Programm nicht löschen.
 
 Für Skripte: `uninstall --yes` fragt nicht und behält Konfiguration und Log; `uninstall --yes --purge` löscht sie. Ordner, die über `--config PFAD` angegeben sind, werden nicht angefasst.
 
@@ -202,6 +222,8 @@ $env:PYTHONPATH = "src"
 python -m pushscan2folder --printer 192.168.1.50
 ```
 
+Zum Ausschneiden von Fotos (Dokumenttyp *Foto*, Größe *auto scan* oder *auto multi scan*) einmal `pip install -r requirements.txt` ausführen. Pillow ist optional.
+
 Es gelten dieselben Optionen. Mit `python -m pushscan2folder --install-autostart ...` richtest du den Autostart für die Python-Variante ein. Tests: `python -m unittest discover -s tests`.
 
 ## Grenzen und Hinweise
@@ -218,5 +240,7 @@ Nicht paketiert und nicht auf echter Hardware getestet; die Unit-Tests laufen in
 cd pushscan2folder
 PYTHONPATH=src python3 -m pushscan2folder --printer 192.168.1.50
 ```
+
+Pillow ist optional und schneidet Fotos aus. Installiere es mit `pip install -r requirements.txt`.
 
 Die Konfiguration liegt in `~/.config/pushscan2folder/config.toml` (oder `$XDG_CONFIG_HOME`), Scans gehen nach `~/Documents/Scans`, wenn du kein `output` setzt. `--install-autostart` gibt es nur für Windows; unter macOS nimmst du für einen Hintergrunddienst einen launchd-Agent. Rückmeldungen von Mac-Nutzern sind willkommen.

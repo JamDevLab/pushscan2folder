@@ -9,7 +9,7 @@
 <p align="center">
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-AGPL--3.0-1F5FAD" alt="License: AGPL-3.0"></a>
   <img src="https://img.shields.io/badge/python-3.11%2B-1F5FAD" alt="Python 3.11+">
-  <img src="https://img.shields.io/badge/dependencies-none-1F5FAD" alt="dependencies: none">
+  <img src="https://img.shields.io/badge/dependencies-Pillow%20(optional)-1F5FAD" alt="dependencies: Pillow (optional)">
   <img src="https://img.shields.io/badge/docker-ready-2496ED" alt="Docker">
 </p>
 
@@ -28,7 +28,8 @@ Getestet mit einem Canon PIXMA TR8550 (TR8500-Serie).
 - Voreinstellungen pro Ziel für den Dokumenttyp *Automatisch*
 - Optionale passwortgeschützte Weboberfläche für Status, Log, Ziele und Einstellungen
 - Für Docker und NAS geeignet, nur ausgehende Verbindungen zum Drucker (TCP 80)
-- Python 3.11+, nur Standardbibliothek
+- Fotos: Bei der Bedienfeld-Größe "auto scan" oder "auto multi scan" werden die Fotos aus dem Glasscan ausgeschnitten, eine Datei pro Foto (braucht Pillow, optional)
+- Python 3.11+, nur Standardbibliothek; das optionale Paket Pillow wird nur zum Ausschneiden von Fotos gebraucht
 
 ## Unterstützte Drucker
 
@@ -68,7 +69,7 @@ Die `docker-compose.yml` sieht so aus, damit du siehst, was du ändern musst:
 ```yaml
 services:
   pushscan2folder:
-    image: ghcr.io/jamdevlab/pushscan2folder:latest   # or a fixed version, e.g. :0.2.0
+    image: ghcr.io/jamdevlab/pushscan2folder:latest   # or a fixed version, e.g. :0.3.0
     restart: unless-stopped
     user: "1000:1000"                    # owner of ./scans and ./config (id -u, id -g)
     environment:
@@ -166,6 +167,7 @@ getroffen und die Funktionen mit einem echten Drucker getestet.
 ## Lizenz
 
 pushscan2folder steht unter AGPL-3.0-or-later, siehe [LICENSE](LICENSE).
+Die optionale Abhängigkeit [Pillow](https://python-pillow.org/) (MIT-CMU-Lizenz) schneidet Fotos aus und ist in der Windows-exe und im Docker-Image enthalten.
 Canon und PIXMA sind Marken von Canon Inc. Dieses Projekt steht in keiner Verbindung zu Canon und wird von Canon weder unterstützt noch empfohlen.
 
 ### Rechtlicher Hinweis

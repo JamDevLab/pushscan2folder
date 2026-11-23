@@ -7,7 +7,7 @@ Zurück zur [README](../README.de.md).
 Ab Version 0.2.0 gibt es ein veröffentlichtes Image, das bei jedem Release
 gebaut wird: `ghcr.io/jamdevlab/pushscan2folder`, für linux/amd64 und
 linux/arm64 (zum Beispiel ein Raspberry Pi). Die Tags sind die genaue Version
-(`0.2.0`), Major.Minor (`0.2`) und `latest`. Du brauchst keinen Klon.
+(`0.3.0`), Major.Minor (`0.3`) und `latest`. Du brauchst keinen Klon.
 
 ## Docker Compose
 
@@ -26,7 +26,7 @@ docker compose logs -f
 ```
 
 Zum Aktualisieren: `docker compose pull && docker compose up -d`. Nimm
-`:latest` oder lege eine Version fest, zum Beispiel `:0.2.0`.
+`:latest` oder lege eine Version fest, zum Beispiel `:0.3.0`.
 
 Die Datei sieht so aus (die Web-Zeilen sind auskommentiert, die Weboberfläche
 ist also standardmäßig aus):
@@ -34,7 +34,7 @@ ist also standardmäßig aus):
 ```yaml
 services:
   pushscan2folder:
-    image: ghcr.io/jamdevlab/pushscan2folder:latest   # or a fixed version, e.g. :0.2.0
+    image: ghcr.io/jamdevlab/pushscan2folder:latest   # or a fixed version, e.g. :0.3.0
     restart: unless-stopped
     user: "1000:1000"                    # owner of ./scans and ./config (id -u, id -g)
     environment:
@@ -111,7 +111,52 @@ das Host-Verzeichnis (prüfe sie mit
 
 Zum Scannen braucht der Container keine Port-Weiterleitung, er verbindet sich
 nur ausgehend mit dem Drucker auf TCP 80. Port 8080 ist nur für die
-[Weboberfläche](web.de.md). Dockers Standard-Bridge-Netzwerk funktioniert.
+[Weboberfläche](web.de.md). Das Image setzt `PUSHSCAN_WEB_PORT=8080` aus
+Kompatibilität zu bestehenden Compose-Dateien, der Standard auf dem Desktop ist
+8737. Dockers Standard-Bridge-Netzwerk funktioniert.
+
+## Konfigurationsänderungen und Druckersuche
+
+Der Dienst liest `./config/config.toml` neu, wenn sie sich ändert. Änderungen
+auf dem Host gelten also innerhalb eines Abfragezyklus ohne Neustart, siehe
+[Datei im laufenden Betrieb ändern](configuration.de.md#datei-im-laufenden-betrieb-ändern).
+Der Knopf "Search the network" auf der Einstellungsseite findet mit dem
+Standard-Bridge-Netz nichts, weil Multicast das LAN nicht erreicht. Die
+Compose-Datei setzt `PUSHSCAN_PRINTER`, was den Knopf ebenfalls ausblendet.
+Trage die Adresse dort ein.
+
+## Healthcheck
+
+Das Image setzt `PUSHSCAN_HEARTBEAT_FILE=/tmp/pushscan2folder.alive` und hat
+einen `HEALTHCHECK`, der alle 30 Sekunden `pushscan2folder health` ausführt, mit
+60 Sekunden Startzeit und 3 Wiederholungen. Der laufende Dienst berührt die
+Heartbeat-Datei nach jedem erfolgreichen Kontakt mit dem Drucker. Das geschieht
+in jedem Abfragezyklus, auch während ein Scan läuft. `health` endet mit 0, wenn
+die Datei jünger als 120 Sekunden ist, sonst mit 1, und gibt den Grund aus
+(siehe [Konfiguration](configuration.de.md#unterbefehle)).
+
+`docker ps` zeigt `healthy` oder `unhealthy`. `unhealthy` heißt, dass der
+Drucker 2 Minuten lang nicht erreichbar war, zum Beispiel weil er ausgeschaltet
+ist oder das Netzwerk ausgefallen ist. Antwortet der Drucker wieder, wird der
+Container wieder `healthy`. Docker startet einen `unhealthy`-Container nicht von
+selbst neu, und ein Neustart würde hier auch nicht helfen.
+
+## Client-Adresse im Log
+
+Hinter Docker kann die Logzeile "web login from 172.x.x.1" das Gateway des
+Docker-Netzwerks zeigen statt der Adresse des echten Clients. Das passiert, wenn
+Dockers Userland-Proxy (`docker-proxy`) die Verbindung weiterleitet, zum
+Beispiel bei Rootless Docker, bei einer Verbindung über IPv6 auf eine
+IPv4-Portzuordnung oder bei manchen NAS-Systemen. Das Programm schreibt diese
+Adresse nur ins Log. Die Anmeldesperre gilt global und nicht pro Adresse (siehe
+[Sicherheitsmodell](web.de.md#sicherheitsmodell)), es geht also nichts kaputt.
+
+Um die echte Adresse zu sehen, gibt es diese Möglichkeiten:
+
+- Unter Linux `network_mode: host`. Entferne dann die `ports:`-Zuordnung, denn
+  die Weboberfläche lauscht direkt auf dem Host.
+- Über IPv4 verbinden.
+- Einen Reverse-Proxy vor den Container setzen.
 
 ## Paperless-ngx
 

@@ -8,6 +8,7 @@ Back to the [README](../README.md).
 - [Options](#options)
 - [Configuration file](#configuration-file)
 - [Precedence](#precedence)
+- [Changing the file while running](#changing-the-file-while-running)
 - [Panel settings](#panel-settings)
 - [Trimming a border](#trimming-a-border)
 - [Multi-page scans from the platen](#multi-page-scans-from-the-platen)
@@ -15,6 +16,7 @@ Back to the [README](../README.md).
 - [Multiple targets](#multiple-targets)
 - [Panel names](#panel-names)
 - [Presets per target](#presets-per-target)
+- [File names](#file-names)
 
 ## Subcommands
 
@@ -44,7 +46,17 @@ The other subcommands:
 PYTHONPATH=src python3 -m pushscan2folder setup
 ```
 
-The password of the web page is never written to `config.toml`: setup stores it
+If no printer is configured yet, setup first searches the local network for
+eSCL scanners with mDNS (Bonjour, service `_uscan._tcp`). The search takes
+about 5 seconds. It lists the address and model of each scanner it finds with a
+number, and you type that number or an IP address. If nothing answers, setup
+asks for the IP address as before. A firewall that blocks multicast or a VPN
+can be the reason. The IP address is shown in the network settings on the
+printer panel. The search needs only the Python standard library.
+
+The web page needs no password when it listens on this PC only (`bind` is
+`127.0.0.1`, `::1` or `localhost`); setup then asks for none. The password of
+the web page is never written to `config.toml`: setup stores it
 in `web_password.txt` next to the config file (mode 0600 where supported) and
 names that file in `[web] password_file`. If the file already has `[[target]]`
 entries, setup asks only for printer, web page and autostart and leaves the
@@ -68,8 +80,16 @@ is already running. The log goes to the state folder
 `$XDG_STATE_HOME/pushscan2folder/pushscan2folder.log`, default
 `~/.local/state/...`, elsewhere) unless `--log-file` is given. `stop` writes a
 stop request file that the poll loop checks once per second and terminates the
-process only if it has not ended after 30 seconds. `status` exits with 0 if the
-instance runs and 1 if not.
+process only if it has not ended after 30 seconds. While a scan runs, `stop`
+waits up to 600 seconds (10 minutes) instead and prints "A scan is running; it
+is finished and saved first ...". The instance keeps a busy marker file in its
+state folder for the time of a scan. A multi-page platen scan that waits for
+the next-page decision on the panel ends right away with the pages scanned so
+far, and these are saved. A page that is being scanned finishes first.
+`uninstall` runs `stop` too and waits in the same way. `status` exits with 0 if the
+instance runs and 1 if not. A foreground `run` refuses to start while the
+background instance runs, because both would register the same names. It
+points to `pushscan2folder stop`.
 
 ```sh
 # Stop the instance, remove the Windows autostart entry, then ask (default no)
@@ -80,6 +100,16 @@ PYTHONPATH=src python3 -m pushscan2folder uninstall --yes [--purge]
 ```
 
 Scans are never deleted, and a folder that contains a scan folder is kept.
+
+`health` checks whether the running service has talked to the printer
+recently. It is used by the Docker healthcheck (see [Docker](docker.md#healthcheck)):
+
+```sh
+# Exit code 0 if the heartbeat file is younger than --max-age seconds
+# (default 120), otherwise 1. It prints the reason.
+PYTHONPATH=src python3 -m pushscan2folder health \
+  --heartbeat-file /tmp/pushscan2folder.alive [--max-age 120]
+```
 
 `probe` and `scan` are for debugging:
 
@@ -111,16 +141,19 @@ environment wins over the [configuration file](#configuration-file). More in
 | `--color`      | `PUSHSCAN_COLOR`      | `color`             | run           | `color` or `gray`. Only used with `--ignore-panel` or if the panel sends no colour |
 | `--resolution` | `PUSHSCAN_RESOLUTION` | `300`               | run           | DPI. Fallback. The panel offers 75, 150, 300, 600 |
 | `--source`     | `PUSHSCAN_SOURCE`     | `auto`              | run (env: run only) | `auto`, `platen` or `adf`. Fallback |
-| `--trim`       | `PUSHSCAN_TRIM`       | none                | run           | Cut off a border by scanning a smaller area, e.g. `right=3,bottom=2` (keys `left`, `top`, `right`, `bottom`, in mm, 0 to 50). Platen only. Replaces the `trim_*` config values as a whole, see [Trimming a border](#trimming-a-border) |
+| `--trim`       | `PUSHSCAN_TRIM`       | none                | run           | Cut off a border by scanning a smaller area, e.g. `right=1,bottom=2` (keys `left`, `top`, `right`, `bottom`, in mm, 0 to 50). Platen only. Replaces the `trim_*` config values as a whole, see [Trimming a border](#trimming-a-border) |
 | `--targets`    | `PUSHSCAN_TARGETS`    | -                   | run           | Several panel entries, each with its own folder and optional preset, see [Multiple targets](#multiple-targets). Replaces `--name` for `run` |
 | `--ignore-panel` | `PUSHSCAN_IGNORE_PANEL` | off             | run           | Ignore the panel settings and always use the four options above (`--format`, `--color`, `--resolution`, `--source`). Env var: `1`, `true` or `yes`. Also disables multi-page scans |
 | `--multipage`  | `PUSHSCAN_MULTIPAGE`  | `document`          | run           | `document`, `auto`, `both` or `off`, see [Multi-page scans](#multi-page-scans-from-the-platen) |
-| `--open-after-scan` | `PUSHSCAN_OPEN_AFTER_SCAN` | `off`       | run, start    | `off`, `folder` or `file`. Desktop PC only: after a job is saved, open the folder (Windows: Explorer with the new file selected) or the file, once per job. On Linux it needs `DISPLAY` or `WAYLAND_DISPLAY`. A failure only logs a warning. Docker has no desktop, keep it `off` |
+| `--open-after-scan` | `PUSHSCAN_OPEN_AFTER_SCAN` | `false`     | run, start    | `true` or `false` (also `yes`/`no`, `1`/`0`, `on`/`off`; the old `folder` and `file` count as `true`). Desktop PC only: after a job is saved, open the folder (Windows: Explorer with the new file selected), once per job. On Linux it needs `DISPLAY` or `WAYLAND_DISPLAY`. A failure only logs a warning. Docker has no desktop, keep it `false` |
+| `--filename`   | `PUSHSCAN_FILENAME`   | `scan_{now:%Y%m%d_%H%M%S}` | run    | Template for the file name of a scan, without the extension, see [File names](#file-names) |
+| `--heartbeat-file` | `PUSHSCAN_HEARTBEAT_FILE` | -          | run, health   | File that `run` touches after every successful contact with the printer, and that `health` checks. The Docker image sets it, see [Docker](docker.md#healthcheck) |
+| `--max-age`    | -                  | `120`               | health        | Seconds after which `health` calls the heartbeat file too old |
 | `--no-pause`   | `PUSHSCAN_NO_PAUSE`   | off                 | all           | Windows: never wait for Enter before a console window opened for this program closes. The autostart entry sets it |
 | `--web`        | `PUSHSCAN_WEB`        | off                 | run           | Serve the [web page](web.md). Env var: `1`, `true` or `yes` |
-| `--web-port`   | `PUSHSCAN_WEB_PORT`   | `8080`              | run           | Port of the web page |
-| `--web-bind`   | `PUSHSCAN_WEB_BIND`   | `0.0.0.0`           | run           | Address of the web page |
-| -              | `PUSHSCAN_WEB_PASSWORD` / `PUSHSCAN_WEB_PASSWORD_FILE` | (required with `--web`) | run | Web password (min. 8 characters), or a file containing it. Env, or `[web] password_file` of the config file. Never the password itself in the config file |
+| `--web-port`   | `PUSHSCAN_WEB_PORT`   | `8737`              | run           | Port of the web page |
+| `--web-bind`   | `PUSHSCAN_WEB_BIND`   | see `[web]` `bind`  | run           | Address of the web page |
+| -              | `PUSHSCAN_WEB_PASSWORD` / `PUSHSCAN_WEB_PASSWORD_FILE` | (required with `--web` unless the bind address is loopback) | run | Web password (min. 8 characters), or a file containing it. Env, or `[web] password_file` of the config file. Never the password itself in the config file |
 | `--keep`       | -                  | off                 | probe         | Do not release the session |
 
 Notes:
@@ -148,29 +181,78 @@ the file and the key, so typos are caught.
 |-----|--------|---------|
 | `printer` | IP or host name | `--printer` |
 | `output` | folder; relative target outputs resolve against it | `--output` |
-| `interval` | seconds | `--interval` |
-| `verbose`, `ignore_panel` | `true` / `false` | `--verbose`, `--ignore-panel` |
-| `multipage` | `document`, `auto`, `both`, `off` | `--multipage` |
 | `[defaults]` `resolution` | `75`, `150`, `300`, `600` | `--resolution` |
 | `[defaults]` `color` | `color`, `gray` | `--color` |
 | `[defaults]` `format` | `pdf`, `jpeg` | `--format` |
 | `[defaults]` `source` | `auto`, `platen`, `adf` | `--source` |
 | `[defaults]` `size` | `a4`, `letter`, `legal`, `10x15`, `13x18` | scan area without panel data |
-| `[defaults]` `open_after_scan` | `off`, `folder`, `file` | `--open-after-scan` |
-| `[defaults]` `trim_left`, `trim_top`, `trim_right`, `trim_bottom` | number, mm, 0 to 50 | `--trim` |
+| `[defaults]` `open_after_scan` | `true`, `false` (the old `"off"`, `"folder"`, `"file"` are still read) | `--open-after-scan` |
+| `[defaults]` `filename` | template, see [File names](#file-names) | `--filename` |
+| `[defaults.document]` `multipage` | `true` / `false`, built-in `true` | `--multipage` (panel document type *Document*) |
+| `[defaults.auto]` `multipage` | `true` / `false`, built-in `false` | `--multipage` (panel document type *Auto*) |
+| `[advanced]` `interval` | seconds | `--interval` |
+| `[advanced]` `verbose`, `ignore_panel` | `true` / `false` | `--verbose`, `--ignore-panel` |
+| `[advanced]` `trim_left`, `trim_top`, `trim_right`, `trim_bottom` | number, mm, 0 to 50 | `--trim` |
 | `[web]` `enabled` | `true` / `false` | `--web` |
-| `[web]` `bind` | address, default `0.0.0.0` | `--web-bind` |
-| `[web]` `port` | 1 to 65535, default 8080 | `--web-port` |
+| `[web]` `bind` | address; not set: `0.0.0.0` when a password is set, else `127.0.0.1` (this PC only). On a loopback address (`127.0.0.1`, `::1`, `localhost`) no password is needed | `--web-bind` |
+| `[web]` `port` | 1 to 65535, default 8737 | `--web-port` |
 | `[web]` `password_file` | file holding the password; relative to the config file. The password itself is never a key | `PUSHSCAN_WEB_PASSWORD_FILE` |
 | `[[target]]` `name` | required, max 31 chars, unique | `NAME` |
 | `[[target]]` `output` | folder; `"."` is the output directory itself; default `<output>/<name>` | `NAME=DIR` |
-| `[[target]]` `document_multipage` | `true` / `false` | `mp:` for document type *Document* |
+| `[[target]]` `filename` | template, see [File names](#file-names); wins over `[defaults]` for this target | - |
+| `[[target]]` `open_after_scan` | `true`, `false`; wins over `[defaults]` for this target, for example `false` for an archive folder | - |
+| `[target.document]` `multipage` | `true` / `false` | `mp:` for document type *Document* |
 | `[target.auto]` `resolution`, `format`, `size` | as above | the `@preset` options |
 | `[target.auto]` `multipage` | `true` / `false` | `mp:` for document type *Auto scan* |
 
-The multi-page booleans start from the global `multipage` mode and add or
-remove *Document* / *Auto scan* for that target. If a target sets neither, it
-follows the global mode.
+The multi-page booleans of a target start from `[defaults.document]` and
+`[defaults.auto]` (or `--multipage`) and replace the value for that target. If
+a target sets neither, it follows the defaults.
+
+The printer panel has three document types. *Photo* needs no table, because the
+panel sends all of its settings itself (JPEG, size, resolution). With *Document*
+the panel sends them too and `[defaults.document]` only decides about the
+multi-page dialog. With *Auto* the panel sends no size, format or resolution, so
+`[defaults]` and `[target.auto]` decide.
+
+If `[defaults.document]` or `[defaults.auto]` is left out, the built-in value applies (`true` for *Document*, `false` for *Auto*). Setting only one of them keeps
+the built-in value of the other.
+
+### Photos
+
+With the document type *Photo* the panel offers the sizes *auto scan* and
+*auto multi scan*. The printer always sends the whole glass, and
+pushscan2folder cuts the photos out on the PC:
+
+- *Auto scan* saves one file with the area of the photo or photos.
+- *Auto multi scan* saves one file per photo, ordered from top to bottom and
+  then from left to right.
+
+This works with the lid open or closed and only on the glass (not the ADF).
+Tilted photos stay tilted, because the cut is a bounding box without
+straightening. With the panel format PDF the tool scans JPEG, cuts out the
+photos and writes one PDF per photo.
+
+Cutting out needs the optional Python package Pillow. The Windows exe and the
+Docker image include it. When you run from source, install it with
+`pip install -r requirements.txt`. Without Pillow everything works as before and
+the whole glass is saved; the log then says "install Pillow to cut the photos
+out of the scan".
+
+### Older config files
+
+Files from earlier versions still work. The old keys are read and the log shows
+a warning that lists them. Setup and the web page write the new layout.
+
+| Old place | New place |
+|-----------|-----------|
+| `interval`, `verbose`, `ignore_panel` at the top level | `[advanced]` |
+| `trim_*` in `[defaults]` | `[advanced]` |
+| `multipage = "document"` (or `auto`, `both`, `off`) at the top level | `multipage` in `[defaults.document]` and `[defaults.auto]` |
+| `document_multipage` in a `[[target]]` | `multipage` in `[target.document]` |
+
+If the old and the new place of the same key are both present, the file is
+rejected with a message such as "keep only ...".
 
 ## Precedence
 
@@ -184,6 +266,27 @@ Command line > environment variable > config file > built-in default.
 - The panel settings come first for the scan itself, the CLI options only fill
   in, see [Panel settings](#panel-settings) and
   [Presets per target](#presets-per-target).
+
+## Changing the file while running
+
+Before each poll cycle, never during a scan, `run` checks the modification
+time and size of the config file. If it changed, the file is read again like at
+startup. Command line options and `PUSHSCAN_*` environment variables still win
+over the file. This also applies to changes made on the [web page](web.md).
+
+These are applied right away: the scan defaults (`[defaults]` keys, `size`,
+`filename`, the `multipage` keys), `interval`, `ignore_panel` and the `trim_*`
+values from `[advanced]`, `open_after_scan`, the targets, `output` and `printer`. Targets whose names stay
+keep their registration on the panel. If the printer changes, the names are
+released on the old printer and registered on the new one.
+
+These need a restart: the web page on or off, its bind address, port and
+password file, the log file, the debug log (`verbose` in `[advanced]`) and the heartbeat file.
+If the file changes one of them, the log shows a warning that names it.
+
+An invalid file, or an invalid file name template, is logged once as an error
+and the running settings stay. A deleted file changes nothing. In Docker this
+works when you edit `./config/config.toml` on the host.
 
 ## Panel settings
 
@@ -210,10 +313,10 @@ are always used.
 
 ## Trimming a border
 
-Some scanners capture a thin border at the glass edge. The TR8550 seems to
-show about 3 mm on the right and 2 mm at the bottom (still to be verified).
-With `--trim right=3,bottom=2` (or `PUSHSCAN_TRIM`, or the `trim_*` keys in the
-config file) the tool asks the printer for a smaller scan area, so the border
+Some scanners capture a thin border at the glass edge. On a TR8550, tests
+showed `trim_right = 1` and `trim_bottom = 2` (mm) remove it. With
+`--trim right=1,bottom=2` (or `PUSHSCAN_TRIM`, or the `trim_*` keys in the
+`[advanced]` table of the config file) the tool asks the printer for a smaller scan area, so the border
 is never scanned. No image processing is involved. Trimming applies to the
 platen only, ADF scans are not trimmed. If less than 1 inch would remain in
 either direction, trimming is skipped and a warning is logged. The setting is
@@ -232,7 +335,9 @@ eSCL, because only that protocol has the "next page" question.
 The printer delivers each page as a JPEG; the PDF embeds the JPEGs unchanged.
 
 `--multipage` (`PUSHSCAN_MULTIPAGE`) sets which document types get the
-dialog:
+dialog. In the config file the same is set with `multipage` in
+`[defaults.document]` (built-in `true`) and `[defaults.auto]` (built-in
+`false`):
 
 | Value                | Dialog for                                        |
 |----------------------|---------------------------------------------------|
@@ -328,3 +433,52 @@ example `- /path/to/paperless/consume:/scans/Paperless` in Docker (see
 folder inside the output directory can also be chosen on the
 [web page](web.md); an absolute one like `Paperless=/consume` works too, but
 only from the command line or the config file.
+
+## File names
+
+The template for the name of a scan file is set with `filename` in
+`[defaults]`, `--filename` or `PUSHSCAN_FILENAME`. A `filename` in a
+`[[target]]` applies to that target only and wins over the other settings. The
+usual precedence applies otherwise (see [Precedence](#precedence)). On the
+[web page](web.md#pages) the Settings page has a "File name" field.
+
+The default is `scan_{now:%Y%m%d_%H%M%S}`, which gives the same names as
+before, for example `scan_20261122_183005.pdf`. The template has no extension,
+because the extension comes from the format (`.pdf` or `.jpg`).
+
+| Field | Meaning | Example |
+|-------|---------|---------|
+| `{name}` | the panel name, made safe for a file name | `My PC` gives `My_PC` |
+| `{date}` | the date | `2026-11-22` |
+| `{time}` | the time | `183005` |
+| `{now:FORMAT}` | the date and time with Python `strftime` codes | `{now:%Y%m%d_%H%M%S}` gives `20261122_183005` |
+
+```toml
+[defaults]
+filename = "{name}_{date}_{time}"     # My_PC_2026-11-22_183005.pdf
+
+[[target]]
+name = "Paperless"
+filename = "scan_{now:%Y%m%d_%H%M%S}"   # this target keeps the default style
+```
+
+No other fields exist. Attribute access such as `{now.year}` and positional
+fields such as `{}` are rejected, and so is a template that gives an empty
+name. The program checks the template at startup, so a mistake stops it with an
+error message and not in the middle of a scan.
+
+The result is made safe for the file system:
+
+- Characters that Windows does not allow in file names (`<>:"/\|?*` and
+  control characters) become `_`, on every system. Spaces and dots at the start
+  and the end are removed.
+- The name is cut to 120 characters.
+- A device name such as `CON` gets a `_` in front, as with
+  [folder names](windows.md#where-files-go) on Windows.
+- A job of several JPEG files gets `_01`, `_02` and so on after the name.
+- An existing file is never overwritten. A `-1`, `-2` and so on is added to the
+  name instead, for example `scan_20261122_183005-1.pdf`.
+
+The target editor on the web page has no field for the template of a target.
+Saving the targets on the web page keeps the `filename` that a target has in
+the file.

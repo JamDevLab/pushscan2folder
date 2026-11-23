@@ -17,6 +17,9 @@ DPI_75 = sample("0101010101000103010101020000")
 DPI_600 = sample("0101010101000103040101020000")
 LETTER = sample("0101010101000203040101020000")
 SIZE_AUTO = sample("0101010101000b03040101020000")
+# Photo, auto scan and auto multi scan (several photos on the glass).
+PHOTO_AUTO = sample("0101020101000b01030000020000")
+PHOTO_MULTI = sample("0101020101000c01030000020000")
 JPEG = sample("0101010101000b01040101020000")
 COMPACT = sample("0101010101000b04000101010000")
 BLEED_MOIRE = sample("0101010101000103030202020000")
@@ -27,6 +30,16 @@ ADF_AUTO = sample("01010301020000000000000000000000000001")
 
 
 class DecodeTests(unittest.TestCase):
+    def test_unknown_values(self):
+        self.assertEqual(panel.unknown_values(BASE), [])
+        self.assertEqual(panel.unknown_values(PHOTO_MULTI), [])
+        self.assertEqual(panel.unknown_values(sample("0101070101000d01030000020000")),
+                         ["document type 0x07", "size 0x0d"])
+
+    def test_auto_multi_scans_the_whole_glass(self):
+        s = panel.apply(panel.decode(PHOTO_MULTI), ScanSettings())
+        self.assertEqual((s.width, s.height), panel.AUTO_REGION)
+
     def test_base(self):
         p = panel.decode(BASE)
         self.assertEqual((p.doc_type, p.color, p.source, p.size, p.fmt, p.resolution),
@@ -39,6 +52,8 @@ class DecodeTests(unittest.TestCase):
         self.assertEqual(panel.decode(DPI_600).resolution, 600)
         self.assertEqual(panel.decode(LETTER).size, "letter")
         self.assertEqual(panel.decode(SIZE_AUTO).size, "auto")
+        self.assertEqual(panel.decode(PHOTO_AUTO).size, "auto")
+        self.assertEqual(panel.decode(PHOTO_MULTI).size, "auto-multi")
         self.assertEqual(panel.decode(JPEG).fmt, "jpeg")
         p = panel.decode(COMPACT)
         self.assertEqual((p.fmt, p.resolution, p.unsharp_mask), ("pdf-compact", None, False))

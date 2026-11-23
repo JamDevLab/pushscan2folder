@@ -249,6 +249,29 @@ class AutostartMainTests(unittest.TestCase):
         self.assertFalse(kwargs.get("shell", False))
         self.assertIn(str(cfg), args[0][args[0].index("/d") + 1])
 
+    def test_install_with_run_options_and_no_subcommand(self):
+        with tempfile.TemporaryDirectory() as d:
+            cfg = Path(d) / "c.toml"
+            cfg.write_text('printer = "192.0.2.1"\n')
+            code, err, run = self.run_main(["--install-autostart", "--config", str(cfg),
+                                            "--output", str(Path(d) / "s")], "win32")
+        self.assertEqual(code, 0, err)
+        self.assertEqual(run.call_args[0][0][:2], ["reg.exe", "add"])
+
+    def test_setup_callback_installs(self):
+        # the setup questions use this callback; it must add the entry, not delete it
+        with tempfile.TemporaryDirectory() as d:
+            cfg = Path(d) / "c.toml"
+            cfg.write_text('printer = "192.0.2.1"\n')
+            with mock.patch.object(sys, "platform", "win32"), \
+                    mock.patch.object(sys, "stdout", __import__("io").StringIO()), \
+                    mock.patch("subprocess.run") as run:
+                run.return_value = mock.Mock(returncode=0, stdout="", stderr="")
+                code = cli.install_autostart(["--config", str(cfg), "--log-file",
+                                              str(Path(d) / "l.log")])
+        self.assertEqual(code, 0)
+        self.assertEqual(run.call_args[0][0][:2], ["reg.exe", "add"])
+
     def test_remove(self):
         code, _, run = self.run_main(["--remove-autostart"], "win32")
         self.assertEqual(code, 0)

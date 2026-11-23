@@ -1,7 +1,7 @@
 ﻿; Inno Setup script for the Windows installer of pushscan2folder.
 ; Built by .github/workflows/release.yml after PyInstaller made the folder
 ; dist\pushscan2folder:
-;   ISCC /DAppVersion=0.2.0 packaging\pushscan2folder.iss
+;   ISCC /DAppVersion=0.3.0 packaging\pushscan2folder.iss
 ; Installs for the current user only (no administrator rights), into
 ; %LOCALAPPDATA%\Programs\pushscan2folder, with Start menu entries and an
 ; entry under Settings > Apps for uninstalling.
@@ -44,10 +44,6 @@ Name: "de"; MessagesFile: "compiler:Languages\German.isl"
 [CustomMessages]
 en.RunSetup=Set up and start pushscan2folder
 de.RunSetup=pushscan2folder einrichten und starten
-en.SetupEntry=pushscan2folder setup
-de.SetupEntry=pushscan2folder einrichten
-en.StopEntry=Stop pushscan2folder
-de.StopEntry=pushscan2folder beenden
 en.DeleteSettings=Also delete the settings and the log of pushscan2folder?%n%nYour scans are not touched.
 de.DeleteSettings=Auch die Einstellungen und das Protokoll von pushscan2folder löschen?%n%nDeine Scans bleiben erhalten.
 
@@ -63,8 +59,6 @@ Source: "..\dist\pushscan2folder\*"; DestDir: "{app}"; Flags: ignoreversion recu
 
 [Icons]
 Name: "{group}\pushscan2folder"; Filename: "{app}\{#Exe}"
-Name: "{group}\{cm:SetupEntry}"; Filename: "{app}\{#Exe}"; Parameters: "setup"
-Name: "{group}\{cm:StopEntry}"; Filename: "{app}\{#Exe}"; Parameters: "stop"
 Name: "{autodesktop}\pushscan2folder"; Filename: "{app}\{#Exe}"; Tasks: desktopicon
 
 [Run]

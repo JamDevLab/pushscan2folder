@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import logging
 import re
+import string
 import threading
 import time
 from dataclasses import dataclass, field, replace
@@ -14,7 +15,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Callable
 
-from . import desktop, panel
+from . import crop, desktop, panel
 from .client import ChmpClient
 from .escl import EXTENSIONS, FORMATS, EsclClient, ScanSettings
 from .native import NativeScanner, PageSettings
@@ -63,7 +64,7 @@ class Trim:
 
 
 def parse_trim(text: str | None) -> Trim:
-    """Parse "right=3,bottom=2" (keys left/top/right/bottom, mm, any subset).
+    """Parse "right=1,bottom=2" (keys left/top/right/bottom, mm, any subset).
     Empty means no trim. Raises ValueError."""
     values: dict[str, float] = {}
     for part in (text or "").split(","):
@@ -74,7 +75,7 @@ def parse_trim(text: str | None) -> Trim:
         key = key.strip().lower()
         if not sep or key not in ("left", "top", "right", "bottom"):
             raise ValueError(f"invalid trim entry {part!r}: use left/top/right/bottom=MM, "
-                             f"e.g. right=3,bottom=2")
+                             f"e.g. right=1,bottom=2")
         if key in values:
             raise ValueError(f"trim side {key!r} given twice")
         try:
@@ -86,10 +87,53 @@ def parse_trim(text: str | None) -> Trim:
     return Trim(**values)
 
 
-def output_names(directory: Path, fmt: str, count: int, now: datetime) -> list[Path]:
-    """scan_YYYYmmdd_HHMMSS[_NN].ext, never overwriting existing files."""
+DEFAULT_FILENAME = "scan_{now:%Y%m%d_%H%M%S}"
+MAX_FILENAME_CHARS = 120
+_FILENAME_FIELDS = ("name", "date", "time", "now")
+
+
+class _FilenameFormatter(string.Formatter):
+    """str.format with only the plain fields of _FILENAME_FIELDS: no attribute
+    or index access ({now.__class__}) and no positional fields."""
+
+    def get_field(self, field_name, args, kwargs):
+        if field_name not in _FILENAME_FIELDS:
+            raise ValueError(f"unknown field {{{field_name}}}: use "
+                             + ", ".join("{" + f + "}" for f in _FILENAME_FIELDS))
+        return kwargs[field_name], field_name
+
+
+def render_filename(template: str, name: str, now: datetime) -> str:
+    """The file name (without extension) for a scan of target `name` at `now`.
+    Fields: {name} (panel name as a safe file name), {date} (2026-11-22),
+    {time} (183000), {now:FORMAT} (strftime codes, e.g. {now:%Y%m%d_%H%M%S}).
+    Characters that are not allowed in a Windows file name become "_".
+    Raises ValueError for a template that cannot be used."""
+    try:
+        text = _FilenameFormatter().format(
+            template, name=safe_dirname(name), date=now.strftime("%Y-%m-%d"),
+            time=now.strftime("%H%M%S"), now=now)
+    except (ValueError, IndexError, KeyError) as exc:
+        raise ValueError(f"file name {template!r}: {exc}") from None
+    text = re.sub(r'[<>:"/\\|?*\x00-\x1f\x7f]', "_", text).strip(" .")
+    if is_reserved_name(text):
+        text = "_" + text
+    if not text:
+        raise ValueError(f"file name {template!r} gives an empty name")
+    return text[:MAX_FILENAME_CHARS]
+
+
+def check_filename(template: str) -> None:
+    """Raise ValueError if `template` cannot be used as a file name template."""
+    render_filename(template, "scan", datetime(2026, 1, 2, 3, 4, 5))
+
+
+def output_names(directory: Path, fmt: str, count: int, now: datetime,
+                 template: str = DEFAULT_FILENAME, name: str = "scan") -> list[Path]:
+    """TEMPLATE[_NN].ext (default scan_YYYYmmdd_HHMMSS), never overwriting
+    existing files: a "-1", "-2" ... is added instead."""
     ext = EXTENSIONS[FORMATS[fmt]]
-    stem = now.strftime("scan_%Y%m%d_%H%M%S")
+    stem = render_filename(template, name, now)
     names = []
     for i in range(count):
         base = stem if count == 1 else f"{stem}_{i + 1:02d}"
@@ -146,6 +190,8 @@ class Target:
     session: int | None = None
     preset: dict = field(default_factory=dict)
     multipage: frozenset[str] | None = None
+    filename: str | None = None  # file name template; None = the global one
+    open_after_scan: bool | None = None   # None = the global one
 
 
 def parse_preset(text: str) -> tuple[dict, frozenset[str] | None]:
@@ -226,11 +272,22 @@ class PushScanService:
                  settings: ScanSettings, interval: float = 4.0, auto_source: bool = True,
                  use_panel: bool = True, native: NativeScanner | None = None,
                  multipage: frozenset[str] = frozenset({"document"}),
-                 trim: Trim | None = None, open_after_scan: str = "off"):
+                 trim: Trim | None = None, open_after_scan: bool = False,
+                 filename: str = DEFAULT_FILENAME):
         self.trim = trim or Trim()
+        self.filename = filename
+        # Optional file touched after every successful contact with the
+        # printer (`pushscan2folder health`, the Docker healthcheck).
+        self.heartbeat: Path | None = None
         self.open_after_scan = open_after_scan
         # Optional callable: True asks the loop to stop (background `stop`).
         self.stop_check: Callable[[], bool] | None = None
+        # Optional callable, called with True when a scan starts and False when
+        # it ends (the background instance marks itself busy for `stop`).
+        self.busy_hook: Callable[[bool], None] | None = None
+        # Optional callable run by the poll loop before each cycle, never during
+        # a scan (the config file watcher uses it to apply a changed file).
+        self.before_step: Callable[[], None] | None = None
         self.use_panel = use_panel
         self.native = native
         self.multipage = multipage
@@ -293,6 +350,26 @@ class PushScanService:
         self.status.set_pending(False)
         log.info("targets updated: %s", ", ".join(new_names) or "none")
 
+    OPTIONS = ("settings", "interval", "auto_source", "use_panel", "multipage", "trim",
+               "open_after_scan", "filename")
+
+    def update_options(self, **options) -> None:
+        """Change scan options (names in OPTIONS). Call it from the poll loop
+        (before_step), so a running scan never sees a mix of old and new."""
+        for key, value in options.items():
+            if key not in self.OPTIONS:
+                raise TypeError(f"unknown option {key!r}")
+            setattr(self, key, value)
+
+    def change_printer(self, chmp: ChmpClient, escl: EsclClient,
+                       native: NativeScanner | None) -> None:
+        """Switch to another printer (from the poll loop). The names on the old
+        one are released (best effort, it may be gone); step() registers them
+        on the new one."""
+        self.release()
+        self.chmp, self.escl, self.native = chmp, escl, native
+        self._last_keepalive = 0.0
+
     def register(self, target: Target) -> None:
         target.session = self.chmp.register(target.name).session
         log.info("%r is now on the printer panel under Scan to PC", target.name)
@@ -323,6 +400,10 @@ class PushScanService:
         if self.use_panel and interrupt:
             p = panel.decode(interrupt)
             log.info("panel settings: %s", p.describe())
+            unknown = panel.unknown_values(interrupt)
+            if unknown:
+                log.warning("unknown panel value(s): %s; please report them together "
+                            "with the 'scan requested' line above", ", ".join(unknown))
             settings = panel.apply(p, settings)
             if p.doc_type == "auto" and preset:
                 settings = replace(settings, **preset)
@@ -364,6 +445,20 @@ class PushScanService:
         modes = self.multipage if target is None or target.multipage is None else target.multipage
         return self.use_panel and panel.decode(interrupt).doc_type in modes
 
+    def cut_mode(self, settings: ScanSettings, interrupt: bytes) -> str | None:
+        """"single" or "multi" when the photos are to be cut out of the scan:
+        panel size auto scan or auto multi scan on the glass, Pillow installed."""
+        if not (self.use_panel and interrupt) or settings.source != "platen":
+            return None
+        size = panel.decode(interrupt).size
+        if size not in panel.AUTO_SIZES:
+            return None
+        if not crop.available():
+            log.info("install Pillow to cut the photos out of the scan; saving the "
+                     "whole glass")
+            return None
+        return "multi" if size == "auto-multi" else "single"
+
     def keepalive(self) -> None:
         """Poll all targets during a scan so the printer keeps them registered."""
         now = time.monotonic()
@@ -376,6 +471,7 @@ class PushScanService:
                     self.register(target)
                     continue
                 resp = self.chmp.poll(target.session)
+                self.beat()
                 if resp.scan_requested:
                     log.warning("scan request for %r during a running scan ignored", target.name)
                 elif resp.status != STATUS_OK:
@@ -404,7 +500,7 @@ class PushScanService:
         pages = self.native.scan(
             PageSettings(settings.color, settings.resolution, settings.width, settings.height,
                          settings.x_offset, settings.y_offset),
-            multipage=True, keepalive=self.keepalive)
+            multipage=True, keepalive=self.keepalive, should_stop=self.stop_wanted)
         complete = [p for p in pages if is_complete(p, "jpeg")]
         self._pages = len(complete)
         if len(complete) != len(pages):
@@ -418,6 +514,8 @@ class PushScanService:
     def scan_to(self, target: Target, event: int = 0, interrupt: bytes = b"") -> list[Path]:
         """Scan for target and save the files; the result goes to self.status."""
         self.status.set_busy(target.name)
+        if self.busy_hook is not None:
+            self.busy_hook(True)
         self._pages = 0
         self._method = ""
         try:
@@ -428,11 +526,15 @@ class PushScanService:
             raise
         finally:
             self.status.set_busy(None)
+            if self.busy_hook is not None:
+                self.busy_hook(False)
         self.status.record(ScanRecord(time.time(), target.name, self._method, self._pages,
                                       tuple(str(p) for p in paths),
                                       "ok" if paths else "nothing saved"))
         if paths:
-            desktop.open_saved(self.open_after_scan, paths)  # once per job
+            wanted = (self.open_after_scan if target.open_after_scan is None
+                      else target.open_after_scan)  # False of a target wins, too
+            desktop.open_saved(wanted, paths)  # once per job
         return paths
 
     def _scan_to(self, target: Target, event: int, interrupt: bytes) -> list[Path]:
@@ -440,6 +542,10 @@ class PushScanService:
         outdir = target.outdir
         settings = self.settings_for(interrupt, target)
         native = self.use_native(settings, interrupt, target)
+        cut = None if native else self.cut_mode(settings, interrupt)
+        saved_fmt = settings.fmt
+        if cut:
+            settings = replace(settings, fmt="jpeg")   # cut out on the JPEG, then convert
         log.info("scanning (%s): source=%s color=%s dpi=%d format=%s region=%dx%d",
                  "native, multi-page" if native else "eSCL",
                  settings.source, settings.color, settings.resolution, settings.fmt,
@@ -457,8 +563,15 @@ class PushScanService:
                             len(docs) - len(complete))
         if not complete:
             return []
+        if cut:
+            complete = [photo for page in complete
+                        for photo in crop.cut_out(page, settings.resolution, cut == "multi")]
+            if saved_fmt == "pdf":
+                complete = [jpegs_to_pdf([photo], settings.resolution) for photo in complete]
+            settings = replace(settings, fmt=saved_fmt)
         outdir.mkdir(parents=True, exist_ok=True)
-        paths = output_names(outdir, settings.fmt, len(complete), datetime.now())
+        paths = output_names(outdir, settings.fmt, len(complete), datetime.now(),
+                             target.filename or self.filename, target.name)
         for path, data in zip(paths, complete):
             path.write_bytes(data)
             log.info("saved %s", path)
@@ -490,10 +603,16 @@ class PushScanService:
     def run(self) -> None:
         backoff = self.interval
         while not self.stop_event.is_set():
+            if self.before_step is not None:
+                try:
+                    self.before_step()
+                except Exception as exc:   # never let it end the service
+                    log.warning("could not apply the changed config: %s", exc)
             try:
                 self.step()
                 backoff = self.interval
                 self.status.poll_ok()
+                self.beat()
             except Exception as exc:
                 log.warning("printer not reachable (%s), retrying in %.0fs", exc, backoff)
                 self.status.poll_failed(str(exc))
@@ -504,6 +623,19 @@ class PushScanService:
             self.status.set_targets(self.targets)
             self._wait(backoff)
         self.release()
+
+    def beat(self) -> None:
+        """Mark the printer as reachable just now (heartbeat file)."""
+        if self.heartbeat is None:
+            return
+        try:
+            self.heartbeat.write_text(f"{time.time():.0f}\n", encoding="ascii")
+        except OSError as exc:
+            log.debug("heartbeat file %s: %s", self.heartbeat, exc)
+
+    def stop_wanted(self) -> bool:
+        """True after stop() or a stop request (does not set the event)."""
+        return self.stop_event.is_set() or (self.stop_check is not None and self.stop_check())
 
     def _wait(self, seconds: float) -> None:
         """Sleep between poll cycles, but end early on stop() or a stop request."""

@@ -9,7 +9,8 @@ scan and comparing the bytes (see docs/PROTOCOL.md):
   6       document type      1 document, 2 photo, 3 auto scan
   7       colour             1 colour, 2 black and white
   8       source             1 platen, 2 ADF
-  10      size               1 A4, 2 Letter, 3 Legal, 8 10x15cm, 9 13x18cm, 0x0b auto
+  10      size               1 A4, 2 Letter, 3 Legal, 8 10x15cm, 9 13x18cm,
+                             0x0b auto scan, 0x0c auto multi scan (photo)
   11      format             1 JPEG, 2 TIFF, 3 PDF, 4 compact PDF
   12      resolution         1 75, 2 150, 3 300, 4 600 dpi (0 with compact PDF)
   13      reduce bleed-through  1 off, 2 on
@@ -32,7 +33,10 @@ log = logging.getLogger(__name__)
 DOC_TYPES = {1: "document", 2: "photo", 3: "auto"}
 COLORS = {1: "color", 2: "gray"}
 SOURCES = {1: "platen", 2: "adf"}
-SIZES = {1: "a4", 2: "letter", 3: "legal", 8: "10x15", 9: "13x18", 0x0B: "auto"}
+SIZES = {1: "a4", 2: "letter", 3: "legal", 8: "10x15", 9: "13x18", 0x0B: "auto",
+         0x0C: "auto-multi"}
+# Sizes for which the printer sends the whole glass; the PC cuts out the photos.
+AUTO_SIZES = ("auto", "auto-multi")
 FORMATS = {1: "jpeg", 2: "tiff", 3: "pdf", 4: "pdf-compact"}
 RESOLUTIONS = {1: 75, 2: 150, 3: 300, 4: 600}
 
@@ -44,7 +48,8 @@ REGIONS = {
     "10x15": (1181, 1772),
     "13x18": (1535, 2126),
 }
-# "auto" has no eSCL equivalent: scan the full platen width at A4 height.
+# "auto" and "auto-multi" have no eSCL equivalent: scan the full platen width
+# at A4 height.
 AUTO_REGION = (2550, 3508)
 # Compact PDF carries no resolution; use a moderate one.
 COMPACT_RESOLUTION = 300
@@ -76,6 +81,17 @@ class PanelSettings:
         return " ".join(parts) or "no settings"
 
 
+FIELDS = ((6, "document type", DOC_TYPES), (7, "colour", COLORS), (8, "source", SOURCES),
+          (10, "size", SIZES), (11, "format", FORMATS), (12, "resolution", RESOLUTIONS))
+
+
+def unknown_values(data: bytes) -> list[str]:
+    """Panel values this program does not know yet (0 means "not set")."""
+    b = bytes(data).ljust(32, b"\0")
+    return [f"{name} 0x{b[offset]:02x}" for offset, name, table in FIELDS
+            if b[offset] and b[offset] not in table]
+
+
 def decode(data: bytes) -> PanelSettings:
     b = bytes(data).ljust(32, b"\0")
     return PanelSettings(
@@ -101,7 +117,7 @@ def apply(panel: PanelSettings, fallback: ScanSettings) -> ScanSettings:
     counterpart and are ignored.
     """
     width, height = fallback.width, fallback.height
-    if panel.size == "auto":
+    if panel.size in AUTO_SIZES:
         width, height = AUTO_REGION
     elif panel.size in REGIONS:
         width, height = REGIONS[panel.size]

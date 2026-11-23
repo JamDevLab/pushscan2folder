@@ -8,7 +8,8 @@ CSRF tokens on every POST form, Origin check and strict response headers.
 Target folders set here must stay inside the base output directory; the
 raw editor enforces the same and cannot change "output" or "printer". Meant
 for a trusted LAN only. With PUSHSCAN_WEB_AUTH=0 there is no login at all (password
-None): the CSRF token is then one per process and the page says so in the nav.
+None, also the default on a loopback bind without a password): the CSRF token is
+then one per process and the page says so in the nav.
 
 Thread safety: request threads only use ServiceStatus.snapshot(),
 LogBuffer.lines(), service.request_targets() and file I/O. They never touch
@@ -35,13 +36,12 @@ from urllib.parse import parse_qs, urlsplit
 
 from . import SOURCE_URL, __version__, panel
 from .config import (COLORS, FORMATS, SAME_FOLDER, SOURCES, Config, ConfigError, TargetSpec,
-                     dump_config,
+                     dump_config, mode_from_flags,
                      load_config, load_config_text, parse_config, size_name, write_config)
-from .desktop import OPEN_MODES
 from .platform_support import component_problem
 from .protocol import PANEL_CHARS, VISIBLE_NAME_CHARS, check_name
-from .service import (MULTIPAGE_MODES, RESOLUTIONS, TRIM_MAX_MM, check_targets,
-                      safe_dirname)
+from .service import (DEFAULT_FILENAME, MULTIPAGE_MODES, RESOLUTIONS, TRIM_MAX_MM,
+                      check_targets, safe_dirname)
 from .status import LogBuffer
 
 log = logging.getLogger(__name__)
@@ -102,7 +102,12 @@ class WebContext:
     overrides: config key -> what overrides its file value (environment
     variable or command line option), shown on the settings page.
     effective: config key -> the value in use (display text).
-    auth: False when the web page runs without a login (PUSHSCAN_WEB_AUTH=0).
+    auth: False when the web page runs without a login (PUSHSCAN_WEB_AUTH=0, or
+    no password on a loopback bind). local_only: the bind address is loopback.
+    discover_fn: searches the network for scanners (discovery.discover); None
+    hides the search. found: the result of the last search. Only an address
+    from it can be set as the printer, so the page cannot point the service
+    at any other host.
     """
     service: object                  # .status, .request_targets()
     log_buffer: LogBuffer
@@ -114,6 +119,10 @@ class WebContext:
     overrides: dict = field(default_factory=dict)
     effective: dict = field(default_factory=dict)
     auth: bool = True
+    local_only: bool = False         # listens on a loopback address only
+    discover_fn: object = None       # () -> list[discovery.Scanner]
+    found: list = field(default_factory=list)
+    printer_pending: str | None = None   # set from the page, not yet read back
 
     def default_label(self, key: str, builtin: str) -> str:
         """The value in use for a setting without a per-target value."""
@@ -294,9 +303,14 @@ class Row:
     fmt: str = ""
     size: str = ""
     automp: bool = False
+    opened: str = ""        # open_after_scan of the target: "yes", "no" or "" = the default
     delete: bool = False
     existing: bool = False
     orig: str = ""          # name in the config file when the form was rendered
+
+
+def _yes_no(flag: bool | None) -> str:
+    return "" if flag is None else "yes" if flag else "no"
 
 
 def row_from_spec(spec: TargetSpec, global_mode: str) -> Row:
@@ -308,7 +322,7 @@ def row_from_spec(spec: TargetSpec, global_mode: str) -> Row:
         res=str(p["resolution"]) if "resolution" in p else "",
         fmt=p.get("fmt", ""), size=size_name(p) or "",
         automp=("auto" in modes) if spec.auto_multipage is None else spec.auto_multipage,
-        existing=True, orig=spec.name)
+        opened=_yes_no(spec.open_after_scan), existing=True, orig=spec.name)
 
 
 def blank_row(global_mode: str) -> Row:
@@ -328,6 +342,7 @@ def rows_from_form(form: dict[str, str]) -> list[Row]:
         rows.append(Row(name=get("name").strip(), output=get("output").strip(),
                         docmp=bool(get("docmp")), res=get("res"),
                         fmt=get("fmt"), size=get("size"), automp=bool(get("automp")),
+                        opened=get("open"),
                         delete=bool(get("del")), existing=get("existing") == "1",
                         orig=get("orig") if get("existing") == "1" else ""))
     return rows
@@ -399,8 +414,11 @@ def specs_from_rows(rows: list[Row], base: Path,
                 errors.append(f"{label}: invalid size {row.size!r}")
             else:
                 preset["width"], preset["height"] = panel.REGIONS[row.size]
+        if row.opened not in ("", "yes", "no"):
+            errors.append(f"{label}: invalid open after scan {row.opened!r}")
         specs.append(TargetSpec(row.name, output=output, preset=preset,
-                                document_multipage=row.docmp, auto_multipage=row.automp))
+                                document_multipage=row.docmp, auto_multipage=row.automp,
+                                open_after_scan={"yes": True, "no": False}.get(row.opened)))
     if not errors and not specs:
         errors.append("At least one target is required.")
     return specs, errors
@@ -421,6 +439,11 @@ def apply_targets(ctx: WebContext, rows: list[Row]) -> tuple[list[TargetSpec], l
     specs, errors = specs_from_rows(rows, ctx.output, locked_specs(cfg, ctx.output))
     if errors:
         return specs, errors
+    # The form has no file name field: keep a target's own template from the file.
+    on_disk = {spec.name: spec for spec in cfg.targets}
+    for spec in specs:
+        if spec.filename is None and spec.name in on_disk:
+            spec.filename = on_disk[spec.name].filename
     cfg.targets = list(specs)
     targets = cfg.build_targets(ctx.output, ctx.multipage_mode)
     try:
@@ -438,12 +461,13 @@ def apply_targets(ctx: WebContext, rows: list[Row]) -> tuple[list[TargetSpec], l
 
 # Built-in values used when a key is not set anywhere.
 BUILTIN = {"resolution": "300", "color": "color", "format": "pdf", "source": "auto",
-           "size": "a4", "multipage": "document", "interval": "4", "open_after_scan": "off",
+           "size": "a4", "multipage": "document", "interval": "4", "open_after_scan": "no",
+           "filename": DEFAULT_FILENAME,
            "trim_left": "0", "trim_top": "0", "trim_right": "0", "trim_bottom": "0"}
 TRIM_KEYS = ("trim_left", "trim_top", "trim_right", "trim_bottom")
 # Config keys the settings form edits (top level and [defaults]).
 SETTING_KEYS = ("interval", "ignore_panel", "multipage", "resolution", "color", "format",
-                "source", "size", "open_after_scan") + TRIM_KEYS
+                "source", "size", "open_after_scan", "filename") + TRIM_KEYS
 NUMBER_KEYS = ("interval",) + TRIM_KEYS
 
 
@@ -454,6 +478,8 @@ def settings_values(cfg: Config) -> dict[str, str]:
         value = getattr(cfg, key)
         if key == "ignore_panel":
             values[key] = "1" if value else ""
+        elif key == "open_after_scan":
+            values[key] = "" if value is None else "true" if value else "false"
         else:
             values[key] = "" if value is None else f"{value:g}" if isinstance(value, float) else str(value)
     return values
@@ -462,6 +488,11 @@ def settings_values(cfg: Config) -> dict[str, str]:
 def settings_from_form(form: dict[str, str]) -> dict[str, str]:
     values = {key: form.get(key, "").strip() for key in SETTING_KEYS}
     values["ignore_panel"] = "1" if form.get("ignore_panel") else ""
+    # A check box cannot say "not set": unticked is saved as false.
+    values["open_after_scan"] = "true" if form.get("open_after_scan") else "false"
+    # Two check boxes; the browser sends only the ticked ones.
+    values["multipage"] = mode_from_flags(bool(form.get("multipage_document")),
+                                          bool(form.get("multipage_auto")))
     return values
 
 
@@ -471,6 +502,7 @@ def check_settings(values: dict[str, str]) -> tuple[Config | None, list[str]]:
     only these settings, errors)."""
     top: dict = {}
     defaults: dict = {}
+    advanced: dict = {}
     for key, text in values.items():
         if not text:
             continue
@@ -484,9 +516,23 @@ def check_settings(values: dict[str, str]) -> tuple[Config | None, list[str]]:
             value = int(text)
         elif key == "ignore_panel":
             value = True
-        (top if key in ("interval", "ignore_panel", "multipage") else defaults)[key] = value
+        elif key == "open_after_scan":
+            value = text == "true"
+        if key == "multipage":
+            modes = MULTIPAGE_MODES.get(text)
+            if modes is None:
+                return None, [f'multipage: "{text}" must be one of: '
+                              + ", ".join(MULTIPAGE_MODES)]
+            for kind in ("document", "auto"):
+                defaults[kind] = {"multipage": kind in modes}
+        elif key in ("interval", "ignore_panel") or key in TRIM_KEYS:
+            advanced[key] = value
+        else:
+            defaults[key] = value
     if defaults:
         top["defaults"] = defaults
+    if advanced:
+        top["advanced"] = advanced
     try:
         return parse_config(top, "settings"), []
     except ConfigError as exc:
@@ -497,7 +543,8 @@ def apply_settings(ctx: WebContext, values: dict[str, str]) -> list[str]:
     """Validate and write the settings into the config file as it is on disk
     now (everything else, targets included, is kept). Returns errors;
     nothing is written then. Raises ConfigError/OSError. The running service
-    is not changed: the new values take effect after a restart."""
+    is not changed here: it reads the changed file before its next poll cycle
+    (ConfigWatcher)."""
     new, errors = check_settings(values)
     if errors:
         return errors
@@ -555,7 +602,8 @@ def apply_raw_config(ctx: WebContext, text: str, base_hash: str) -> tuple[list[s
     (errors, current_text): current_text is set instead of errors when the
     file changed on disk since the form was shown. Nothing is written on an
     error. Targets are handed to the service (not with PUSHSCAN_TARGETS or
-    without targets in the file); everything else needs a restart. Raises
+    without targets in the file); the service reads the rest of the changed
+    file before its next poll cycle, except [web], which needs a restart. Raises
     OSError/UnicodeDecodeError."""
     disk_text = read_config_text(ctx)
     if text_hash(disk_text) != base_hash:
@@ -696,6 +744,7 @@ label.check { display:flex; gap:8px; align-items:center; margin:10px 0 2px; font
 .login label { text-align:left; }
 .login button { width:100%; margin-top:14px; }
 .save { margin:16px 0; } .save button { padding:10px 28px; }
+form.inline { display:inline-block; margin:.3rem 0; }
 .ro { margin:.4rem 0 0; } .ro + .hint { margin-bottom:.6rem; } .ro code { word-break:break-all; }
 .ok { color:var(--ok); } .bad { color:var(--bad); } .warn { color:var(--warn); }
 .error { border-color:var(--bad); } .muted { color:var(--muted); font-size:.9rem; }
@@ -821,6 +870,9 @@ def _nav(ctx: WebContext, csrf: str, active: str = "") -> str:
         end = ('<form method="post" action="/logout">'
                f'<input type="hidden" name="csrf" value="{esc(csrf)}">'
                '<button type="submit">Log out</button></form>')
+    elif ctx.local_only:
+        end = ('<span class="pill nopw" title="The page listens on this PC only">'
+               'No login: this page is only reachable from this PC.</span>')
     else:
         end = ('<span class="pill warn nopw" title="Anyone who can reach this port can change '
                'targets and settings">No password set</span>')
@@ -988,7 +1040,8 @@ def _locked_row_html(i: int, count: int, row: Row, spec: TargetSpec, global_mode
         f'<p>This folder is outside the output directory. It is set in the '
         f"config file and can only be changed there; the web page keeps this target "
         f"unchanged.</p>"
-        f"<p>Auto scan preset: {esc(_preset_summary(spec.preset))}. Multi-page dialog: "
+        f"<p>Open after a scan: {esc(_yes_no(spec.open_after_scan) or 'default')}. "
+        f"Auto scan preset: {esc(_preset_summary(spec.preset))}. Multi-page dialog: "
         f'Document {"yes" if shown.docmp else "no"}, Auto scan {"yes" if shown.automp else "no"}.</p>'
         "</div>" + _card_foot(i, row, False) + "</section>")
 
@@ -1021,6 +1074,9 @@ def _row_html(i: int, count: int, row: Row, disabled: bool,
         + label("Output folder below the output directory (empty = default)", "output")
         + f'<input type="text" id="output_{i}" name="output_{i}" value="{esc(row.output)}" '
         f'maxlength="{MAX_FOLDER_CHARS}"{off}>'
+        + label("Open after a scan (desktop PC only)", "open")
+        + sel("open", row.opened, keep("open_after_scan")
+              + [("yes", "Yes"), ("no", "No")])
         + '</div><div class="group"><h3>Auto scan preset</h3><p class="hint">Empty = the default of the '
         '<a href="/settings">Settings</a> page.</p>'
         + label("Resolution", "res")
@@ -1073,7 +1129,8 @@ def render_targets(ctx: WebContext, csrf: str, rows: list[Row] | None = None,
     locked = locked_specs(cfg, ctx.output)
     claims = claim_locked(rows, locked)
     n = len(rows)
-    defaults = {k: ctx.default_label(k, BUILTIN[k]) for k in ("resolution", "color", "format", "size")}
+    defaults = {k: ctx.default_label(k, BUILTIN[k])
+                for k in ("resolution", "color", "format", "size", "open_after_scan")}
     # Pressing Enter in a text field "clicks" the first submit button of the form, so
     # the first button must be Save (visually hidden, the visible one is in the bar below).
     dirty_attr = ' data-dirty="1"' if dirty else ""
@@ -1105,9 +1162,10 @@ def _field(label: str, control: str, key: str, help_text: str, ctx: WebContext) 
             f'<p class="hint">{esc(help_text)}</p>{note}</div>')
 
 
-def _text_input(name: str, value: str, placeholder: str) -> str:
-    return (f'<input type="text" name="{esc(name)}" value="{esc(value)}" inputmode="decimal" '
-            f'placeholder="{esc(placeholder)}" maxlength="12">')
+def _text_input(name: str, value: str, placeholder: str, numeric: bool = True) -> str:
+    kind = 'inputmode="decimal" maxlength="12"' if numeric else 'maxlength="120"'
+    return (f'<input type="text" name="{esc(name)}" value="{esc(value)}" {kind} '
+            f'placeholder="{esc(placeholder)}">')
 
 
 def _setting_select(key: str, value: str, options: list[tuple[str, str]]) -> str:
@@ -1115,9 +1173,69 @@ def _setting_select(key: str, value: str, options: list[tuple[str, str]]) -> str
     return _select(key, value, unset + options, False)
 
 
+def _multipage_field(mode: str, ctx: WebContext) -> str:
+    """Two check boxes, one per panel document type ([defaults.document] and
+    [defaults.auto] multipage). An unset mode shows the built-in one."""
+    modes = MULTIPAGE_MODES.get(mode or BUILTIN["multipage"], frozenset())
+    boxes = (_check("multipage_document", "document" in modes, 'Document type "Document"', False)
+             + _check("multipage_auto", "auto" in modes, 'Document type "Auto"', False))
+    field = _field("Multi-page dialog", boxes, "multipage",
+                   "For these panel document types a glass scan asks for further pages "
+                   '(one multi-page PDF). "Photo" never asks. Targets can override it.', ctx)
+    # no single control to point the label at: name the group instead
+    return field.replace('<label for="f-multipage">', '<label id="f-multipage">', 1)
+
+
+def _printer_html(ctx: WebContext, csrf: str, scanners: list | None) -> str:
+    """The printer line of the settings page, with the network search."""
+    out = [f'<p class="ro">Printer: <code>{esc(ctx.printer)}</code></p>']
+    if "printer" in ctx.overrides:
+        out.append(f'<p class="hint">Overridden by {esc(ctx.overrides["printer"])}, so it '
+                   "can only be changed there.</p>")
+        return "".join(out)
+    if ctx.discover_fn is None:
+        out.append('<p class="hint">Not editable here. Change it in the config file.</p>')
+        return "".join(out)
+    hidden = f'<input type="hidden" name="csrf" value="{esc(csrf)}">'
+    out.append('<form method="post" action="/printer/search" class="inline">' + hidden
+               + '<button type="submit" class="secondary">'
+               + ("Search again" if scanners is not None else "Search the network")
+               + '</button></form>'
+               '<p class="hint">Looks for scanners (eSCL, mDNS) for about 5 seconds. In Docker '
+               "with the default bridge network it finds nothing; set the address in the "
+               "config file then.</p>")
+    if scanners is None:
+        return "".join(out)
+    if not scanners:
+        out.append('<p class="warn">No scanner answered. A firewall, a VPN or a separate '
+                   "network can block the search.</p>")
+        return "".join(out)
+    rows = []
+    for scanner in scanners:
+        if scanner.address == ctx.printer:
+            action = '<span class="badge">in use</span>'
+        else:
+            action = ('<form method="post" action="/printer/use" class="inline">' + hidden
+                      + f'<input type="hidden" name="address" value="{esc(scanner.address)}">'
+                      '<button type="submit" class="secondary">Use</button></form>')
+        rows.append(f"<tr><td><code>{esc(scanner.address)}</code></td>"
+                    f"<td>{esc(scanner.model or scanner.name)}</td><td>{action}</td></tr>")
+    out.append('<div class="scroll"><table><thead><tr><th>Address</th><th>Scanner</th>'
+               "<th></th></tr></thead><tbody>" + "".join(rows) + "</tbody></table></div>")
+    return "".join(out)
+
+
+def set_printer(ctx: WebContext, address: str) -> None:
+    """Write `address` as "printer" into the config file (everything else is
+    kept). The caller checked it against ctx.found. Raises ConfigError/OSError."""
+    cfg = read_config(ctx)
+    cfg.printer = address
+    write_config(ctx.config_path, dump_config(cfg))
+
+
 def render_settings(ctx: WebContext, csrf: str, values: dict[str, str] | None = None,
                     errors: list[str] = (), notes: list[str] = (),
-                    dirty: bool = False) -> bytes:
+                    dirty: bool = False, scanners: list | None = None) -> bytes:
     parts = ["<h1>Settings</h1>"]
     for e in errors:
         parts.append(f'<section class="error bad">{esc(e)}</section>')
@@ -1139,16 +1257,15 @@ def render_settings(ctx: WebContext, csrf: str, values: dict[str, str] | None = 
     parts.append(f'<p class="muted">Source: config file <code>{esc(ctx.config_path)}</code>'
                  + ("" if exists else " (does not exist yet; saving creates it)")
                  + ". Saving rewrites the file and comments in it are not preserved. "
-                 "Changes take effect after a restart. Empty fields are removed from the "
+                 "Changes take effect within a few seconds. Empty fields are removed from the "
                  'file, so the built-in value applies. <a href="/config">Edit config.toml '
                  "directly</a> keeps comments.</p>")
 
-    ro = []
-    for key, label in (("printer", "Printer"), ("output", "Output folder")):
-        shown = ctx.printer if key == "printer" else ctx.output
-        note = (f' Overridden by {esc(ctx.overrides[key])}.' if key in ctx.overrides else "")
-        ro.append(f'<p class="ro">{label}: <code>{esc(shown)}</code></p>'
-                  f'<p class="hint">Not editable here. Change it in the config file.{note}</p>')
+    ro = [_printer_html(ctx, csrf, scanners)]
+    note = (f' Overridden by {esc(ctx.overrides["output"])}.' if "output" in ctx.overrides
+            else "")
+    ro.append(f'<p class="ro">Output folder: <code>{esc(ctx.output)}</code></p>'
+              f'<p class="hint">Not editable here. Change it in the config file.{note}</p>')
     try:
         disk = read_config(ctx)
     except ConfigError:
@@ -1186,18 +1303,20 @@ def render_settings(ctx: WebContext, csrf: str, values: dict[str, str] | None = 
                f"{TRIM_MAX_MM:g} mm. Glass only, the document feeder is not trimmed.", ctx)
         for side in ("left", "top", "right", "bottom")]
     behaviour = [
-        _field("Multi-page dialog", sel("multipage", v("multipage"),
-                                        [(m, m) for m in MULTIPAGE_MODES]), "multipage",
-               "For which panel document types a glass scan asks for further pages "
-               "(multi-page PDF): document, auto, both or off. Targets can override it.", ctx),
+        _multipage_field(v("multipage"), ctx),
         _field("Poll interval (seconds)", _text_input("interval", v("interval"), "4"),
                "interval", "How often the printer is asked for scan requests. Must be "
                "greater than 0.", ctx),
-        _field("Open after scan", sel("open_after_scan", v("open_after_scan"),
-                                      [(m, m) for m in OPEN_MODES]), "open_after_scan",
-               "off, folder (opens the folder, on Windows with the new file selected) or "
-               "file (opens the scan). Only works when the program runs on a desktop PC "
-               "with a logged-in user, not in Docker or on a server.", ctx),
+        _field("File name", _text_input("filename", v("filename"), DEFAULT_FILENAME, numeric=False),
+               "filename", "Name of a scan without extension. Fields: {name} (panel "
+               "name), {date} (2026-11-22), {time} (183000) and {now:...} with strftime "
+               "codes. An existing file is never overwritten, a -1, -2 ... is added. "
+               "Targets can set their own in the config file.", ctx),
+        _field("Open after scan", _check("open_after_scan", v("open_after_scan") == "true",
+                                         "Open the folder after each scan", False),
+               "open_after_scan", "On Windows the new file is selected in Explorer. Only "
+               "works when the program runs on a desktop PC with a logged-in user, not in "
+               "Docker or on a server. Targets can override it.", ctx),
         _field("Ignore panel", _check("ignore_panel", bool(v("ignore_panel")),
                                       "Always use the values above", False),
                "ignore_panel", "Off: the choices made on the printer panel (colour, size, "
@@ -1248,8 +1367,8 @@ def render_config(ctx: WebContext, csrf: str, text: str | None = None,
                  '<p class="muted">Rules for the web page: "output" and "printer" cannot be '
                  "changed here. A target folder must be a relative path inside the output "
                  f"directory <code>{esc(ctx.output)}</code>; a target with an absolute path or "
-                 '".." can only stay as it is in the file. Target changes apply within a poll '
-                 "cycle, all other changes after a restart. The size limit is "
+                 '".." can only stay as it is in the file. Changes apply within a poll '
+                 "cycle, except the [web] table, which needs a restart. The size limit is "
                  f"{MAX_BODY // 1024} KB. Press Escape, then Tab, to leave the text field "
                  "with the keyboard.</p>")
     dirty_attr = ' data-dirty="1"' if dirty else ""
@@ -1272,22 +1391,40 @@ def render_config(ctx: WebContext, csrf: str, text: str | None = None,
 LOCAL_SUFFIXES = (".local", ".lan", ".home", ".home.arpa", ".internal", ".fritz.box")
 
 
-def local_host(host: str | None) -> bool:
-    """True for an IP address, localhost, a name without dots or a local suffix."""
-    if not host:
-        return False
+def _host_name(host: str) -> str:
+    """The name or address of a Host header, without port and brackets."""
     host = host.strip().lower()
     if host.startswith("["):                       # [IPv6]:port
         host = host[1:].split("]", 1)[0]
     elif host.count(":") == 1:
         host = host.split(":", 1)[0]
-    host = host.rstrip(".")
+    return host.rstrip(".")
+
+
+def local_host(host: str | None) -> bool:
+    """True for an IP address, localhost, a name without dots or a local suffix."""
+    if not host:
+        return False
+    host = _host_name(host)
     try:
         ipaddress.ip_address(host)
         return True
     except ValueError:
         pass
     return host == "localhost" or "." not in host or host.endswith(LOCAL_SUFFIXES)
+
+
+def is_loopback(address: str | None) -> bool:
+    """True for "localhost" and for a loopback IP address (127.x.x.x, ::1)."""
+    if not address:
+        return False
+    address = address.strip().lower()
+    if address == "localhost":
+        return True
+    try:
+        return ipaddress.ip_address(address).is_loopback
+    except ValueError:
+        return False
 
 
 # --- HTTP ------------------------------------------------------------------------
@@ -1307,10 +1444,12 @@ class WebServer(ThreadingHTTPServer):
         # password None: no login. Every client then shares one CSRF token that
         # exists only in this process; the Origin checks stay as they are.
         ctx.auth = password is not None
+        ctx.local_only = is_loopback(address[0])
         self.password_digest = _digest(password) if password is not None else None
         self.open_csrf = secrets.token_urlsafe(32)
         self.sessions = Sessions()
         self.save_lock = threading.Lock()
+        self.search_lock = threading.Lock()   # one network search at a time
         self.secure_cookie = secure_cookie
         self.cookie_name = SECURE_COOKIE if secure_cookie else COOKIE
         self._slots = threading.BoundedSemaphore(MAX_CONNECTIONS)
@@ -1451,11 +1590,14 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(200, render_targets(ctx, csrf))
         saved = "1" in parse_qs(urlsplit(self.path).query).get("saved", [])
         if path == "/settings":
-            notes = ["Saved. The new values take effect after a restart."] if saved else []
+            notes = ["Saved. The new values are used from the next poll cycle."] if saved else []
+            if "1" in parse_qs(urlsplit(self.path).query).get("printer", []):
+                notes = [f"Saved. The printer {ctx.printer_pending or ctx.printer} is used from "
+                         "the next poll cycle."]
             return self._send(200, render_settings(ctx, csrf, notes=notes))
         if path == "/config":
-            notes = (["Saved. Target changes are applied within a poll cycle, all other "
-                      "changes take effect after a restart."] if saved else [])
+            notes = (["Saved. The changes are used from the next poll cycle; changes to "
+                      "[web] need a restart."] if saved else [])
             return self._send(200, render_config(ctx, csrf, notes=notes))
         self._text_error(404, "Not found")
 
@@ -1511,7 +1653,15 @@ class Handler(BaseHTTPRequestHandler):
 
     def _host_ok(self) -> bool:
         """Without a login only local host names are served (DNS rebinding)."""
-        if self.server.ctx.auth or local_host(self.headers.get("Host")):
+        ctx, host = self.server.ctx, self.headers.get("Host")
+        if ctx.auth:
+            return True
+        if ctx.local_only:
+            # No login because only this PC can connect: then only the
+            # loopback names, so no other name can be pointed at 127.0.0.1.
+            if host and is_loopback(_host_name(host)):
+                return True
+        elif local_host(host):
             return True
         self._text_error(403, "Without a password the web page answers only to an IP "
                               "address or a local host name", close=True)
@@ -1546,6 +1696,10 @@ class Handler(BaseHTTPRequestHandler):
             return self._save_settings(form, csrf)
         if path == "/config":
             return self._save_config(form, csrf)
+        if path == "/printer/search":
+            return self._search_printer(csrf)
+        if path == "/printer/use":
+            return self._use_printer(form, csrf)
         self._text_error(404, "Not found")
 
     def _login(self, form: dict) -> None:
@@ -1596,13 +1750,52 @@ class Handler(BaseHTTPRequestHandler):
             with self.server.save_lock:
                 errors = apply_settings(ctx, values)
             if not errors:
-                log.info("settings saved from the web page (take effect after a restart)")
+                log.info("settings saved from the web page")
                 return self._redirect("/settings?saved=1")
         except ConfigError as exc:
             errors = [str(exc)]
         except OSError as exc:
             errors = [f"Cannot write {ctx.config_path}: {exc.strerror or exc}"]
         self._send(400, render_settings(ctx, csrf, values=values, errors=errors, dirty=True))
+
+    def _search_printer(self, csrf: str) -> None:
+        ctx = self.server.ctx
+        if ctx.discover_fn is None or "printer" in ctx.overrides:
+            return self._text_error(404, "Not found")
+        if not self.server.search_lock.acquire(blocking=False):
+            return self._send(409, render_settings(ctx, csrf,
+                                                   errors=["A search is already running."]))
+        try:
+            found = list(ctx.discover_fn())
+        finally:
+            self.server.search_lock.release()
+        ctx.found = found
+        log.info("printer search from the web page: %d scanner(s) found", len(found))
+        self._send(200, render_settings(ctx, csrf, scanners=found))
+
+    def _use_printer(self, form: dict, csrf: str) -> None:
+        ctx = self.server.ctx
+        if ctx.discover_fn is None or "printer" in ctx.overrides:
+            return self._text_error(404, "Not found")
+        reason = ctx.config_block_reason()
+        if reason:
+            return self._send(403, render_settings(ctx, csrf, errors=[reason]))
+        address = form.get("address", "").strip()
+        if address not in {scanner.address for scanner in ctx.found}:
+            return self._send(400, render_settings(
+                ctx, csrf, errors=["Only an address found by the search can be used. "
+                                   "Search again."]))
+        try:
+            with self.server.save_lock:
+                set_printer(ctx, address)
+        except ConfigError as exc:
+            return self._send(400, render_settings(ctx, csrf, errors=[str(exc)]))
+        except OSError as exc:
+            return self._send(400, render_settings(
+                ctx, csrf, errors=[f"Cannot write {ctx.config_path}: {exc.strerror or exc}"]))
+        ctx.printer_pending = address
+        log.info("printer set to %s from the web page", address)
+        self._redirect("/settings?saved=1&printer=1")
 
     def _save_config(self, form: dict, csrf: str) -> None:
         ctx = self.server.ctx
@@ -1658,6 +1851,11 @@ class Handler(BaseHTTPRequestHandler):
                                        notes=["Changes are not saved yet."]))
 
 
+# How often the server thread checks for shutdown (seconds); stopping waits
+# up to this long. Tests set it lower.
+POLL_INTERVAL = 0.5
+
+
 def start_server(ctx: WebContext, password: str | None, bind: str, port: int,
                  secure_cookie: bool = False):
     """Start the web server in a daemon thread. Returns (server, thread);
@@ -1666,7 +1864,8 @@ def start_server(ctx: WebContext, password: str | None, bind: str, port: int,
     reverse proxy. password None: no login at all (PUSHSCAN_WEB_AUTH=0).
     Raises OSError (e.g. port in use)."""
     server = WebServer((bind, port), ctx, password, secure_cookie=secure_cookie)
-    thread = threading.Thread(target=server.serve_forever, name="web", daemon=True)
+    thread = threading.Thread(target=server.serve_forever, name="web", daemon=True,
+                              kwargs={"poll_interval": POLL_INTERVAL})
     thread.start()
     return server, thread
 

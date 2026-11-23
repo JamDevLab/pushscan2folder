@@ -26,6 +26,10 @@ from .platform_support import default_state_dir, is_windows
 LOCK_NAME = "pushscan2folder.lock"
 INFO_NAME = "pushscan2folder.pid"
 STOP_NAME = "pushscan2folder.stop"
+BUSY_NAME = "pushscan2folder.busy"   # exists while a scan runs
+# Error output of the last background start: errors before the log file is
+# open (a bad option, the web password file) end up here, not in the log.
+ERRORS_NAME = "pushscan2folder.start-errors.txt"
 
 # Windows process creation flags (spelled out: the subprocess constants exist on Windows only).
 CREATE_NO_WINDOW = 0x08000000
@@ -33,7 +37,8 @@ DETACHED_PROCESS = 0x00000008
 CREATE_NEW_PROCESS_GROUP = 0x00000200
 WINDOWS_FLAGS = CREATE_NO_WINDOW | DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP
 
-STOP_TIMEOUT = 30.0   # seconds to wait for a clean stop (a running scan finishes first)
+STOP_TIMEOUT = 30.0   # seconds to wait for a clean stop
+SCAN_STOP_TIMEOUT = 600.0   # longer while a scan runs: the job finishes and is saved first
 START_TIMEOUT = 10.0  # seconds to wait until the new instance holds its lock
 
 ALREADY_RUNNING = "already running"
@@ -82,6 +87,8 @@ class Instance:
         self.lock_path = self.dir / LOCK_NAME
         self.info_path = self.dir / INFO_NAME
         self.stop_path = self.dir / STOP_NAME
+        self.busy_path = self.dir / BUSY_NAME
+        self.errors_path = self.dir / ERRORS_NAME
         self._fd: int | None = None
 
     def is_running(self) -> bool:
@@ -111,6 +118,7 @@ class Instance:
             return False
         self._fd = fd
         self._remove(self.stop_path)
+        self._remove(self.busy_path)   # left over if the last instance crashed mid-scan
         self.info_path.write_text(json.dumps({"pid": os.getpid(), "log": log_file}),
                                   encoding="utf-8")
         return True
@@ -120,12 +128,26 @@ class Instance:
             return
         self._remove(self.info_path)
         self._remove(self.stop_path)
+        self._remove(self.busy_path)
         _unlock(self._fd)
         os.close(self._fd)
         self._fd = None
 
     def stop_requested(self) -> bool:
         return self.stop_path.exists()
+
+    def set_busy(self, busy: bool) -> None:
+        """Mark that a scan runs (so `stop` waits for it). Best effort."""
+        if not busy:
+            self._remove(self.busy_path)
+            return
+        try:
+            self.busy_path.write_text("scan\n", encoding="utf-8")
+        except OSError:
+            pass
+
+    def is_busy(self) -> bool:
+        return self.busy_path.exists()
 
     def request_stop(self) -> None:
         self.dir.mkdir(parents=True, exist_ok=True)
@@ -142,7 +164,7 @@ class Instance:
 
     def clean_stale(self) -> None:
         """Remove the files of an instance that is gone."""
-        for path in (self.info_path, self.stop_path):
+        for path in (self.info_path, self.stop_path, self.busy_path):
             self._remove(path)
 
     @staticmethod
@@ -165,16 +187,30 @@ def terminate(pid: int) -> None:
 def stop_instance(inst: Instance, timeout: float = STOP_TIMEOUT, poll: float = 0.5,
                   sleep: Callable[[float], None] = time.sleep,
                   clock: Callable[[], float] = time.monotonic,
-                  kill: Callable[[int], None] = terminate) -> str:
+                  kill: Callable[[int], None] = terminate,
+                  scan_timeout: float = SCAN_STOP_TIMEOUT,
+                  on_wait_for_scan: Callable[[], None] = lambda: None) -> str:
     """Stop the background instance cleanly (it releases its panel entries),
-    terminate it if it does not react within `timeout` seconds. Returns
-    NOT_RUNNING, STOPPED, TERMINATED or FAILED."""
+    terminate it if it does not react within `timeout` seconds. While a scan
+    runs it waits up to `scan_timeout` seconds instead, so the job is saved
+    (`on_wait_for_scan` is called once then). Returns NOT_RUNNING, STOPPED,
+    TERMINATED or FAILED."""
     if not inst.is_running():
         inst.clean_stale()
         return NOT_RUNNING
     inst.request_stop()
-    deadline = clock() + timeout
-    while inst.is_running() and clock() < deadline:
+    start = clock()
+    told = False
+    while inst.is_running():
+        now = clock()
+        if inst.is_busy():
+            if not told:
+                on_wait_for_scan()
+                told = True
+            if now >= start + max(timeout, scan_timeout):
+                break
+        elif now >= start + timeout:
+            break
         sleep(poll)
     if not inst.is_running():
         inst.clean_stale()
@@ -195,11 +231,12 @@ def stop_instance(inst: Instance, timeout: float = STOP_TIMEOUT, poll: float = 0
     return TERMINATED
 
 
-def launch(command: list[str], popen=subprocess.Popen):
-    """Start `command` detached from this console and session, no output
-    streams, no window. Returns the Popen object."""
+def launch(command: list[str], popen=subprocess.Popen, stderr=subprocess.DEVNULL):
+    """Start `command` detached from this console and session, no window, no
+    input or output; error output goes to `stderr` (a file or DEVNULL).
+    Returns the Popen object."""
     kwargs: dict = dict(stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
-                        stderr=subprocess.DEVNULL, close_fds=True)
+                        stderr=stderr, close_fds=True)
     if is_windows():
         kwargs["creationflags"] = WINDOWS_FLAGS
     else:
@@ -221,19 +258,44 @@ def start_instance(argv: list[str], inst: Instance, popen=subprocess.Popen,
         pid = inst.read_info().pid
         return False, ALREADY_RUNNING + (f" (PID {pid})" if pid else "")
     try:
-        proc = launch(autostart.program_command() + argv, popen)
+        inst.dir.mkdir(parents=True, exist_ok=True)
+        errors = open(inst.errors_path, "wb")
+    except OSError:
+        errors = None
+    try:
+        proc = launch(autostart.program_command() + argv, popen,
+                      stderr=errors if errors is not None else subprocess.DEVNULL)
     except OSError as exc:
         return False, f"cannot start: {exc.strerror or exc}"
+    finally:
+        if errors is not None:
+            errors.close()   # the child has its own handle
     deadline = clock() + timeout
     while clock() < deadline:
         if inst.is_running():
             pid = inst.read_info().pid
+            for _ in range(4):  # the info file follows right after the lock
+                if pid:
+                    break
+                sleep(0.25)
+                pid = inst.read_info().pid
             return True, "started" + (f" (PID {pid})" if pid else "")
         code = proc.poll()
         if code is not None:
-            return False, f"the background process ended right away (exit code {code})"
+            message = f"the background process ended right away (exit code {code})"
+            reason = start_errors(inst)
+            return False, message + (f":\n{reason}" if reason else "")
         sleep(0.25)
     return False, "the background process did not report in time"
+
+
+def start_errors(inst: Instance, limit: int = 2000) -> str:
+    """What the last background start wrote to its error output ("" if nothing)."""
+    try:
+        data = inst.errors_path.read_bytes()[-limit:]
+    except OSError:
+        return ""
+    return data.decode("utf-8", "replace").strip()
 
 
 def log_tail(path: Path | str | None, lines: int = 10) -> list[str]:

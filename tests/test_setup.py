@@ -128,7 +128,7 @@ class WebTableTests(unittest.TestCase):
 
     def test_builtin_when_not_in_file(self):
         args, _ = cli.parse_args(["--config", self.config_file('printer = "192.0.2.1"\n'), "run"])
-        self.assertEqual((args.web, args.web_port, args.web_bind), (False, 8080, "0.0.0.0"))
+        self.assertEqual((args.web, args.web_port, args.web_bind), (False, 8737, "127.0.0.1"))
 
     def test_dump_keeps_web_table(self):
         cfg = load_config_text(WEB_TOML)
@@ -137,7 +137,7 @@ class WebTableTests(unittest.TestCase):
         again = load_config_text(text)
         self.assertEqual((again.web_enabled, again.web_bind, again.web_port,
                           again.web_password_file), (True, "127.0.0.1", 9090, "pw.txt"))
-        self.assertNotIn("[web]", dump_config(Config(printer="x")))
+        self.assertNotIn("\n[web]\n", dump_config(Config(printer="x")))
 
     def test_password_from_config_file(self):
         pw = self.dir / "pw.txt"
@@ -182,12 +182,12 @@ class SetupTests(unittest.TestCase):
         patcher.start()
         self.addCleanup(patcher.stop)
 
-    def run_setup(self, answers, passwords=(), probe=None, autostart_fn=None):
+    def run_setup(self, answers, passwords=(), probe=None, autostart_fn=None, discover_fn=None):
         io_ = ScriptedIO(answers, passwords)
         probe = probe or mock.Mock(return_value=(True, "printer answered, state: Idle"))
         session = wizard.Setup(self.path, input_fn=io_.input, getpass_fn=io_.getpass,
                                probe_fn=probe, autostart_fn=autostart_fn, out=io_.out,
-                               default_name="USER  PC")
+                               default_name="USER  PC", discover_fn=discover_fn)
         return session.run(), io_, probe
 
     def test_new_config_without_web(self):
@@ -209,6 +209,50 @@ class SetupTests(unittest.TestCase):
         assert_mode(self, self.path, 0o600)
         self.assertIn("pushscan2folder setup", io_.text)
 
+    def test_found_scanner_picked_by_number(self):
+        from pushscan2folder.discovery import Scanner
+        found = [Scanner("192.0.2.4", "A", ""), Scanner("192.0.2.5", "B", "Canon TR8500 series")]
+        # 2 = second scanner, name, folder, web no, start no
+        start, io_, probe = self.run_setup(["2", "", str(self.dir / "s"), "n", "n"],
+                                           discover_fn=lambda: found)
+        probe.assert_called_once_with("192.0.2.5")
+        self.assertIn("192.0.2.5  Canon TR8500 series", io_.text)
+        self.assertEqual(load_config_text(self.path.read_text()).printer, "192.0.2.5")
+
+    def test_found_scanner_or_typed_address(self):
+        from pushscan2folder.discovery import Scanner
+        found = [Scanner("192.0.2.4", "A", "")]
+        self.run_setup(["192.0.2.9", "", str(self.dir / "s"), "n", "n"],
+                       discover_fn=lambda: found)
+        self.assertEqual(load_config_text(self.path.read_text()).printer, "192.0.2.9")
+
+    def test_nothing_found_asks_for_the_address(self):
+        start, io_, _ = self.run_setup(["192.0.2.7", "", str(self.dir / "s"), "n", "n"],
+                                       discover_fn=lambda: [])
+        self.assertIn("No scanner answered", io_.text)
+        self.assertEqual(load_config_text(self.path.read_text()).printer, "192.0.2.7")
+
+    def test_search_again(self):
+        from pushscan2folder.discovery import Scanner
+        results = [[], [Scanner("192.0.2.4", "A", "")], [Scanner("192.0.2.4", "A", ""),
+                                                         Scanner("192.0.2.5", "B", "")]]
+        calls = []
+
+        def discover():
+            calls.append(1)
+            return results[len(calls) - 1]
+        # Enter (= search again), s, then number 2; name, folder, web no, start no
+        self.run_setup(["", "S", "2", "", str(self.dir / "s"), "n", "n"], discover_fn=discover)
+        self.assertEqual(len(calls), 3)
+        self.assertEqual(load_config_text(self.path.read_text()).printer, "192.0.2.5")
+
+    def test_failing_search_asks_for_the_address(self):
+        def broken():
+            raise RuntimeError("boom")
+        _, io_, _ = self.run_setup(["192.0.2.7", "", str(self.dir / "s"), "n", "n"],
+                                   discover_fn=broken)
+        self.assertIn("search failed", io_.text)
+
     def test_unreachable_printer_can_be_entered_again(self):
         probe = mock.Mock(side_effect=[(False, "no answer"), (True, "ok")])
         start, io_, _ = self.run_setup(["192.0.2.9", "", "192.0.2.8", "", "", "n", "n"],
@@ -226,14 +270,14 @@ class SetupTests(unittest.TestCase):
     def test_web_password_goes_to_its_own_file(self):
         secret = "correct horse battery"
         start, io_, _ = self.run_setup(
-            ["192.0.2.7", "Scan", str(self.dir / "s"), "y", "", "", ""],
+            ["192.0.2.7", "Scan", str(self.dir / "s"), "y", "", "y", "", "", ""],
             passwords=["short", secret, "other-password", secret, secret])
         text = self.path.read_text(encoding="utf-8")
         self.assertNotIn(secret, text)
         self.assertNotIn("short", text)
         cfg = load_config_text(text)
         self.assertTrue(cfg.web_enabled)
-        self.assertEqual((cfg.web_port, cfg.web_bind), (8080, "127.0.0.1"))
+        self.assertEqual((cfg.web_port, cfg.web_bind), (8737, "0.0.0.0"))
         pw_file = self.path.with_name("web_password.txt")
         self.assertEqual(cfg.web_password_file, str(pw_file))
         self.assertEqual(pw_file.read_text(encoding="utf-8").strip(), secret)
@@ -243,6 +287,25 @@ class SetupTests(unittest.TestCase):
         self.assertIn("0.0.0.0", io_.text)      # LAN explanation
         self.assertNotIn(secret, io_.text)
 
+    def test_web_on_this_pc_needs_no_password(self):
+        # web yes, port default, other devices default (no), start now (default)
+        start, io_, _ = self.run_setup(["192.0.2.7", "Scan", str(self.dir / "s"), "y", "", "", ""])
+        cfg = load_config_text(self.path.read_text(encoding="utf-8"))
+        self.assertTrue(cfg.web_enabled)
+        self.assertEqual(cfg.web_bind, "127.0.0.1")
+        self.assertIsNone(cfg.web_password_file)
+        self.assertFalse(self.path.with_name("web_password.txt").exists())
+        self.assertIn("Should other devices", "".join(io_.questions))
+        self.assertNotIn("Web password", "".join(io_.questions))
+
+    def test_bind_address_is_checked(self):
+        self.assertIsNone(wizard.bind_problem("127.0.0.1"))
+        self.assertIsNone(wizard.bind_problem("0.0.0.0"))
+        self.assertIsNone(wizard.bind_problem("::1"))
+        self.assertIsNone(wizard.bind_problem("localhost"))
+        for bad in ("localhost:8080", "my pc", "", "300.1.1.1"):
+            self.assertIsNotNone(wizard.bind_problem(bad), bad)
+
     def test_example_password_refused(self):
         self.assertIsNotNone(wizard.password_problem(wizard.EXAMPLE_PASSWORD))
         self.assertIsNotNone(wizard.password_problem("1234567"))
@@ -251,8 +314,8 @@ class SetupTests(unittest.TestCase):
     def test_invalid_port_and_name_are_asked_again(self):
         bad_name = "x" * 40
         start, io_, _ = self.run_setup(
-            ["192.0.2.7", bad_name, "Scan", str(self.dir / "s"), "y", "99999", "9000", "",
-             "", ""], passwords=["long-enough-pw", "long-enough-pw"])
+            ["192.0.2.7", bad_name, "Scan", str(self.dir / "s"), "y", "99999", "9000", "y",
+             "", "", ""], passwords=["long-enough-pw", "long-enough-pw"])
         cfg = load_config_text(self.path.read_text())
         self.assertEqual(cfg.web_port, 9000)
         self.assertEqual(cfg.targets[0].name, "Scan")
@@ -309,6 +372,10 @@ class SetupTests(unittest.TestCase):
         self.assertEqual([(t.name, t.output) for t in cfg.targets], [("New", ".")])
         self.assertEqual(cfg.output, out_dir)
         self.assertEqual(self.path.with_name("config.toml.bak").read_text(), original)
+        # a second start over keeps the first copy
+        self.run_setup(["3", "192.0.2.6", "Newer", str(out_dir), "n", "n"])
+        self.assertEqual(self.path.with_name("config.toml.bak").read_text(), original)
+        self.assertIn('"New"', self.path.with_name("config.toml.2.bak").read_text())
 
     def test_invalid_existing_config_is_not_overwritten(self):
         self.path.parent.mkdir(parents=True)
@@ -348,6 +415,7 @@ class SetupTests(unittest.TestCase):
                 mock.patch.object(sys, "platform", "linux"), \
                 mock.patch("pushscan2folder.wizard.probe_printer",
                            return_value=(True, "ok")), \
+                mock.patch("pushscan2folder.discovery.discover", return_value=[]), \
                 mock.patch.dict(os.environ, {k: v for k, v in os.environ.items()
                                              if not k.startswith("PUSHSCAN_")}, clear=True), \
                 redirect_stdout(io.StringIO()):
@@ -357,10 +425,51 @@ class SetupTests(unittest.TestCase):
 
     def test_cancel_with_ctrl_d(self):
         with mock.patch("builtins.input", side_effect=EOFError), \
+                mock.patch("pushscan2folder.discovery.discover", return_value=[]), \
                 mock.patch.dict(os.environ, {"XDG_CONFIG_HOME": str(self.dir),
                                              "APPDATA": str(self.dir)}), \
                 redirect_stdout(io.StringIO()):
             self.assertEqual(cli.main(["setup"]), 1)
+
+
+class FilenameOptionTests(unittest.TestCase):
+    def test_invalid_template_exits_2(self):
+        err = io.StringIO()
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        env = {k: v for k, v in os.environ.items() if not k.startswith("PUSHSCAN_")}
+        env.update(XDG_CONFIG_HOME=tmp.name, APPDATA=tmp.name)
+        with mock.patch.dict(os.environ, env, clear=True), \
+                mock.patch("pushscan2folder.__main__.greeting", return_value=None), \
+                mock.patch("pushscan2folder.__main__.pause_before_exit"), \
+                mock.patch.object(sys, "stderr", err):
+            code = cli.main(["--printer", "192.0.2.1", "--filename", "{x}"])
+        self.assertEqual(code, 2)
+        self.assertIn("--filename", err.getvalue())
+
+
+class HealthTests(unittest.TestCase):
+    def health(self, path, now, max_age=120.0):
+        args = mock.Mock(heartbeat_file=path, max_age=max_age)
+        with redirect_stdout(io.StringIO()) as out:
+            return cli.health_main(args, now=now), out.getvalue()
+
+    def test_fresh_stale_missing(self):
+        with tempfile.TemporaryDirectory() as d:
+            beat = Path(d) / "alive"
+            self.assertEqual(self.health(str(beat), 0)[0], 1)          # no file yet
+            beat.write_text("1\n")
+            mtime = os.path.getmtime(beat)
+            code, out = self.health(str(beat), mtime + 30)
+            self.assertEqual(code, 0, out)
+            code, out = self.health(str(beat), mtime + 500)
+            self.assertEqual(code, 1)
+            self.assertIn("500 s ago", out)
+        self.assertEqual(self.health(None, 0)[0], 1)
+
+    def test_cli_parses_health(self):
+        args, _ = cli.parse_args(["health", "--heartbeat-file", "x", "--max-age", "60"])
+        self.assertEqual((args.cmd, args.heartbeat_file, args.max_age), ("health", "x", 60.0))
 
 
 class GreetingTests(unittest.TestCase):
@@ -406,15 +515,186 @@ class GreetingTests(unittest.TestCase):
         self.cfg.write_text('printer = "x"\n')
         # typed in a shell (or not Windows): just run
         self.assertEqual(self.greet(clicked=False)[:2], (None, False))
-        # double click: use, change or start over
-        self.assertEqual(self.greet()[:2], (7, True))
-        # already running in the background: say so instead
-        self.instance.is_running.return_value = True
-        self.instance.read_info.return_value = mock.Mock(pid=42)
-        result, setup, out = self.greet()
-        self.assertEqual((result, setup), (0, False))
-        self.assertIn("PID 42", out)
-        self.assertIn("pushscan2folder stop", out)
+
+    def menu(self, answers, running=False, pid=42, stop_code=12):
+        """Run the double click menu with typed answers (an exception ends the input)."""
+        self.instance.is_running.return_value = running
+        self.instance.read_info.return_value = mock.Mock(pid=pid)
+        typed = iter(answers)
+
+        def fake_input(prompt):
+            value = next(typed, EOFError())
+            if isinstance(value, BaseException):
+                raise value
+            return value
+
+        with mock.patch.object(cli, "setup_main", return_value=7) as setup, \
+                mock.patch.object(cli, "start_main", return_value=11) as start, \
+                mock.patch.object(cli, "stop_main", return_value=stop_code) as stop, \
+                mock.patch.object(cli, "status_main", return_value=0) as status, \
+                mock.patch.object(cli, "uninstall_main", return_value=5) as uninst, \
+                mock.patch.object(cli.webbrowser, "open", return_value=True) as browser, \
+                mock.patch.object(cli.subprocess, "Popen") as popen, \
+                mock.patch.object(cli.desktop, "open_path") as open_path, \
+                mock.patch.object(cli, "double_click", return_value=True), \
+                redirect_stdout(io.StringIO()) as out:
+            result = cli.greeting([], self.instance, input_fn=fake_input)
+        return result, dict(setup=setup, start=start, stop=stop, status=status,
+                            uninstall=uninst, browser=browser, popen=popen,
+                            open_path=open_path), out.getvalue()
+
+    def test_menu_not_running_starts_by_default(self):
+        self.cfg.parent.mkdir()
+        self.cfg.write_text('printer = "x"\n')
+        result, calls, out = self.menu(["", "7"])
+        self.assertEqual(result, 0)
+        calls["start"].assert_called_once_with(["start"], instance=self.instance)
+        self.assertIn("Not running.", out)
+        self.assertNotIn("Stop", out)
+        self.assertEqual(out.count("pushscan2folder 0"), 2)  # menu shown again
+
+    def test_menu_running_default_is_status_and_loops(self):
+        self.cfg.parent.mkdir()
+        self.cfg.write_text('printer = "x"\n')
+        result, calls, out = self.menu(["", "x", "7"], running=True)
+        self.assertEqual(result, 0)
+        self.assertEqual(calls["status"].call_count, 1)
+        self.assertIn("Running in the background (PID 42).", out)
+        self.assertIn("Please enter one of the numbers.", out)
+        self.assertNotIn("Start in the background", out)
+
+    def test_menu_running_stop(self):
+        self.cfg.parent.mkdir()
+        self.cfg.write_text('printer = "x"\n')
+        result, calls, _ = self.menu(["1", "7"], running=True)
+        self.assertEqual(result, 0)
+        calls["stop"].assert_called_once_with(self.instance)
+
+    def test_menu_settings(self):
+        self.cfg.parent.mkdir()
+        self.cfg.write_text('printer = "x"\n')
+        result, calls, _ = self.menu(["4", "7"])  # start, status, config, settings
+        self.assertEqual((result, calls["setup"].called), (0, True))
+        # running: stop first (declined: back to the menu, then quit)
+        result, calls, out = self.menu(["4", "n", "7"], running=True)
+        self.assertEqual((result, calls["setup"].called), (0, False))
+        self.assertIn("must be stopped", out)
+        result, calls, _ = self.menu(["4", "", "7"], running=True, stop_code=0)
+        self.assertEqual((result, calls["stop"].called, calls["setup"].called), (0, True, True))
+        # a failed stop: no settings, back to the menu
+        result, calls, _ = self.menu(["4", "", "7"], running=True, stop_code=1)
+        self.assertEqual((result, calls["setup"].called), (0, False))
+
+    def write_config(self, text='printer = "x"\n'):
+        self.cfg.parent.mkdir(exist_ok=True)
+        self.cfg.write_text(text)
+
+    def test_menu_web_entry(self):
+        # not running, or web off: hidden
+        self.write_config('printer = "x"\n[web]\nenabled = true\n')
+        self.assertNotIn("web page", self.menu(["7"])[2])
+        self.write_config('printer = "x"\n')
+        self.assertNotIn("web page", self.menu(["7"], running=True)[2])
+        # running and enabled: shown, 0.0.0.0 -> 127.0.0.1
+        self.write_config('printer = "x"\n[web]\nenabled = true\nbind = "0.0.0.0"\nport = 9000\n')
+        result, calls, out = self.menu(["3", "8"], running=True)
+        self.assertIn("http://127.0.0.1:9000/", out)
+        calls["browser"].assert_called_once_with("http://127.0.0.1:9000/")
+        self.assertEqual(result, 0)
+        # own bind address, IPv6 in brackets, env port wins
+        self.write_config('printer = "x"\n[web]\nenabled = true\nbind = "::1"\n')
+        with mock.patch.dict(os.environ, {"PUSHSCAN_WEB_PORT": "9100"}):
+            self.assertEqual(cli.web_url(), "http://[::1]:9100/")
+        self.write_config('printer = "x"\n[web]\nenabled = true\n')
+        self.assertEqual(cli.web_url(), "http://127.0.0.1:8737/")
+
+    def test_menu_open_config_file(self):
+        self.write_config()
+        result, calls, out = self.menu(["3", "7"])
+        calls["open_path"].assert_called_once_with(self.cfg)
+        self.assertIn("Changes are used within a few seconds.", out)
+
+    def test_open_path_windows_and_fallback(self):
+        from pushscan2folder import desktop
+        path = Path("C:/x/config.toml")
+        with mock.patch.object(desktop, "is_windows", return_value=True):
+            popen = mock.Mock()
+            desktop.open_path(path, popen=popen, has_program=lambda s: s == ".toml")
+            self.assertEqual(popen.call_args[0][0], ["explorer.exe", str(path)])
+            self.assertTrue(popen.call_args[1]["creationflags"] & desktop.DETACHED_PROCESS)
+            popen = mock.Mock()
+            desktop.open_path(path, popen=popen, has_program=lambda s: False)
+            self.assertEqual(popen.call_args[0][0], ["notepad.exe", str(path)])
+            # The terminal's job forbids leaving it: start without that flag.
+            popen = mock.Mock(side_effect=[OSError("denied"), None])
+            desktop.open_path(path, popen=popen, has_program=mock.Mock(side_effect=OSError))
+            self.assertEqual(popen.call_count, 2)
+            self.assertFalse(popen.call_args[1]["creationflags"]
+                             & desktop.CREATE_BREAKAWAY_FROM_JOB)
+        with mock.patch.object(desktop, "is_windows", return_value=False), \
+                mock.patch.object(desktop, "is_macos", return_value=False):
+            popen = mock.Mock()
+            desktop.open_path(path, popen=popen)
+            self.assertEqual(popen.call_args[0][0], ["xdg-open", str(path)])
+        with mock.patch.object(desktop, "is_windows", return_value=False), \
+                mock.patch.object(desktop, "is_macos", return_value=True):
+            popen = mock.Mock()
+            desktop.open_path(path, popen=popen)
+            self.assertEqual(popen.call_args[0][0], ["open", str(path)])
+
+    def test_menu_open_config_error(self):
+        self.write_config()
+        with mock.patch.object(cli.desktop, "open_path", side_effect=OSError("boom")), \
+                redirect_stdout(io.StringIO()) as out:
+            cli.open_config_file()
+        self.assertIn("error: cannot open", out.getvalue())
+        self.assertNotIn("Opened", out.getvalue())
+
+    def test_menu_help_opens_source_url(self):
+        from pushscan2folder import SOURCE_URL
+        self.write_config()
+        result, calls, _ = self.menu(["5", "7"])
+        calls["browser"].assert_called_once_with(SOURCE_URL)
+        self.assertEqual(result, 0)
+
+    def test_menu_uninstall_declined(self):
+        self.write_config()
+        result, calls, _ = self.menu(["6", "", "7"])
+        self.assertFalse(calls["uninstall"].called)
+        self.assertEqual(result, 0)
+
+    def test_menu_uninstall_accepted(self):
+        self.write_config()
+        result, calls, out = self.menu(["6", "y"])   # not frozen: no uninstaller question
+        self.assertEqual(result, 5)
+        args = calls["uninstall"].call_args[0]
+        self.assertEqual((args[0].yes, args[0].purge, args[1]), (False, False, ["uninstall"]))
+        self.assertFalse(calls["popen"].called)
+
+    def test_menu_uninstall_starts_windows_uninstaller(self):
+        self.write_config()
+        exe_dir = self.dir / "app"
+        exe_dir.mkdir()
+        (exe_dir / "unins000.exe").write_text("")
+        self.addCleanup(setattr, cli, "skip_pause", False)
+        with mock.patch.object(sys, "frozen", True, create=True), \
+                mock.patch.object(sys, "executable", str(exe_dir / "pushscan2folder.exe")):
+            result, calls, _ = self.menu(["6", "y", ""])
+        self.assertEqual(result, 5)
+        calls["popen"].assert_called_once_with([str(exe_dir / "unins000.exe")])
+        self.assertTrue(cli.skip_pause)
+        with mock.patch.object(cli, "is_windows", return_value=True), \
+                mock.patch.object(cli, "should_pause", return_value=True), \
+                mock.patch("builtins.input") as pause:
+            cli.pause_before_exit([])
+        self.assertFalse(pause.called)
+
+    def test_menu_quit_and_eof(self):
+        self.cfg.parent.mkdir()
+        self.cfg.write_text('printer = "x"\n')
+        self.assertEqual(self.menu(["7"])[0], 0)
+        self.assertEqual(self.menu([EOFError()])[0], 0)
+        self.assertEqual(self.menu([KeyboardInterrupt()], running=True)[0], 0)
 
     def test_double_click_only_on_windows(self):
         with mock.patch.object(cli, "console_process_count", return_value=1), \
