@@ -1,4 +1,6 @@
 """Config file parsing, validation and precedence (no network)."""
+import contextlib
+import io
 import os
 import tempfile
 import unittest
@@ -402,9 +404,22 @@ class PrecedenceTests(ConfigTestBase):
         self.assertEqual(args.printer, "10.0.0.9")
         with self.assertRaises(ConfigError):
             cli.parse_args(["--config", str(self.dir / "nope.toml"), "run"])
-        os.environ["PUSHSCAN_CONFIG"] = str(self.dir / "nope.toml")
-        with self.assertRaises(ConfigError):
+        os.environ["PUSHSCAN_CONFIG"] = str(self.dir / "missing" / "nope.toml")
+        with self.assertRaises(ConfigError):   # its folder does not exist
             cli.parse_args(["run"])
+
+    def test_missing_env_config_gets_an_example(self):
+        # First start of the container: /config is mounted but empty.
+        path = self.dir / "config" / "config.toml"
+        path.parent.mkdir()
+        os.environ["PUSHSCAN_CONFIG"] = str(path)
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            args, cfg = cli.parse_args(["run"])
+        self.assertIn("Created an example config file", err.getvalue())
+        self.assertIn("# [[target]]", path.read_text(encoding="utf-8"))
+        self.assertEqual(cfg.targets, [])
+        self.assertEqual(load_config(path).targets, [])
 
     def test_default_name_without_passwd_entry(self):
         # Docker on a NAS: the uid from "user:" has no passwd entry.

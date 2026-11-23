@@ -739,6 +739,17 @@ class DesktopTests(unittest.TestCase):
             self.assertEqual(service.scan_to(Target("Scan", Path("out"))), [Path("a.pdf")])
 
 
+    def test_no_desktop_is_reported_once(self):
+        with mock.patch.object(desktop, "has_desktop", return_value=False), \
+                mock.patch.object(desktop, "_told_no_desktop", False), \
+                self.assertLogs("pushscan2folder.desktop", "WARNING") as logs:
+            popen = mock.Mock()
+            for _ in range(3):
+                self.assertFalse(desktop.open_saved(True, [Path("a.pdf")], popen))
+        self.assertEqual(len(logs.records), 1)
+        popen.assert_not_called()
+
+
 class OpenAfterScanConfigTests(unittest.TestCase):
     def parse(self, argv, toml=None):
         cfg = load_config_text(toml) if toml else None

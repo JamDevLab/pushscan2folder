@@ -18,7 +18,7 @@ from pathlib import Path
 from . import (SOURCE_URL, __version__, autostart, background, desktop, discovery, panel, protocol,
                terminal, uninstall, web, wizard)
 from .client import ChmpClient
-from .config import Config, ConfigError, load_config
+from .config import Config, ConfigError, dump_config, load_config, write_config
 from .escl import EsclClient, ScanSettings
 from .native import NativeScanner
 from .platform_support import (default_config_path, default_log_path, default_output,
@@ -63,10 +63,30 @@ def multipage_env(fallback: str | None = None) -> str:
     return aliases.get(value, value)
 
 
+def create_example_config(path: Path) -> bool:
+    """First start of a container: PUSHSCAN_CONFIG names a file that does not
+    exist yet in an existing folder (a mounted volume). Write a commented
+    example there, so the user has a file to edit instead of a container
+    that keeps restarting. True if the file was written."""
+    if not path.parent.is_dir():
+        return False
+    try:
+        write_config(path, dump_config(Config()))
+    except OSError as exc:
+        print(f"warning: cannot create an example config file {path}: "
+              f"{exc.strerror or exc}", file=sys.stderr)
+        return False
+    print(f"Created an example config file {path}. Add your targets there; "
+          "changes are used while the program runs.", file=sys.stderr)
+    return True
+
+
 def find_config(argv=None) -> Config:
     """Load the config file: --config, else PUSHSCAN_CONFIG, else the default
-    location if it exists, else an empty Config. A missing explicit file is an
-    error, except with the web page enabled (its first save creates the file).
+    location if it exists, else an empty Config. A missing PUSHSCAN_CONFIG
+    file is created with commented examples when its folder exists. A missing
+    explicit file is otherwise an error, except with the web page enabled
+    (its first save creates the file).
     Raises ConfigError."""
     pre = argparse.ArgumentParser(add_help=False, allow_abbrev=False)
     pre.add_argument("--config", default=None)
@@ -75,6 +95,8 @@ def find_config(argv=None) -> Config:
     explicit = known.config or env("CONFIG")
     if explicit:
         path = Path(explicit)
+        if not path.is_file() and not known.config and create_example_config(path):
+            return load_config(path)
         if not path.is_file():
             if known.web or env_bool("WEB", False):
                 return Config()  # the web page creates the file on the first save
