@@ -83,3 +83,28 @@ without Pillow installed (tests that need Pillow skip themselves).
   also appear in the README, `docs/docker*.md`, `docker-compose.yml`,
   `packaging/pushscan2folder.iss` and the bug report template.
 - Pushing, merging, tagging and releasing need the maintainer's explicit go.
+
+## Status and open points
+
+- Released: 0.3.0 (2026-11-23). `## [Unreleased]` in `CHANGELOG.md` lists
+  what is on `next` since then.
+- Tested by hand only with a TR8550: Windows (installer, menu, background
+  mode) and Docker on Linux. macOS runs only in CI.
+- Open protocol questions (some panel bytes, size codes 4 to 7 and 0x0a):
+  "Open questions" in `docs/PROTOCOL.md`. Unknown panel values are logged
+  as a warning.
+- Known limits: the native multi-page protocol is used for the platen only;
+  photo cut-out works on the eSCL path for the platen only and does not
+  straighten tilted photos; the feeder trim is 0 by default because the
+  feeder sometimes pulls pages in skewed.
+- Postponed by the maintainer, do not start unasked: code signing of the
+  Windows installer, a tray icon and a configuration window.
+
+## Testing against the real printer
+
+Only when the maintainer asks, and only the printer they name. A private
+config (not in git) lives in `private/config.toml`; run it in the
+foreground or background with
+`PYTHONPATH=src .venv/bin/python -m pushscan2folder --config private/config.toml run`
+and redirect the log below `private/` (scans go to the gitignored `scans/`). Never test the mDNS search
+against the real network, and never contact other devices.
