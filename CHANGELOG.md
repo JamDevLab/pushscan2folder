@@ -5,6 +5,17 @@ All notable changes are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- Docker: if the file in `PUSHSCAN_CONFIG` does not exist and its folder
+  does, the first start writes a commented example config file there instead
+  of stopping with "config file not found".
+
+### Changed
+
+- `open_after_scan` without a desktop session (for example in Docker) logs
+  its warning once instead of after every scan.
+
 ## [0.3.0] - 2026-11-23
 
 A clearer config file layout, one Windows program with a menu, a web page

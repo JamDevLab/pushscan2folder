@@ -25,6 +25,10 @@ docker compose up -d
 docker compose logs -f
 ```
 
+If `config/config.toml` does not exist on the first start, the container
+writes a commented example there and starts with the built-in defaults; edit
+it while the container runs. The second `curl` line is then optional.
+
 To update, run `docker compose pull && docker compose up -d`. Use `:latest` or
 pin a version, for example `:0.3.0`.
 

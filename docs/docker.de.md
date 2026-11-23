@@ -25,6 +25,11 @@ docker compose up -d
 docker compose logs -f
 ```
 
+Fehlt `config/config.toml` beim ersten Start, schreibt der Container dort eine
+kommentierte Beispieldatei und startet mit den eingebauten Standardwerten. Du
+kannst sie bearbeiten, während der Container läuft. Die zweite `curl`-Zeile
+ist dann nicht nötig.
+
 Zum Aktualisieren: `docker compose pull && docker compose up -d`. Nimm
 `:latest` oder lege eine Version fest, zum Beispiel `:0.3.0`.
 
