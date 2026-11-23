@@ -10,6 +10,7 @@ from unittest import mock
 
 from pushscan2folder import __main__ as cli
 from pushscan2folder import autostart, wizard
+from pushscan2folder.platform_support import windows_program
 from pushscan2folder.config import Config, ConfigError, dump_config, load_config_text
 
 from support import assert_mode
@@ -620,11 +621,11 @@ class GreetingTests(unittest.TestCase):
         with mock.patch.object(desktop, "is_windows", return_value=True):
             popen = mock.Mock()
             desktop.open_path(path, popen=popen, has_program=lambda s: s == ".toml")
-            self.assertEqual(popen.call_args[0][0], ["explorer.exe", str(path)])
+            self.assertEqual(popen.call_args[0][0], [windows_program("explorer.exe"), str(path)])
             self.assertTrue(popen.call_args[1]["creationflags"] & desktop.DETACHED_PROCESS)
             popen = mock.Mock()
             desktop.open_path(path, popen=popen, has_program=lambda s: False)
-            self.assertEqual(popen.call_args[0][0], ["notepad.exe", str(path)])
+            self.assertEqual(popen.call_args[0][0], [windows_program("notepad.exe"), str(path)])
             # The terminal's job forbids leaving it: start without that flag.
             popen = mock.Mock(side_effect=[OSError("denied"), None])
             desktop.open_path(path, popen=popen, has_program=mock.Mock(side_effect=OSError))

@@ -13,6 +13,8 @@ from __future__ import annotations
 import os
 import sys
 
+from .platform_support import windows_program
+
 RUN_KEY = r"HKCU\Software\Microsoft\Windows\CurrentVersion\Run"
 VALUE_NAME = "pushscan2folder"
 # Options whose value is a path; made absolute because the autostart entry
@@ -52,7 +54,10 @@ def _quote(token: str) -> str:
     if '"' in token or "%" in token or "\n" in token or "\r" in token:
         raise ValueError(f"cannot use {token!r} in an autostart entry "
                          '(no double quotes or percent signs)')
-    return f'"{token}"'
+    # CommandLineToArgvW: backslashes before a closing quote count double,
+    # else "C:\\" would read as an escaped quote.
+    trailing = len(token) - len(token.rstrip("\\"))
+    return '"' + token + "\\" * trailing + '"'
 
 
 def run_value(args: list[str]) -> str:
@@ -66,9 +71,9 @@ def run_value(args: list[str]) -> str:
 
 def install_command(args: list[str]) -> list[str]:
     """Argument list for subprocess.run (never through a shell)."""
-    return ["reg.exe", "add", RUN_KEY, "/v", VALUE_NAME, "/t", "REG_SZ",
+    return [windows_program("reg.exe"), "add", RUN_KEY, "/v", VALUE_NAME, "/t", "REG_SZ",
             "/d", run_value(args), "/f"]
 
 
 def remove_command() -> list[str]:
-    return ["reg.exe", "delete", RUN_KEY, "/v", VALUE_NAME, "/f"]
+    return [windows_program("reg.exe"), "delete", RUN_KEY, "/v", VALUE_NAME, "/f"]

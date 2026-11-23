@@ -16,6 +16,7 @@ from unittest import mock
 from pushscan2folder import __main__ as cli
 from pushscan2folder import autostart, background, desktop, uninstall, wizard, web
 from pushscan2folder.config import ConfigError, dump_config, load_config_text
+from pushscan2folder.platform_support import windows_program
 from pushscan2folder.escl import ScanSettings
 from pushscan2folder.service import PushScanService, Target
 from pushscan2folder.status import LogBuffer
@@ -66,6 +67,54 @@ class InstanceTests(TempDirCase):
         self.assertTrue(a.claim())
         self.assertFalse(a.stop_requested())     # an old request is dropped
         self.assertEqual(a.read_info().pid, os.getpid())
+
+    def test_unsafe_pids_are_ignored(self):
+        a = self.instance()
+        a.dir.mkdir(parents=True)
+        for bad in ("true", "0", "1", "-1", "2.5", '"7"'):
+            a.info_path.write_text('{"pid": %s}' % bad, encoding="utf-8")
+            self.assertIsNone(a.read_info().pid, bad)
+        a.info_path.write_text('{"pid": 2}', encoding="utf-8")
+        self.assertEqual(a.read_info().pid, 2)
+
+    def test_terminate_refuses_unsafe_pids(self):
+        for bad in (True, 0, 1, -1, None, "5"):
+            with self.subTest(pid=bad), mock.patch("os.kill") as kill, \
+                    mock.patch("subprocess.run") as run:
+                with self.assertRaises(OSError):
+                    background.terminate(bad)
+                kill.assert_not_called()
+                run.assert_not_called()
+
+    def test_claim_retries_while_a_probe_holds_the_lock(self):
+        a = self.instance()
+        results = iter([False, False, True])
+        sleeps = []
+        with mock.patch.object(background, "_try_lock", side_effect=lambda fd: next(results)):
+            self.assertTrue(a.claim(sleep=sleeps.append))
+        self.assertEqual(len(sleeps), 2)
+
+    def test_claim_gives_up_after_the_retries(self):
+        a = self.instance()
+        sleeps = []
+        with mock.patch.object(background, "_try_lock", return_value=False) as lock:
+            self.assertFalse(a.claim(sleep=sleeps.append))
+        self.assertEqual(lock.call_count, background.CLAIM_TRIES)
+        self.assertEqual(len(sleeps), background.CLAIM_TRIES - 1)
+
+    def test_clean_stale_keeps_the_files_of_a_new_instance(self):
+        a, b = self.instance(), self.instance()
+        self.assertTrue(a.claim("new.log"))
+        b.clean_stale()                          # a runs: nothing is removed
+        self.assertTrue(a.info_path.exists())
+        self.assertEqual(b.read_info().log, "new.log")
+
+    @unittest.skipIf(os.name == "nt", "POSIX modes")
+    def test_state_files_are_private(self):
+        a = self.instance("private")
+        self.assertTrue(a.claim())
+        self.assertEqual(a.dir.stat().st_mode & 0o777, 0o700)
+        self.assertEqual(a.info_path.stat().st_mode & 0o777, 0o600)
 
     def test_garbled_info_file(self):
         a = self.instance()
@@ -184,7 +233,7 @@ class StopTests(TempDirCase):
         with mock.patch.object(background, "is_windows", return_value=True), \
                 mock.patch("subprocess.run") as run:
             background.terminate(123)
-        self.assertEqual(run.call_args[0][0], ["taskkill", "/PID", "123", "/T", "/F"])
+        self.assertEqual(run.call_args[0][0], [windows_program("taskkill.exe"), "/PID", "123", "/T", "/F"])
         with mock.patch.object(background, "is_windows", return_value=False), \
                 mock.patch("os.kill") as kill:
             background.terminate(123)
@@ -634,14 +683,14 @@ class UninstallTests(TempDirCase):
         self.assertFalse(self.state_dir.exists())
         self.assertIn("scan folder is inside", out.getvalue())
         if sys.platform == "win32":   # only Windows touches the registry (mocked)
-            self.assertEqual(run.call_args[0][0][:2], ["reg.exe", "delete"])
+            self.assertEqual(run.call_args[0][0][:2], [windows_program("reg.exe"), "delete"])
         else:
             run.assert_not_called()
 
     def test_remove_autostart_message(self):
         with mock.patch("subprocess.run", return_value=mock.Mock(returncode=0)) as run:
             self.assertIn("removed", cli.remove_autostart_message())
-        self.assertEqual(run.call_args[0][0][:2], ["reg.exe", "delete"])
+        self.assertEqual(run.call_args[0][0][:2], [windows_program("reg.exe"), "delete"])
         with mock.patch("subprocess.run", return_value=mock.Mock(returncode=1)):
             self.assertIn("No autostart", cli.remove_autostart_message())
 
@@ -669,7 +718,7 @@ class DesktopTests(unittest.TestCase):
             self.assertTrue(desktop.open_saved(True, [Path("C:/s/a.pdf"), Path("C:/s/b.pdf")],
                                                popen=popen))
         args, kwargs = popen.call_args
-        self.assertEqual(args[0][0], "powershell.exe")
+        self.assertEqual(args[0][0], windows_program("powershell.exe"))
         self.assertEqual(kwargs["env"]["PUSHSCAN_SELECT"], str(Path("C:/s/a.pdf")))
         self.assertEqual(kwargs["creationflags"], desktop.CREATE_NO_WINDOW)
         script = base64.b64decode(args[0][-1]).decode("utf-16-le")
@@ -681,7 +730,7 @@ class DesktopTests(unittest.TestCase):
         with mock.patch.object(sys, "platform", "win32"):
             self.assertTrue(desktop.open_saved(True, [Path("C:/my scans/a.pdf")],
                                                popen=popen))
-        self.assertEqual(popen.call_args[0][0], f'explorer.exe /select,"{Path("C:/my scans/a.pdf")}"')
+        self.assertEqual(popen.call_args[0][0], f'"{windows_program("explorer.exe")}" /select,"{Path("C:/my scans/a.pdf")}"')
 
     def test_linux_and_macos(self):
         path = Path("/home/u/Scans/a.pdf")

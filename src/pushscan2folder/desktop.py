@@ -10,7 +10,7 @@ import os
 import subprocess
 from pathlib import Path
 
-from .platform_support import is_macos, is_windows
+from .platform_support import is_macos, is_windows, windows_program
 
 log = logging.getLogger(__name__)
 
@@ -64,7 +64,7 @@ def explorer_select(path: Path, popen=subprocess.Popen) -> None:
     """Show `path` selected in Explorer, reusing a window of its folder."""
     encoded = base64.b64encode(SELECT_SCRIPT.encode("utf-16-le")).decode("ascii")
     try:
-        popen(["powershell.exe", "-NoProfile", "-NonInteractive", "-WindowStyle", "Hidden",
+        popen([windows_program("powershell.exe"), "-NoProfile", "-NonInteractive", "-WindowStyle", "Hidden",
                "-EncodedCommand", encoded],
               env=dict(os.environ, PUSHSCAN_SELECT=str(path)),
               creationflags=CREATE_NO_WINDOW, stdin=subprocess.DEVNULL,
@@ -73,7 +73,7 @@ def explorer_select(path: Path, popen=subprocess.Popen) -> None:
         # Explorer wants /select,"path" as is; a list would quote the
         # whole argument when the path has spaces. Windows file names
         # cannot contain quotes, so this string is safe.
-        popen(f'explorer.exe /select,"{path}"')
+        popen(f'"{windows_program("explorer.exe")}" /select,"{path}"')
 
 
 DETACHED_PROCESS = 0x00000008
@@ -114,7 +114,7 @@ def open_path(path: Path, popen=subprocess.Popen, has_program=None) -> None:
             found = (has_program or windows_has_program)(path.suffix)
         except (OSError, AttributeError):
             found = False
-        _start_detached(["explorer.exe" if found else "notepad.exe", str(path)], popen)
+        _start_detached([windows_program("explorer.exe" if found else "notepad.exe"), str(path)], popen)
         return
     popen(["open" if is_macos() else "xdg-open", str(path)], start_new_session=True,
           stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
