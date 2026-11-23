@@ -32,6 +32,7 @@ COLOUR_THRESHOLD = 60    # 0..255 saturation that counts as colour
 CLOSE_SIZE = 5           # odd; gap closing in analysis pixels (~3 mm)
 MIN_SIDE_MM = 15         # smaller areas are dust or noise
 JPEG_QUALITY = 95
+MAX_AREAS = 200          # more marked areas than this is noise, not photos
 
 Box = tuple[int, int, int, int]  # left, top, right, bottom in scan pixels
 
@@ -109,7 +110,12 @@ def find_photos(image, dpi: int) -> list[Box]:
     small = image.convert("RGB").resize((max(1, w // step), max(1, h // step)),
                                         Image.BOX)
     min_side = MIN_SIDE_MM / 25.4 * dpi / step
-    boxes = [b for b in _merge(_areas(_mask(small)))
+    areas = _areas(_mask(small))
+    if len(areas) > MAX_AREAS:
+        # _merge is cubic in the number of areas; a speckled scan is no photo anyway
+        log.info("%d separate areas on the glass, too many to be photos", len(areas))
+        return []
+    boxes = [b for b in _merge(areas)
              if b[2] - b[0] >= min_side and b[3] - b[1] >= min_side]
     boxes.sort(key=lambda b: (b[1], b[0]))
     return [(b[0] * step, b[1] * step, min(w, b[2] * step), min(h, b[3] * step))
@@ -129,11 +135,17 @@ def cut_out(jpeg: bytes, dpi: int, multi: bool) -> list[bytes]:
     if not available():
         return [jpeg]
     try:
-        image = Image.open(io.BytesIO(jpeg))
-        image.load()
-    except (OSError, ValueError) as exc:
-        log.warning("cannot read the scan to cut out photos (%s), saving it whole", exc)
+        return _cut_out(jpeg, dpi, multi)
+    except Exception as exc:  # bad image data must never lose the scan
+        # Includes Image.DecompressionBombError and MemoryError (an Exception).
+        log.warning("cannot cut out photos (%s: %s), saving the scan whole",
+                    type(exc).__name__, exc)
         return [jpeg]
+
+
+def _cut_out(jpeg: bytes, dpi: int, multi: bool) -> list[bytes]:
+    image = Image.open(io.BytesIO(jpeg))
+    image.load()
     boxes = find_photos(image, dpi)
     if not boxes:
         log.info("no photo found on the glass, saving the whole scan")

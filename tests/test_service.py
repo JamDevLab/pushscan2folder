@@ -1,4 +1,5 @@
 """End-to-end tests against a fake printer on localhost (no real device needed)."""
+import os
 import tempfile
 import threading
 import unittest
@@ -10,7 +11,7 @@ from pathlib import Path
 from pushscan2folder import escl, protocol
 from pushscan2folder.client import ChmpClient
 from pushscan2folder.escl import EsclClient, ScanSettings
-from pushscan2folder.service import (PushScanService, Target, Trim, check_targets, output_names,
+from pushscan2folder.service import (PushScanService, Target, Trim, check_targets, save_files,
                                      render_filename, check_filename,
                                      parse_trim,
                                     parse_targets, safe_dirname)
@@ -427,14 +428,54 @@ class PresetPrecedenceTests(unittest.TestCase):
 
 
 class HelperTests(unittest.TestCase):
-    def test_output_names_unique(self):
+    def test_save_files_unique_names(self):
         with tempfile.TemporaryDirectory() as d:
             now = datetime(2026, 11, 22, 0, 1, 3)
             (Path(d) / "scan_20261122_000103.pdf").write_bytes(b"x")
-            self.assertEqual(output_names(Path(d), "pdf", 1, now)[0].name,
+            self.assertEqual(save_files(Path(d), [(b"%PDF", "pdf")], now)[0].name,
                              "scan_20261122_000103-1.pdf")
-            names = [p.name for p in output_names(Path(d), "jpeg", 2, now)]
+            names = [p.name for p in save_files(Path(d), [(b"a", "jpeg"), (b"b", "jpeg")], now)]
             self.assertEqual(names, ["scan_20261122_000103_01.jpg", "scan_20261122_000103_02.jpg"])
+
+    @unittest.skipIf(os.name == "nt", "POSIX permissions")
+    def test_save_files_honours_the_umask(self):
+        old = os.umask(0o022)
+        try:
+            with tempfile.TemporaryDirectory() as d:
+                path = save_files(Path(d), [(b"a", "jpeg")], datetime(2026, 1, 2))[0]
+                self.assertEqual(path.stat().st_mode & 0o777, 0o644)
+        finally:
+            os.umask(old)
+
+    def test_save_files_never_overwrites_or_follows_symlinks(self):
+        now = datetime(2026, 11, 22, 0, 1, 3)
+        with tempfile.TemporaryDirectory() as d, tempfile.TemporaryDirectory() as victim:
+            d = Path(d)
+            (d / "scan_20261122_000103_01.jpg").write_bytes(b"old")
+            target = Path(victim) / "secret"
+            try:
+                (d / "scan_20261122_000103_02.jpg").symlink_to(target)
+            except (OSError, NotImplementedError):
+                self.skipTest("no symlinks")
+            paths = save_files(d, [(b"a", "jpeg"), (b"b", "jpeg")], now)
+            self.assertEqual([p.name for p in paths], ["scan_20261122_000103_01-1.jpg",
+                                                       "scan_20261122_000103_02-1.jpg"])
+            self.assertEqual((d / "scan_20261122_000103_01.jpg").read_bytes(), b"old")
+            self.assertFalse(target.exists())
+            self.assertEqual([p.read_bytes() for p in paths], [b"a", b"b"])
+            self.assertEqual(sorted(p.name for p in d.glob(".*")), [])
+
+    def test_save_files_copy_fallback_without_hard_links(self):
+        now = datetime(2026, 11, 22, 0, 1, 3)
+        with tempfile.TemporaryDirectory() as d:
+            d = Path(d)
+            (d / "scan_20261122_000103.pdf").write_bytes(b"old")
+            with mock.patch.object(os, "link", side_effect=OSError(1, "not permitted")):
+                paths = save_files(d, [(b"%PDF new", "pdf")], now)
+            self.assertEqual(paths[0].name, "scan_20261122_000103-1.pdf")
+            self.assertEqual(paths[0].read_bytes(), b"%PDF new")
+            self.assertEqual((d / "scan_20261122_000103.pdf").read_bytes(), b"old")
+            self.assertEqual(list(d.glob(".*")), [])
 
     def test_filename_template(self):
         now = datetime(2026, 11, 22, 18, 30, 5)
@@ -453,13 +494,12 @@ class HelperTests(unittest.TestCase):
                 check_filename(bad)
         check_filename("{name}")
 
-    def test_output_names_with_template(self):
+    def test_save_files_with_template(self):
         with tempfile.TemporaryDirectory() as d:
             now = datetime(2026, 11, 22, 0, 1, 3)
-            first = output_names(Path(d), "pdf", 1, now, "{name}", "Rechnung")[0]
+            first = save_files(Path(d), [(b"x", "pdf")], now, "{name}", "Rechnung")[0]
             self.assertEqual(first.name, "Rechnung.pdf")
-            first.write_bytes(b"x")
-            self.assertEqual(output_names(Path(d), "pdf", 1, now, "{name}", "Rechnung")[0].name,
+            self.assertEqual(save_files(Path(d), [(b"y", "pdf")], now, "{name}", "Rechnung")[0].name,
                              "Rechnung-1.pdf")
 
     def test_job_path(self):

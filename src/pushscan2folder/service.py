@@ -5,8 +5,11 @@ Platen scans whose panel document type is in `multipage` (default:
 pages (multi-page PDF). Everything else uses eSCL."""
 from __future__ import annotations
 
+import errno
 import logging
+import os
 import re
+import secrets
 import string
 import threading
 import time
@@ -128,22 +131,66 @@ def check_filename(template: str) -> None:
     render_filename(template, "scan", datetime(2026, 1, 2, 3, 4, 5))
 
 
-def output_names(directory: Path, fmt: str, count: int, now: datetime,
-                 template: str = DEFAULT_FILENAME, name: str = "scan") -> list[Path]:
-    """TEMPLATE[_NN].ext (default scan_YYYYmmdd_HHMMSS), never overwriting
-    existing files: a "-1", "-2" ... is added instead."""
-    ext = EXTENSIONS[FORMATS[fmt]]
+def _publish(tmp: Path, final: Path) -> None:
+    """Give the finished temp file its final name without ever replacing or
+    following anything that exists there. Raises FileExistsError if the name
+    is taken (a dangling symlink counts)."""
+    try:
+        os.link(tmp, final)  # atomic, fails if `final` exists
+        return
+    except FileExistsError:
+        raise
+    except OSError as exc:
+        if exc.errno not in (errno.EPERM, errno.ENOTSUP, errno.EXDEV, errno.EOPNOTSUPP,
+                             errno.EACCES, errno.ENOSYS, errno.EINVAL):
+            raise
+    # No hard links here (some SMB/NAS shares, FAT): copy; "x" never overwrites
+    # and does not follow a symlink.
+    with open(final, "xb") as dst:
+        try:
+            with open(tmp, "rb") as src:
+                while chunk := src.read(1 << 20):
+                    dst.write(chunk)
+        except BaseException:
+            dst.close()
+            final.unlink(missing_ok=True)
+            raise
+
+
+def save_files(directory: Path, files: list[tuple[bytes, str]], now: datetime,
+               template: str = DEFAULT_FILENAME, name: str = "scan") -> list[Path]:
+    """Write (data, fmt) pairs as TEMPLATE[_NN].ext (default
+    scan_YYYYmmdd_HHMMSS), never overwriting existing files: a "-1", "-2" ...
+    is added instead. Each file goes to a hidden temp file first, so a folder
+    watcher never sees a half-written file, and is published without
+    replacing or following anything that exists."""
     stem = render_filename(template, name, now)
-    names = []
-    for i in range(count):
-        base = stem if count == 1 else f"{stem}_{i + 1:02d}"
-        path = directory / f"{base}.{ext}"
-        n = 1
-        while path.exists() or path in names:
-            path = directory / f"{base}-{n}.{ext}"
-            n += 1
-        names.append(path)
-    return names
+    paths = []
+    for i, (data, fmt) in enumerate(files):
+        ext = EXTENSIONS[FORMATS[fmt]]
+        base = stem if len(files) == 1 else f"{stem}_{i + 1:02d}"
+        tmp = directory / f".{secrets.token_hex(8)}.part"
+        # 0o666 and the umask, like a plain write (mkstemp would make it 0600
+        # and a folder watcher running as another user could not read it).
+        fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_BINARY", 0),
+                     0o666)
+        try:
+            with os.fdopen(fd, "wb") as f:
+                f.write(data)
+                f.flush()
+                os.fsync(f.fileno())
+            n = 0
+            while True:
+                path = directory / (f"{base}.{ext}" if n == 0 else f"{base}-{n}.{ext}")
+                try:
+                    _publish(tmp, path)
+                    break
+                except FileExistsError:
+                    n += 1
+            paths.append(path)
+        finally:
+            tmp.unlink(missing_ok=True)
+    return paths
 
 
 def is_complete(data: bytes, fmt: str) -> bool:
@@ -511,8 +558,19 @@ class PushScanService:
         if not complete:
             return []
         if settings.fmt == "pdf":
-            return [jpegs_to_pdf(complete, settings.resolution)]
+            try:
+                return [jpegs_to_pdf(complete, settings.resolution)]
+            except ValueError as exc:
+                log.warning("cannot build a PDF (%s), saving the pages as JPEG files", exc)
         return complete
+
+    @staticmethod
+    def _photo_pdf(photo: bytes, dpi: int) -> bytes:
+        try:
+            return jpegs_to_pdf([photo], dpi)
+        except ValueError as exc:
+            log.warning("cannot build a PDF (%s), saving the page as a JPEG file", exc)
+            return photo
 
     def scan_to(self, target: Target, event: int = 0, interrupt: bytes = b"") -> list[Path]:
         """Scan for target and save the files; the result goes to self.status."""
@@ -570,13 +628,15 @@ class PushScanService:
             complete = [photo for page in complete
                         for photo in crop.cut_out(page, settings.resolution, cut == "multi")]
             if saved_fmt == "pdf":
-                complete = [jpegs_to_pdf([photo], settings.resolution) for photo in complete]
+                complete = [self._photo_pdf(photo, settings.resolution) for photo in complete]
             settings = replace(settings, fmt=saved_fmt)
         outdir.mkdir(parents=True, exist_ok=True)
-        paths = output_names(outdir, settings.fmt, len(complete), datetime.now(),
-                             target.filename or self.filename, target.name)
-        for path, data in zip(paths, complete):
-            path.write_bytes(data)
+        # A page that could not be made a PDF stays a JPEG (see _photo_pdf, scan_native).
+        files = [(d, "jpeg" if settings.fmt == "pdf" and not d.startswith(b"%PDF")
+                  else settings.fmt) for d in complete]
+        paths = save_files(outdir, files, datetime.now(),
+                           target.filename or self.filename, target.name)
+        for path in paths:
             log.info("saved %s", path)
         return paths
 
