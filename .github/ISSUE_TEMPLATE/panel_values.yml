@@ -1,0 +1,43 @@
+name: Unknown panel value
+description: The log warned about an unknown panel value. Report it so it can be decoded.
+labels: ["protocol"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        The log shows `unknown panel value(s): ...` when the printer sends a setting the program does not know yet.
+        Each report fills a gap in the open questions of the [protocol notes](https://github.com/JamDevLab/pushscan2folder/blob/main/docs/PROTOCOL.md).
+  - type: input
+    id: printer
+    attributes:
+      label: Printer model
+      placeholder: Canon PIXMA TR8550
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: pushscan2folder version
+      placeholder: 0.3.0
+    validations:
+      required: true
+  - type: textarea
+    id: log
+    attributes:
+      label: Log lines
+      description: The `scan requested` line, the `panel settings` line and the warning, copied from the log.
+      render: text
+    validations:
+      required: true
+  - type: textarea
+    id: panel
+    attributes:
+      label: Panel settings you chose
+      description: Every setting as the printer display showed it (document type, size, format, resolution, colour and so on).
+      placeholder: |
+        Document type: Photo
+        Size: 13x18 cm
+        Format: JPEG
+        Colour
+    validations:
+      required: true

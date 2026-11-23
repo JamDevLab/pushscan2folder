@@ -24,6 +24,8 @@ body:
         - label: Scan from the ADF
         - label: Multi-page scan from the glass (next-page dialog)
         - label: The panel settings are used (resolution, format, size, colour)
+        - label: Next-page dialog after a feeder scan (`feeder_next_page`)
+        - label: Photos cut out of a glass scan (photo size "Auto scan" or "Auto multi scan")
   - type: textarea
     id: notes
     attributes:

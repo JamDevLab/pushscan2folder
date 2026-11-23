@@ -1,0 +1,31 @@
+name: Feature request
+description: Suggest a new feature or a change.
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What do you want to do?
+      description: The task you have in mind, for example "scan receipts straight into a dated folder".
+    validations:
+      required: true
+  - type: textarea
+    id: idea
+    attributes:
+      label: How could it work?
+      description: Your idea for the config key, panel setting or behaviour. Leave it empty if you have none.
+  - type: dropdown
+    id: platform
+    attributes:
+      label: Where do you run it?
+      multiple: true
+      options:
+        - Docker
+        - Linux (without Docker)
+        - Windows
+        - macOS
+  - type: input
+    id: printer
+    attributes:
+      label: Printer model
+      placeholder: Canon PIXMA TR8550
