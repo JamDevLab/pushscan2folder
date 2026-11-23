@@ -18,6 +18,8 @@ jobs:
         include:
           - os: ubuntu-latest
             python: "3.12"
+          - os: ubuntu-latest   # the Python of the Docker image
+            python: "3.15"
     env:
       PYTHONPATH: src
     steps:
