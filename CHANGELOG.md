@@ -7,6 +7,15 @@ All notable changes are documented here. The format follows
 
 ### Added
 
+- Photos: with the panel document type *Photo* and the size *auto scan* or
+  *auto multi scan*, the photos are cut out of the glass scan on the PC. Auto
+  scan saves one file with the photo area, auto multi scan one file per photo
+  (top to bottom, then left to right). With panel format PDF, one PDF per
+  photo. Needs the optional package Pillow (`requirements.txt`), which the
+  Windows exe and the Docker image include. Without Pillow the whole glass is
+  saved. Tilted photos are not straightened.
+- A warning in the log for unknown panel values, with a request to report
+  them.
 - Windows: one Start menu entry instead of three. A double click with an
   existing config file shows a small menu: start in the background, stop,
   status, open the web page (when it runs and is enabled), open the config

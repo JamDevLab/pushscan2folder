@@ -24,7 +24,7 @@ Zurück zur [README](../README.de.md).
    ohne einen Scan zu starten, passiert nichts.
 4. Freigeben. Bei SIGINT/SIGTERM gibt das Tool die Sitzung frei.
 
-Das Tool braucht Python >= 3.11 und nur die Standardbibliothek. Es baut nur
+Das Tool braucht Python >= 3.11 und die Standardbibliothek. Pillow ist optional und wird nur zum Ausschneiden von Fotos gebraucht. Es baut nur
 ausgehende Verbindungen zum Drucker auf (TCP 80). Eingehende Ports sind nicht
 nötig (außer für die optionale Weboberfläche), daher funktioniert Dockers
 Standard-Bridge-Netzwerk.

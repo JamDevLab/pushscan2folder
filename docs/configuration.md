@@ -218,6 +218,27 @@ multi-page dialog. With *Auto* the panel sends no size, format or resolution, so
 If `[defaults.document]` or `[defaults.auto]` is left out, the built-in value applies (`true` for *Document*, `false` for *Auto*). Setting only one of them keeps
 the built-in value of the other.
 
+### Photos
+
+With the document type *Photo* the panel offers the sizes *auto scan* and
+*auto multi scan*. The printer always sends the whole glass, and
+pushscan2folder cuts the photos out on the PC:
+
+- *Auto scan* saves one file with the area of the photo or photos.
+- *Auto multi scan* saves one file per photo, ordered from top to bottom and
+  then from left to right.
+
+This works with the lid open or closed and only on the glass (not the ADF).
+Tilted photos stay tilted, because the cut is a bounding box without
+straightening. With the panel format PDF the tool scans JPEG, cuts out the
+photos and writes one PDF per photo.
+
+Cutting out needs the optional Python package Pillow. The Windows exe and the
+Docker image include it. When you run from source, install it with
+`pip install -r requirements.txt`. Without Pillow everything works as before and
+the whole glass is saved; the log then says "install Pillow to cut the photos
+out of the scan".
+
 ### Older config files
 
 Files from earlier versions still work. The old keys are read and the log shows

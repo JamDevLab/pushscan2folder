@@ -2,7 +2,7 @@
 
 ## Development
 
-- Python >= 3.11, standard library only. Please do not add dependencies.
+- Python >= 3.11, standard library only, plus the optional Pillow package for cutting out photos (`requirements.txt`). Please do not add further dependencies.
 - Run the tests before every commit:
 
   ```sh

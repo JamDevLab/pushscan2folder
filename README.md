@@ -9,7 +9,7 @@
 <p align="center">
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-AGPL--3.0-1F5FAD" alt="License: AGPL-3.0"></a>
   <img src="https://img.shields.io/badge/python-3.11%2B-1F5FAD" alt="Python 3.11+">
-  <img src="https://img.shields.io/badge/dependencies-none-1F5FAD" alt="dependencies: none">
+  <img src="https://img.shields.io/badge/dependencies-Pillow%20(optional)-1F5FAD" alt="dependencies: Pillow (optional)">
   <img src="https://img.shields.io/badge/docker-ready-2496ED" alt="Docker">
 </p>
 
@@ -27,7 +27,8 @@ scans and saves the result as a PDF or JPEG file. Tested with a Canon PIXMA TR85
 - Presets per target for the auto document type
 - Optional password-protected web page for status, log, targets and settings
 - Docker and NAS ready, only outbound connections to the printer (TCP 80)
-- Python 3.11+, standard library only
+- Photos: with the panel size "auto scan" or "auto multi scan" the photos are cut out of the glass scan, one file per photo (needs Pillow, optional)
+- Python 3.11+, standard library only; the optional Pillow package is needed only for cutting out photos
 
 ## Supported printers
 
@@ -160,6 +161,7 @@ the design decisions and tested the features with a real printer.
 ## License
 
 pushscan2folder is licensed under AGPL-3.0-or-later, see [LICENSE](LICENSE).
+The optional dependency [Pillow](https://python-pillow.org/) (MIT-CMU license) cuts out photos and is bundled in the Windows exe and the Docker image.
 Canon and PIXMA are trademarks of Canon Inc. This project is not affiliated with or endorsed by Canon.
 
 ### Legal note

@@ -222,6 +222,8 @@ $env:PYTHONPATH = "src"
 python -m pushscan2folder --printer 192.168.1.50
 ```
 
+Zum Ausschneiden von Fotos (Dokumenttyp *Foto*, Größe *auto scan* oder *auto multi scan*) einmal `pip install -r requirements.txt` ausführen. Pillow ist optional.
+
 Es gelten dieselben Optionen. Mit `python -m pushscan2folder --install-autostart ...` richtest du den Autostart für die Python-Variante ein. Tests: `python -m unittest discover -s tests`.
 
 ## Grenzen und Hinweise
@@ -238,5 +240,7 @@ Nicht paketiert und nicht auf echter Hardware getestet; die Unit-Tests laufen in
 cd pushscan2folder
 PYTHONPATH=src python3 -m pushscan2folder --printer 192.168.1.50
 ```
+
+Pillow ist optional und schneidet Fotos aus. Installiere es mit `pip install -r requirements.txt`.
 
 Die Konfiguration liegt in `~/.config/pushscan2folder/config.toml` (oder `$XDG_CONFIG_HOME`), Scans gehen nach `~/Documents/Scans`, wenn du kein `output` setzt. `--install-autostart` gibt es nur für Windows; unter macOS nimmst du für einen Hintergrunddienst einen launchd-Agent. Rückmeldungen von Mac-Nutzern sind willkommen.

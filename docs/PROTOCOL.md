@@ -113,7 +113,7 @@ the TR8550 by changing one setting per scan:
 | 7      | colour              | 1 colour, 2 black and white |
 | 8      | source              | 1 platen, 2 ADF (chosen by the printer's paper sensor) |
 | 9      | -                   | 0 |
-| 10     | size                | 1 A4, 2 Letter, 3 Legal (ADF only), 8 10×15 cm, 9 13×18 cm, 0x0b auto |
+| 10     | size                | 1 A4, 2 Letter, 3 Legal (ADF only), 8 10×15 cm, 9 13×18 cm, 0x0b auto scan (photo), 0x0c auto multi scan (photo) |
 | 11     | format              | 1 JPEG, 2 TIFF, 3 PDF, 4 compact PDF |
 | 12     | resolution          | 1 = 75, 2 = 150, 3 = 300, 4 = 600 dpi; 0 with compact PDF |
 | 13     | reduce bleed-through| 1 off, 2 on |
@@ -126,7 +126,9 @@ With document type auto scan only offsets 6 to 8 are set (plus offset 20 = 1
 when the ADF is used, *unconfirmed*), and the PC decides the rest.
 
 With photo the printer preselects 10×15 cm, JPEG and 300 dpi. Bleed-through
-and descreen are 0 (not applicable).
+and descreen are 0 (not applicable). With the sizes auto scan (0x0b) and auto
+multi scan (0x0c) the printer sends the whole glass. The PC cuts out the photos
+(see [Photos](configuration.md#photos)).
 
 The printer enforces some panel restrictions, not the protocol: compact PDF
 cannot be combined with unsharp mask or bleed-through reduction, and the panel

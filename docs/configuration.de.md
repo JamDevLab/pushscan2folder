@@ -227,6 +227,27 @@ Fehlt `[defaults.document]` oder `[defaults.auto]`, gilt der eingebaute Wert
 (`true` für *Dokument*, `false` für *Automatisch*). Setzt du nur eine der beiden
 Tabellen, behält die andere ihren eingebauten Wert.
 
+### Fotos
+
+Beim Dokumenttyp *Foto* bietet das Bedienfeld die Größen *auto scan* und
+*auto multi scan* an. Der Drucker sendet immer die ganze Glasfläche, und
+pushscan2folder schneidet die Fotos auf dem PC aus:
+
+- *Auto scan* speichert eine Datei mit dem Bereich des Fotos oder der Fotos.
+- *Auto multi scan* speichert eine Datei pro Foto, sortiert von oben nach unten
+  und dann von links nach rechts.
+
+Das funktioniert mit offenem oder geschlossenem Deckel und nur auf dem Glas
+(nicht im Vorlageneinzug). Schiefe Fotos bleiben schief, denn der Ausschnitt ist
+ein umschließendes Rechteck ohne Geraderichten. Bei Bedienfeld-Format PDF scannt
+das Tool als JPEG, schneidet die Fotos aus und schreibt ein PDF pro Foto.
+
+Zum Ausschneiden braucht es das optionale Python-Paket Pillow. Die Windows-exe
+und das Docker-Image enthalten es. Beim Start aus dem Quellcode installierst du
+es mit `pip install -r requirements.txt`. Ohne Pillow funktioniert alles wie
+bisher und die ganze Glasfläche wird gespeichert; das Log sagt dann "install
+Pillow to cut the photos out of the scan".
+
 ### Ältere Konfigurationsdateien
 
 Dateien aus früheren Versionen funktionieren weiter. Die alten Schlüssel werden
