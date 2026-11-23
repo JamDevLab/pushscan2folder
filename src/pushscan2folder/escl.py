@@ -26,6 +26,9 @@ MAX_RESPONSE = 1024 * 1024            # status, job creation, error bodies
 MAX_DOCUMENT_BYTES = 512 * 1024 * 1024
 MAX_JOB_BYTES = 1024 * 1024 * 1024
 MAX_DOCUMENTS = 500
+CLEANUP_TIMEOUT = 3.0                 # seconds for the best-effort job DELETE
+# Total time for one document: an ADF PDF with all pages can stream for long.
+DOCUMENT_DEADLINE = 2 * 3600.0
 
 # A4 at 300 dpi in eSCL units (1/300 inch); the printer clamps to its maximum.
 A4_WIDTH = 2480
@@ -93,12 +96,14 @@ class EsclClient:
         self.timeout = timeout
 
     def _request(self, method: str, path: str, body: bytes | None = None,
-                 headers: dict | None = None, limit: int = MAX_RESPONSE):
-        conn = http.client.HTTPConnection(self.printer, self.port, timeout=self.timeout)
+                 headers: dict | None = None, limit: int = MAX_RESPONSE,
+                 timeout: float | None = None, deadline: float | None = None):
+        conn = http.client.HTTPConnection(self.printer, self.port,
+                                          timeout=self.timeout if timeout is None else timeout)
         try:
             conn.request(method, path, body=body, headers=headers or {})
             resp = conn.getresponse()
-            return resp.status, dict(resp.getheaders()), read_body(resp, limit, EsclError)
+            return resp.status, dict(resp.getheaders()), read_body(resp, limit, EsclError, deadline)
         finally:
             conn.close()
 
@@ -110,6 +115,14 @@ class EsclClient:
 
     def adf_loaded(self) -> bool:
         return self.status().get("adf") == "ScannerAdfLoaded"
+
+    def _cancel(self, path: str) -> None:
+        """Best effort: tell the printer to drop a job that did not end normally."""
+        try:
+            code, _, _ = self._request("DELETE", path, timeout=CLEANUP_TIMEOUT)
+            log.debug("DELETE %s -> HTTP %d", path, code)
+        except Exception as exc:   # never hide the original problem
+            log.debug("DELETE %s failed: %s", path, exc)
 
     def scan(self, settings: ScanSettings) -> list[bytes]:
         """Run a scan job and return all documents (one per page for JPEG/ADF)."""
@@ -125,27 +138,40 @@ class EsclClient:
         log.info("scan job %s", path)
         docs = []
         total = 0
-        while True:
-            if len(docs) >= MAX_DOCUMENTS or total >= MAX_JOB_BYTES:
-                log.warning("stopping after %d documents (size or count limit)", len(docs))
-                break
-            started = time.monotonic()
-            try:
-                code, _, data = self._request("GET", f"{path}/NextDocument",
-                                              limit=min(MAX_DOCUMENT_BYTES, MAX_JOB_BYTES - total))
-            except (OSError, EsclError) as exc:   # EsclError: document over the limit
-                if not docs:
-                    raise
-                # Keep what we already have if waiting for a further page fails.
-                log.warning("NextDocument after %d document(s) failed: %s", len(docs), exc)
-                break
-            log.debug("NextDocument -> HTTP %d after %.1fs", code, time.monotonic() - started)
-            if code == 200:
-                docs.append(data)
-                total += len(data)
-                log.info("received document %d (%d bytes)", len(docs), len(data))
-                continue
-            if code == 404 and docs:
-                break
-            raise EsclError(f"NextDocument: HTTP {code}")
+        clean_end = False   # the printer ended the job itself (404 after documents)
+        try:
+            while True:
+                if len(docs) >= MAX_DOCUMENTS or total >= MAX_JOB_BYTES:
+                    log.warning("stopping after %d documents (size or count limit)", len(docs))
+                    break
+                started = time.monotonic()
+                try:
+                    code, _, data = self._request(
+                        "GET", f"{path}/NextDocument",
+                        limit=min(MAX_DOCUMENT_BYTES, MAX_JOB_BYTES - total),
+                        deadline=DOCUMENT_DEADLINE)
+                except (OSError, EsclError) as exc:   # EsclError: over the limit
+                    if not docs:
+                        raise
+                    # Keep what we already have if waiting for a further page fails.
+                    log.warning("NextDocument after %d document(s) failed: %s", len(docs), exc)
+                    break
+                log.debug("NextDocument -> HTTP %d after %.1fs", code, time.monotonic() - started)
+                if code == 200:
+                    if not data:
+                        if docs:
+                            log.warning("empty document after %d document(s), stopping", len(docs))
+                            break
+                        raise EsclError("NextDocument: empty document")
+                    docs.append(data)
+                    total += len(data)
+                    log.info("received document %d (%d bytes)", len(docs), len(data))
+                    continue
+                if code == 404 and docs:
+                    clean_end = True
+                    break
+                raise EsclError(f"NextDocument: HTTP {code}")
+        finally:
+            if not clean_end:
+                self._cancel(path)
         return docs

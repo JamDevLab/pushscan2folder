@@ -1,7 +1,7 @@
 ﻿; Inno Setup script for the Windows installer of pushscan2folder.
 ; Built by .github/workflows/release.yml after PyInstaller made the folder
 ; dist\pushscan2folder:
-;   ISCC /DAppVersion=0.3.0 packaging\pushscan2folder.iss
+;   ISCC /DAppVersion=0.4.0 packaging\pushscan2folder.iss
 ; Installs for the current user only (no administrator rights), into
 ; %LOCALAPPDATA%\Programs\pushscan2folder, with Start menu entries and an
 ; entry under Settings > Apps for uninstalling.
@@ -45,6 +45,8 @@ Name: "de"; MessagesFile: "compiler:Languages\German.isl"
 en.RunSetup=Set up and start pushscan2folder
 de.RunSetup=pushscan2folder einrichten und starten
 en.DeleteSettings=Also delete the settings and the log of pushscan2folder?%n%nYour scans are not touched.
+en.StoppingInstance=Stopping pushscan2folder (a running scan is finished first, this can take a few minutes)...
+de.StoppingInstance=pushscan2folder wird beendet (ein laufender Scan wird zuerst abgeschlossen, das kann einige Minuten dauern)...
 de.DeleteSettings=Auch die Einstellungen und das Protokoll von pushscan2folder löschen?%n%nDeine Scans bleiben erhalten.
 
 [Tasks]
@@ -67,6 +69,14 @@ Filename: "{app}\{#Exe}"; Description: "{cm:RunSetup}"; Flags: postinstall nowai
 [Code]
 var
   WasRunning: Boolean;
+  StopPage: TOutputProgressWizardPage;
+
+{ Shown while an update waits for the background instance to stop. }
+procedure InitializeWizard;
+begin
+  StopPage := CreateOutputProgressPage(SetupMessage(msgWizardPreparing),
+                                       CustomMessage('StoppingInstance'));
+end;
 
 { Run the installed program without a window and without waiting for Enter. }
 function RunHidden(const Args: String): Integer;
@@ -88,11 +98,22 @@ begin
   begin
     WasRunning := RunHidden('status') = 0;
     if WasRunning then
-      RunHidden('stop');
+    begin
+      { `stop` waits for a running scan (up to 10 minutes) and has no timeout
+        option, and the installer window stays idle meanwhile: say why. }
+      StopPage.Show;
+      try
+        RunHidden('stop');
+      finally
+        StopPage.Hide;
+      end;
+    end;
   end;
 end;
 
-{ ... and start it again afterwards. }
+{ ... and start it again afterwards. Known limit: the background info file
+  keeps only the PID and the log file, not the options of the old instance, so
+  the restart uses the defaults (config file in %APPDATA%, default log file). }
 procedure CurStepChanged(CurStep: TSetupStep);
 begin
   if (CurStep = ssPostInstall) and WasRunning then

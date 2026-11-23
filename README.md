@@ -23,8 +23,8 @@ scans and saves the result as a PDF or JPEG file. Tested with a Canon PIXMA TR85
 
 - Adds a "scan to PC" entry to the printer panel
 - Several targets, each with its own folder
-- Multi-page PDFs from the glass, with the next-page dialog on the panel
-- Presets per target for the auto document type
+- Multi-page PDFs from the glass, with the next-page dialog on the panel; optionally the same dialog after a scan from the document feeder (`feeder_next_page`)
+- Settings per target for the auto document type, and a folder per document type
 - Optional password-protected web page for status, log, targets and settings
 - Docker and NAS ready, only outbound connections to the printer (TCP 80)
 - Photos: with the panel size "auto scan" or "auto multi scan" the photos are cut out of the glass scan, one file per photo (needs Pillow, optional)
@@ -67,7 +67,7 @@ The `docker-compose.yml` looks like this, so you can see what to change:
 ```yaml
 services:
   pushscan2folder:
-    image: ghcr.io/jamdevlab/pushscan2folder:latest   # or a fixed version, e.g. :0.3.0
+    image: ghcr.io/jamdevlab/pushscan2folder:latest   # or a fixed version, e.g. :0.4.0
     restart: unless-stopped
     user: "1000:1000"                    # owner of ./scans and ./config (id -u, id -g)
     environment:
@@ -90,33 +90,39 @@ port 8080. More in [Docker](docs/docker.md) and [Web page](docs/web.md).
 On plain Linux:
 
 ```sh
-PYTHONPATH=src python3 -m pushscan2folder --printer 192.168.1.50 run --output ./scans
+PYTHONPATH=src python3 -m pushscan2folder --printer 192.168.1.50 run --folder ./scans
 ```
 
 Then choose the host on the printer panel (scan to PC) and start the scan.
 
 ## Configuration
 
-Settings come from command line options, environment variables (`PUSHSCAN_*`)
-or a TOML file ([config.example.toml](config.example.toml)). The command line
-wins over the environment, and the environment wins over the file. The
-printer address is the only required setting.
+The printer panel decides colour, source (the feeder when paper is in it,
+else the glass) and, for the document types Document and Photo, size, format
+and resolution. The TOML file ([config.example.toml](config.example.toml))
+sets the rest: folders, file names, which document types ask for the next
+page, and the settings for document type Auto. Only the printer address and
+the base folder can also come from the command line or the environment
+(`--printer`, `--folder`, `PUSHSCAN_PRINTER`, `PUSHSCAN_FOLDER`). The printer
+address is the only required setting. `pushscan2folder check` shows what a
+file does.
 
 A minimal file with two targets:
 
 ```toml
 printer = "192.168.1.50"
+folder = "/scans"
 
 [[target]]
 name = "Scans"
 
 [[target]]
 name = "Paperless"
-output = "consume"
+folder = "consume"
 ```
 
-The full option table, targets and presets, trimming, multi-page scans and
-panel settings are in [docs/configuration.md](docs/configuration.md).
+The full key table, folders, the next page dialog (also after the feeder), trimming and panel
+settings are in [docs/configuration.md](docs/configuration.md).
 
 ## Web page
 
@@ -134,7 +140,7 @@ instructions above are the closest match.
 
 ## More documentation
 
-- [Configuration](docs/configuration.md): options, config file, targets, presets, trim, multi-page
+- [Configuration](docs/configuration.md): options, config file, targets, folders, trim, next page dialog
 - [Web page](docs/web.md): pages, passwords, security, HTTPS
 - [Docker](docs/docker.md): compose, user, volumes, paperless-ngx, NAS
 - [Troubleshooting](docs/troubleshooting.md): limitations and common problems

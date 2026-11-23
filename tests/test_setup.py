@@ -10,6 +10,7 @@ from unittest import mock
 
 from pushscan2folder import __main__ as cli
 from pushscan2folder import autostart, wizard
+from pushscan2folder.platform_support import windows_program
 from pushscan2folder.config import Config, ConfigError, dump_config, load_config_text
 
 from support import assert_mode
@@ -27,9 +28,9 @@ class DefaultCommandTests(unittest.TestCase):
         self.assertEqual((args.cmd, args.printer, args.verbose), ("run", "192.0.2.1", True))
 
     def test_run_options_without_subcommand(self):
-        args, _ = cli.parse_args(["--output", "x", "--printer", "192.0.2.1", "--web"])
+        args, _ = cli.parse_args(["--folder", "x", "--printer", "192.0.2.1", "--web"])
         self.assertEqual(args.cmd, "run")
-        self.assertEqual(args.output, Path("x"))
+        self.assertEqual(args.folder, Path("x"))
         self.assertTrue(args.web)
         self.assertEqual(args.printer, "192.0.2.1")
 
@@ -41,8 +42,52 @@ class DefaultCommandTests(unittest.TestCase):
     def test_option_value_that_looks_like_a_command(self):
         args, _ = cli.parse_args(["--name", "scan", "--printer", "192.0.2.1"])
         self.assertEqual((args.cmd, args.name), ("run", "scan"))
-        args, _ = cli.parse_args(["--printer", "192.0.2.1", "--output", "scan"])
-        self.assertEqual((args.cmd, args.output), ("run", Path("scan")))
+        args, _ = cli.parse_args(["--printer", "192.0.2.1", "--folder", "scan"])
+        self.assertEqual((args.cmd, args.folder), ("run", Path("scan")))
+
+    def test_scan_accepts_color_and_resolution(self):
+        args, _ = cli.parse_args(["--printer", "192.0.2.1", "scan", "--color", "gray",
+                                  "--resolution", "600", "--format", "jpeg",
+                                  "--source", "adf", "--folder", "out"])
+        self.assertEqual((args.cmd, args.color, args.resolution, args.format, args.source),
+                         ("scan", "gray", 600, "jpeg", "adf"))
+        self.assertEqual(args.folder, Path("out"))
+        settings = cli.fallback_settings(args, Config())
+        self.assertEqual((settings.color, settings.resolution, settings.fmt, settings.source),
+                         ("gray", 600, "jpeg", "adf"))
+
+    def test_scan_rejects_an_unknown_resolution(self):
+        with mock.patch("sys.stderr", io.StringIO()), self.assertRaises(SystemExit):
+            cli.parse_args(["--printer", "192.0.2.1", "scan", "--resolution", "123"])
+
+    def test_removed_run_options_are_refused(self):
+        for option in ("--output", "--multipage", "--targets", "--color"):
+            with mock.patch("sys.stderr", io.StringIO()), self.assertRaises(SystemExit):
+                cli.parse_args(["--printer", "192.0.2.1", "run", option, "x"])
+
+    def test_environment_folder_overrides_the_config(self):
+        with tempfile.TemporaryDirectory() as d:
+            path = Path(d) / "c.toml"
+            path.write_text('printer = "192.0.2.1"\nfolder = "from_file"\n', encoding="utf-8")
+            args, _ = cli.parse_args(["--config", str(path)])
+            self.assertEqual(args.folder, Path("from_file"))
+            with mock.patch.dict(os.environ, {"PUSHSCAN_FOLDER": "from_env"}):
+                args, _ = cli.parse_args(["--config", str(path)])
+                self.assertEqual(args.folder, Path("from_env"))
+                args, _ = cli.parse_args(["--config", str(path), "--folder", "from_cli"])
+                self.assertEqual(args.folder, Path("from_cli"))
+
+    def test_web_overrides_reports_printer_and_folder_only(self):
+        args, _ = cli.parse_args(["--printer", "192.0.2.1"])
+        self.assertEqual(cli.web_overrides(args, ["--printer", "192.0.2.1"]),
+                         {"printer": "command line option --printer"})
+        with mock.patch.dict(os.environ, {"PUSHSCAN_FOLDER": "x", "PUSHSCAN_WEB_PORT": "9"}):
+            overrides = cli.web_overrides(args, ["--web-port", "9", "run", "--fold=y"])
+        self.assertEqual(set(overrides), {"folder"})
+        self.assertIn("command line option --folder", overrides["folder"])
+        with mock.patch.dict(os.environ, {"PUSHSCAN_FOLDER": "x"}):
+            self.assertEqual(cli.web_overrides(args, [])["folder"],
+                             "environment variable PUSHSCAN_FOLDER")
 
     def test_no_arguments_is_run(self):
         args, _ = cli.parse_args([])
@@ -200,10 +245,10 @@ class SetupTests(unittest.TestCase):
         self.assertIn("USER  PC", "".join(io_.questions))
         cfg = load_config_text(self.path.read_text(encoding="utf-8"))
         self.assertEqual(cfg.printer, "192.0.2.7")
-        self.assertEqual(cfg.output, out_dir)
+        self.assertEqual(cfg.folder, out_dir)
         self.assertEqual([t.name for t in cfg.targets], ["USER  PC"])
-        self.assertEqual(cfg.targets[0].output, ".")  # one target: no subfolder
-        self.assertEqual(cfg.build_targets(out_dir, "off")[0].outdir, out_dir)
+        self.assertEqual(cfg.targets[0].folder, ".")  # one target: no subfolder
+        self.assertEqual(cfg.build_targets(out_dir)[0].outdir, out_dir)
         self.assertIn(f"go to: {out_dir}", io_.text)
         self.assertFalse(cfg.web_enabled)
         assert_mode(self, self.path, 0o600)
@@ -323,13 +368,13 @@ class SetupTests(unittest.TestCase):
     def test_existing_targets_are_left_alone(self):
         self.path.parent.mkdir(parents=True)
         self.path.write_text('printer = "192.0.2.1"\n\n[[target]]\nname = "Mine"\n'
-                             'output = "mine"\n', encoding="utf-8")
+                             'folder = "mine"\n', encoding="utf-8")
         # 2 = change, printer, web no, start no
         start, io_, _ = self.run_setup(["2", "192.0.2.2", "n", "n"])
         self.assertFalse(start)
         cfg = load_config_text(self.path.read_text())
         self.assertEqual(cfg.printer, "192.0.2.2")
-        self.assertEqual([(t.name, t.output) for t in cfg.targets], [("Mine", "mine")])
+        self.assertEqual([(t.name, t.folder) for t in cfg.targets], [("Mine", "mine")])
         self.assertIn("stay as they are", io_.text)
         self.assertNotIn("Panel name", "".join(io_.questions))
 
@@ -346,12 +391,12 @@ class SetupTests(unittest.TestCase):
 
     def test_change_offers_no_subfolder_for_a_single_target(self):
         self.path.parent.mkdir(parents=True)
-        self.path.write_text('printer = "192.0.2.1"\noutput = "s"\n\n[[target]]\nname = "PC"\n',
+        self.path.write_text('printer = "192.0.2.1"\nfolder = "s"\n\n[[target]]\nname = "PC"\n',
                              encoding="utf-8")
         # 2 = change, printer (keep), straight into s? yes (default), web no, start no
         _, io_, _ = self.run_setup(["2", "", "", "n", "n"])
         cfg = load_config_text(self.path.read_text())
-        self.assertEqual(cfg.targets[0].output, ".")
+        self.assertEqual(cfg.targets[0].folder, ".")
         self.assertIn("instead of", "".join(io_.questions))
 
     def test_existing_config_choice_is_asked_again(self):
@@ -363,14 +408,14 @@ class SetupTests(unittest.TestCase):
 
     def test_start_over_keeps_a_backup(self):
         self.path.parent.mkdir(parents=True)
-        original = 'printer = "192.0.2.1"\n\n[[target]]\nname = "Old"\noutput = "old"\n'
+        original = 'printer = "192.0.2.1"\n\n[[target]]\nname = "Old"\nfolder = "old"\n'
         self.path.write_text(original, encoding="utf-8")
         out_dir = self.dir / "new"
         # 3 = start over, printer, name, folder, web no, start no
         self.run_setup(["3", "192.0.2.5", "New", str(out_dir), "n", "n"])
         cfg = load_config_text(self.path.read_text())
-        self.assertEqual([(t.name, t.output) for t in cfg.targets], [("New", ".")])
-        self.assertEqual(cfg.output, out_dir)
+        self.assertEqual([(t.name, t.folder) for t in cfg.targets], [("New", ".")])
+        self.assertEqual(cfg.folder, out_dir)
         self.assertEqual(self.path.with_name("config.toml.bak").read_text(), original)
         # a second start over keeps the first copy
         self.run_setup(["3", "192.0.2.6", "Newer", str(out_dir), "n", "n"])
@@ -432,20 +477,22 @@ class SetupTests(unittest.TestCase):
             self.assertEqual(cli.main(["setup"]), 1)
 
 
-class FilenameOptionTests(unittest.TestCase):
+class FilenameConfigTests(unittest.TestCase):
     def test_invalid_template_exits_2(self):
         err = io.StringIO()
         tmp = tempfile.TemporaryDirectory()
         self.addCleanup(tmp.cleanup)
         env = {k: v for k, v in os.environ.items() if not k.startswith("PUSHSCAN_")}
         env.update(XDG_CONFIG_HOME=tmp.name, APPDATA=tmp.name)
+        path = Path(tmp.name) / "c.toml"
+        path.write_text('printer = "192.0.2.1"\nfilename = "{x}"\n', encoding="utf-8")
         with mock.patch.dict(os.environ, env, clear=True), \
                 mock.patch("pushscan2folder.__main__.greeting", return_value=None), \
                 mock.patch("pushscan2folder.__main__.pause_before_exit"), \
                 mock.patch.object(sys, "stderr", err):
-            code = cli.main(["--printer", "192.0.2.1", "--filename", "{x}"])
+            code = cli.main(["--config", str(path)])
         self.assertEqual(code, 2)
-        self.assertIn("--filename", err.getvalue())
+        self.assertIn("filename", err.getvalue())
 
 
 class HealthTests(unittest.TestCase):
@@ -479,6 +526,8 @@ class GreetingTests(unittest.TestCase):
         self.dir = Path(tmp.name)
         env = {k: v for k, v in os.environ.items() if not k.startswith("PUSHSCAN_")}
         env.update(XDG_CONFIG_HOME=tmp.name, APPDATA=tmp.name)
+        path = Path(tmp.name) / "c.toml"
+        path.write_text('printer = "192.0.2.1"\nfilename = "{x}"\n', encoding="utf-8")
         for patcher in (mock.patch.dict(os.environ, env, clear=True), mock.patch("sys.stdin")):
             started = patcher.start()
             self.addCleanup(patcher.stop)
@@ -620,11 +669,11 @@ class GreetingTests(unittest.TestCase):
         with mock.patch.object(desktop, "is_windows", return_value=True):
             popen = mock.Mock()
             desktop.open_path(path, popen=popen, has_program=lambda s: s == ".toml")
-            self.assertEqual(popen.call_args[0][0], ["explorer.exe", str(path)])
+            self.assertEqual(popen.call_args[0][0], [windows_program("explorer.exe"), str(path)])
             self.assertTrue(popen.call_args[1]["creationflags"] & desktop.DETACHED_PROCESS)
             popen = mock.Mock()
             desktop.open_path(path, popen=popen, has_program=lambda s: False)
-            self.assertEqual(popen.call_args[0][0], ["notepad.exe", str(path)])
+            self.assertEqual(popen.call_args[0][0], [windows_program("notepad.exe"), str(path)])
             # The terminal's job forbids leaving it: start without that flag.
             popen = mock.Mock(side_effect=[OSError("denied"), None])
             desktop.open_path(path, popen=popen, has_program=mock.Mock(side_effect=OSError))

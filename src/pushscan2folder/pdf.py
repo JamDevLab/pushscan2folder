@@ -12,20 +12,36 @@ def jpeg_info(data: bytes) -> tuple[int, int, int, tuple[int, int] | None]:
         raise ValueError("not a JPEG")
     dpi = None
     pos = 2
-    while pos + 4 <= len(data):
+    while pos + 2 <= len(data):
         if data[pos] != 0xFF:
             raise ValueError(f"bad JPEG marker at {pos}")
         marker = data[pos + 1]
-        if marker == 0xFF:
+        if marker == 0xFF:  # fill byte
             pos += 1
             continue
+        if marker == 0x01 or 0xD0 <= marker <= 0xD8:  # standalone, no length
+            pos += 2
+            continue
+        if marker in (0xD9, 0xDA):  # end of image, start of scan: no frame header before
+            break
+        if pos + 4 > len(data):
+            raise ValueError("truncated JPEG")
         (length,) = struct.unpack_from(">H", data, pos + 2)
+        if length < 2 or pos + 2 + length > len(data):
+            raise ValueError(f"bad JPEG segment length at {pos}")
         seg = data[pos + 4:pos + 2 + length]
         if marker == 0xE0 and seg.startswith(b"JFIF\0") and len(seg) >= 12 and seg[7] == 1:
             dpi = struct.unpack_from(">HH", seg, 8)
         if marker in SOF_MARKERS:
+            if len(seg) < 6:
+                raise ValueError("truncated JPEG frame header")
             height, width = struct.unpack_from(">HH", seg, 1)
-            return width, height, seg[5], dpi
+            comps = seg[5]
+            if width == 0 or height == 0:
+                raise ValueError("JPEG with zero size")
+            if comps not in (1, 3, 4):
+                raise ValueError(f"unsupported JPEG component count {comps}")
+            return width, height, comps, dpi
         pos += 2 + length
     raise ValueError("no JPEG frame header")
 

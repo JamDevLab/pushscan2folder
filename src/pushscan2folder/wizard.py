@@ -28,7 +28,7 @@ EXISTING_CHOICES = {"1": "use", "2": "change", "3": "new"}
 
 def target_folder(base: Path, spec: TargetSpec) -> Path:
     """Where the scans of `spec` end up (as Config.build_targets does it)."""
-    return base / (spec.output if spec.output else safe_dirname(spec.name))
+    return base / (spec.folder if spec.folder else safe_dirname(spec.name))
 
 
 def password_problem(password: str) -> str | None:
@@ -245,7 +245,7 @@ class Setup:
     # --- an existing config file ----------------------------------------------
 
     def show(self, cfg: Config) -> None:
-        base = Path(cfg.output or platform_support.default_output())
+        base = Path(cfg.folder or platform_support.default_output())
         self.out(f"Found the config file {link(self.path)}")
         self.out(f"  printer: {cfg.printer or 'not set'}")
         for spec in cfg.targets:
@@ -266,13 +266,13 @@ class Setup:
     def ask_same_folder(self, cfg: Config) -> None:
         """One target that saves into a subfolder of its name (older setups):
         offer to save straight into the output folder instead."""
-        if len(cfg.targets) != 1 or cfg.targets[0].output:
+        if len(cfg.targets) != 1 or cfg.targets[0].folder:
             return
         spec = cfg.targets[0]
-        base = Path(cfg.output or platform_support.default_output())
+        base = Path(cfg.folder or platform_support.default_output())
         if self.yes_no(f"Save the scans straight into {base} instead of "
                        f"{target_folder(base, spec)}?", True):
-            spec.output = SAME_FOLDER
+            spec.folder = SAME_FOLDER
 
     def backup(self) -> None:
         """Keep a copy of the old file before it is replaced."""
@@ -320,10 +320,10 @@ class Setup:
         else:
             name = self.ask_name(self.default_name)
             output = self.ask("Folder for scans",
-                              str(cfg.output or platform_support.default_output()))
-            cfg.output = Path(output)
+                              str(cfg.folder or platform_support.default_output()))
+            cfg.folder = Path(output)
             # one target: the scans go straight into that folder, no subfolder
-            cfg.targets = [TargetSpec(name, output=SAME_FOLDER)]
+            cfg.targets = [TargetSpec(name, folder=SAME_FOLDER)]
         self.ask_web(cfg)
         self.ask_open_after_scan(cfg)
         log_path = platform_support.default_log_path()
@@ -346,7 +346,7 @@ class Setup:
         out("Setup done.")
         out(f"  Config file: {link(self.path)}")
         out(f"  Printer:     {cfg.printer}")
-        base = Path(cfg.output or platform_support.default_output())
+        base = Path(cfg.folder or platform_support.default_output())
         for spec in cfg.targets:
             out(f"  Scans of '{spec.name}' go to: {link(target_folder(base, spec))}")
         if cfg.web_enabled:

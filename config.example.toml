@@ -1,93 +1,68 @@
 # Example configuration for pushscan2folder.
 #
-# Default location: ~/.config/pushscan2folder/config.toml
-# (or $XDG_CONFIG_HOME/pushscan2folder/config.toml; on Windows
-# %APPDATA%\pushscan2folder\config.toml), or pass --config PATH /
-# set PUSHSCAN_CONFIG. Precedence: command line > PUSHSCAN_* env vars > this file >
-# built-in defaults. Every key is optional.
-# Docker (docker-compose.yml): this file is ./config/config.toml, and
-# PUSHSCAN_PRINTER from the compose file wins over "printer" below.
+# Where this file lives: ~/.config/pushscan2folder/config.toml on Linux,
+# %APPDATA%\pushscan2folder\config.toml on Windows, or the path in
+# --config / PUSHSCAN_CONFIG. In Docker: ./config/config.toml.
+# Every key is optional. Changes are used while the program runs.
+#
+# The printer panel decides the colour (the start button you press), the
+# source (the document feeder when paper is in it, else the glass) and, for
+# the document types "Document" and "Photo", size, format and resolution.
+# This file sets the rest: folders, file names, the "next page" dialog and
+# the settings for document type "Auto".
 
-printer = "192.168.1.50"   # printer IP or host name (--printer)
-output = "/scans"          # base output folder (--output)
+printer = "192.168.1.50"                 # printer IP address or host name
+folder = "/scans"                        # base folder of all targets
 
-# Scan settings used where the printer panel sends nothing.
-[defaults]
-resolution = 300           # 75 | 150 | 300 | 600
-color = "color"            # color | gray
-format = "pdf"             # pdf | jpeg
-source = "auto"            # auto | platen | adf
-size = "a4"                # a4 | letter | legal | 10x15 | 13x18
-open_after_scan = false    # true: open the folder after a scan (desktop PC only)
-# File name of a scan without extension (--filename / PUSHSCAN_FILENAME).
-# Fields: {name} (panel name), {date} (2026-11-22), {time} (183005) and
-# {now:FORMAT} with strftime codes. Existing files are never overwritten (-1, -2 ...).
-# A [[target]] can set its own filename, it wins over this one.
-# Date and time codes: %Y year, %m month, %d day, %H hour, %M minute, %S second.
-filename = "scan_{now:%Y-%m-%d_%H-%M-%S}"   # e.g. scan_2026-11-22_18-30-05.pdf
-
-# Document type "Document" on the printer panel (Doc. type).
-[defaults.document]
-multipage = true           # ask on the panel for more pages after each one
-
-# Document type "Auto" on the printer panel. The panel sends no size, format
-# or resolution then, so [defaults] and [target.auto] decide. ("Photo" needs
-# no table: the panel sends all of its settings itself.)
-[defaults.auto]
-multipage = false
+# Defaults for all targets
+# File name without extension. Fields: {name} (panel name), {date}
+# (2026-11-22), {time} (183005), {now:...} with %Y %m %d %H %M %S.
+# Existing files are never overwritten (-1, -2 ... is added).
+filename = "scan_{now:%Y-%m-%d_%H-%M-%S}"
+# Document types that get the "next page" dialog for scans on the glass:
+# "document", "auto", "photo". The feeder scans all pages in one go.
+next_page = ["document"]
+# Optional: the same dialog after a scan from the document feeder, to check
+# the page count (the feeder sometimes pulls two sheets). Adds about 10 s per
+# round. Off by default.
+# feeder_next_page = ["document"]
+# Document type "Auto": the panel sends no settings, these are used.
+# resolution 75 | 150 | 300 | 600, format "pdf" | "jpeg",
+# size "a4" | "letter" | "legal" | "10x15" | "13x18"
+auto = { resolution = 300, format = "pdf", size = "a4" }
+open_after_scan = false                  # desktop PC only: show the new file
 
 # Rarely needed.
 [advanced]
-interval = 4               # poll interval in seconds
-verbose = false            # debug log; needs a restart
-ignore_panel = false       # true: always use [defaults], ignore the panel
-# Trim: cut off a border at the glass edge by scanning a smaller area
-# (platen only, not the ADF). In mm, 0 to 50; 0 means no trim.
-trim_left = 0              # mm
-trim_top = 0               # mm
-trim_right = 1             # mm; tested on a TR8550
-trim_bottom = 2            # mm; tested on a TR8550
+interval = 4                             # seconds between polls
+verbose = false                          # debug log, needs a restart
+# Cut off a border by scanning a smaller area, mm per side (0 to 50).
+trim = { right = 1, bottom = 2 }         # glass; tested on a TR8550
+adf_trim = { }                           # document feeder
 
-# Optional web page (status, log, target editor). The password is NOT stored
-# here: put it in a file of its own (`pushscan2folder setup` does this) and
-# name the file. The web page shows this table but cannot change it.
-# Precedence: --web / --web-port / --web-bind and PUSHSCAN_WEB* win over it.
+# Optional web page (status, log, target and settings editor). The password
+# is not stored here: `pushscan2folder setup` writes it to a file of its own.
 # [web]
 # enabled = true
-# bind = "127.0.0.1"         # only this PC; 0.0.0.0 = reachable from the network
+# bind = "127.0.0.1"                     # this PC only; 0.0.0.0 = the network
 # port = 8737
-# password_file = "web_password.txt"   # relative to this config file
+# password_file = "web_password.txt"     # relative to this file
 
-# One [[target]] per entry on the printer panel (name: max 31 chars, unique).
+# One [[target]] per entry on the printer panel (name: max 31 characters).
+# folder is relative to the base folder unless absolute; without it the
+# folder is named after the target.
 
-# All defaults: scans go to /scans/Scans
 [[target]]
-name = "Scans"
+name = "Scans"                           # scans go to /scans/Scans
 
-# Folder /scans/Paperless (for paperless-ngx, mount its consume folder
-# there), multi-page dialog for document type "Document", and a preset for
-# "Auto scan" (the preset wins over the panel there).
 [[target]]
-name = "Paperless"
-# filename = "archive_{now:%Y%m%d}"   # this target only, e.g. archive_20261122.pdf
-open_after_scan = false   # this target only: never open after a scan
+name = "Paperless"                       # mount the paperless-ngx consume folder here
+next_page = ["document", "auto"]         # also ask for more pages with "Auto"
+photo_folder = "Photos"                  # photos of this entry go to /scans/Photos
 
-[target.document]
-multipage = true
-
-[target.auto]
-resolution = 300
-format = "pdf"
-multipage = true           # dialog for auto scan too
-
-# Relative output is resolved against the base output (/scans/archive).
 [[target]]
 name = "Archive"
-output = "archive"   # a subfolder of the scan folder (output)
-
-[target.document]
-multipage = false
-
-[target.auto]
-resolution = 600
-format = "jpeg"
+folder = "Archive/{now:%Y}"              # one folder per year
+next_page = []                           # never ask for more pages
+feeder_next_page = ["document"]          # but check the page count after the feeder
+auto = { resolution = 600, format = "jpeg" }

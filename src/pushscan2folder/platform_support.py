@@ -5,6 +5,7 @@ are the Windows rules and are applied on every platform, so a config written
 on Linux also works when it is copied to Windows."""
 from __future__ import annotations
 
+import ntpath
 import os
 import re
 import sys
@@ -18,6 +19,23 @@ def is_windows() -> bool:
 
 def is_macos() -> bool:
     return sys.platform == "darwin"
+
+
+# Where the Windows helper programs live, below %SystemRoot%.
+_WINDOWS_PROGRAMS = {
+    "explorer.exe": "",
+    "powershell.exe": r"System32\WindowsPowerShell\v1.0",
+}
+
+
+def windows_program(name: str) -> str:
+    """Absolute path of a Windows system program (reg.exe, taskkill.exe,
+    powershell.exe, explorer.exe, notepad.exe). A bare name would make
+    CreateProcess look in the program folder and the current directory first,
+    where a planted file could win. Built with ntpath, so it also works in
+    tests on other systems."""
+    root = os.environ.get("SystemRoot") or r"C:\Windows"
+    return ntpath.join(root, _WINDOWS_PROGRAMS.get(name, "System32"), name)
 
 
 def default_config_path() -> Path:

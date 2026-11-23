@@ -17,9 +17,9 @@ Zurück zur [README](../README.de.md).
    32 Bytes Einstellungen vom Bedienfeld. Das Tool scannt mit diesen
    Einstellungen, entweder über Canons eigenes Scanner-Protokoll (mehrseitige
    Scans vom Vorlagenglas, siehe
-   [Konfiguration](configuration.de.md#mehrseitige-scans-vom-vorlagenglas))
+   [Konfiguration](configuration.de.md#dialog-für-die-nächste-seite))
    oder über eSCL. Es schreibt
-   `scan_YYYYmmdd_HHMMSS[_NN].pdf|jpg` in das Ausgabeverzeichnis und
+   `scan_YYYYmmdd_HHMMSS[_NN].pdf|jpg` in den Ordner des Ziels und
    überschreibt nie vorhandene Dateien. Wählst du am Bedienfeld einen Namen aus,
    ohne einen Scan zu starten, passiert nichts.
 4. Freigeben. Bei SIGINT/SIGTERM gibt das Tool die Sitzung frei.

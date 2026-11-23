@@ -216,24 +216,24 @@ class MultipageModeTests(unittest.TestCase):
         return svc.use_native(svc.settings_for(interrupt), interrupt)  # no target: global modes
 
     def test_modes(self):
-        from pushscan2folder.__main__ import MULTIPAGE_MODES as M
-        self.assertTrue(self.check(M["document"], self.DOCUMENT))
-        self.assertFalse(self.check(M["document"], self.AUTO))
-        self.assertTrue(self.check(M["auto"], self.AUTO))
-        self.assertFalse(self.check(M["auto"], self.DOCUMENT))
-        self.assertTrue(self.check(M["both"], self.AUTO))
-        self.assertFalse(self.check(M["off"], self.DOCUMENT))
-        self.assertFalse(self.check(M["both"], self.ADF_DOC))  # ADF stays eSCL
+        document, auto = frozenset({"document"}), frozenset({"auto"})
+        both, off = frozenset({"document", "auto"}), frozenset()
+        self.assertTrue(self.check(document, self.DOCUMENT))
+        self.assertFalse(self.check(document, self.AUTO))
+        self.assertTrue(self.check(auto, self.AUTO))
+        self.assertFalse(self.check(auto, self.DOCUMENT))
+        self.assertTrue(self.check(both, self.AUTO))
+        self.assertFalse(self.check(off, self.DOCUMENT))
+        self.assertFalse(self.check(both, self.ADF_DOC))  # ADF stays eSCL
 
-    def test_env_aliases(self):
-        import os
-        from pushscan2folder import __main__ as cli
-        for value, mode in (("1", "document"), ("no", "off"), ("Both", "both")):
-            os.environ["PUSHSCAN_MULTIPAGE"] = value
-            try:
-                self.assertEqual(cli.multipage_env(), mode)
-            finally:
-                del os.environ["PUSHSCAN_MULTIPAGE"]
+    def test_photo_is_a_mode_too(self):
+        photo = bytes.fromhex("0000000001010201010000000000000000000000000000000000000000000000")
+        photo_10x15 = bytes.fromhex("0000000001010201010008030301010200000000000000000000000000000000")
+        photo_auto = bytes.fromhex("000000000101020101000b030301010200000000000000000000000000000000")
+        self.assertTrue(self.check(frozenset({"photo"}), photo))
+        self.assertFalse(self.check(frozenset({"photo"}), photo_auto))  # cut-out wins
+        self.assertTrue(self.check(frozenset({"photo"}), photo_10x15))
+        self.assertFalse(self.check(frozenset({"document"}), photo_10x15))
 
 
 class PdfTests(unittest.TestCase):

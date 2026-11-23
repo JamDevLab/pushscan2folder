@@ -41,8 +41,8 @@ melden, siehe [CONTRIBUTING.md](../CONTRIBUTING.md) (auf Englisch).
   *Automatisch* zurück. Prüfe ihn daher vor dem nächsten mehrseitigen Scan.
 - Mehrseitige Scans sind mit A4 bei 300 dpi geprüft. Andere Auflösungen und
   Größen nutzen dieselben Parameter, sind aber noch nicht getestet.
-- Getestete Zuschnittwerte für den TR8550: `trim_right = 1` und
-  `trim_bottom = 2` (mm), siehe [Rand abschneiden](configuration.de.md#rand-abschneiden).
+- Getestete Zuschnittwerte für den TR8550: `trim = { right = 1, bottom = 2 }`
+  (mm), siehe [Rand abschneiden](configuration.de.md#rand-abschneiden).
 - Wählst du am Bedienfeld einen Namen aus, ohne einen Scan zu starten, passiert
   nichts.
 - Der Drucker verwirft eine Registrierung nach etwa 60 s ohne Abfrage. Das Tool
@@ -83,25 +83,27 @@ melden, siehe [CONTRIBUTING.md](../CONTRIBUTING.md) (auf Englisch).
   siehe [Client-Adresse im Log](docker.de.md#client-adresse-im-log).
 - Der Scan hat einen unerwarteten Dateinamen: siehe
   [Dateinamen](configuration.de.md#dateinamen). Das `filename` eines Ziels hat
-  Vorrang vor `[defaults]`, und `PUSHSCAN_FILENAME` oder `--filename` haben
-  Vorrang vor der Konfigurationsdatei.
+  Vorrang vor dem globalen `filename`.
 - Der Name erscheint nicht auf dem Bedienfeld: Namen mit anderen Zeichen als
   Buchstaben, Ziffern, Leerzeichen, `-`, `_` und `@` werden abgelehnt, siehe
   [Namen auf dem Bedienfeld](configuration.de.md#namen-auf-dem-bedienfeld).
   Nach einem Neustart des Druckers erscheinen die Namen nach etwa 10 s wieder.
-- Eine Voreinstellung hat keine Farbe: Die Farbe kommt immer vom Bedienfeld,
-  siehe [Voreinstellungen pro Ziel](configuration.de.md#voreinstellungen-pro-ziel).
-- Der Dialog für mehrseitige Scans erscheint nicht: Er wird nur bei Scans vom
-  Vorlagenglas gezeigt, standardmäßig nur für den Dokumenttyp *Dokument*, und
-  nicht mit `--ignore-panel`. Siehe
-  [Mehrseitige Scans](configuration.de.md#mehrseitige-scans-vom-vorlagenglas).
-- Scans lassen sich in Docker nicht schreiben: Das Ausgabeverzeichnis muss für
+- Die `auto`-Einstellungen haben keine Farbe: Die Farbe kommt immer vom
+  Bedienfeld, siehe [Dokumenttyp Auto](configuration.de.md#dokumenttyp-auto).
+- Der Dialog für die nächste Seite erscheint nicht: Er wird nur bei Scans vom
+  Vorlagenglas gezeigt und nur für die Dokumenttypen in `next_page`
+  (standardmäßig nur *Dokument*). Bei *Foto* mit den Größen *auto scan* und
+  *auto multi scan* erscheint er nie. Nach einem Scan aus dem Einzug erscheint er nur, wenn
+  `feeder_next_page` den Dokumenttyp enthält. Siehe
+  [Dialog für die nächste Seite](configuration.de.md#dialog-für-die-nächste-seite).
+- Scans lassen sich in Docker nicht schreiben: Der Basisordner muss für
   den Container-Benutzer beschreibbar sein, siehe
   [Benutzer, UID und GID](docker.de.md#benutzer-uid-und-gid).
 - Die Weboberfläche startet nicht: siehe
   [Passwort-Optionen](web.de.md#passwort-optionen). Formulare, die hinter einem
   Reverse-Proxy mit "Origin does not match Host" abgelehnt werden: siehe
   [HTTPS](web.de.md#https-hinter-einem-reverse-proxy).
-- Die Ziele lassen sich auf der Weboberfläche nicht bearbeiten: Das Bearbeiten
-  ist abgeschaltet, wenn sie aus `PUSHSCAN_TARGETS` / `--targets` kommen, siehe
-  [Ziele und Ordner bearbeiten](web.de.md#ziele-und-ordner-bearbeiten).
+- Eine Einstellung aus der Konfigurationsdatei wirkt nicht: `pushscan2folder
+  check` zeigt, was die Datei bewirkt, und `PUSHSCAN_FOLDER` oder
+  `PUSHSCAN_PRINTER` (wie im Docker-Image gesetzt) überschreiben `folder` und
+  `printer`, siehe [Vorrang](configuration.de.md#vorrang).

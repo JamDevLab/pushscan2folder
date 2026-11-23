@@ -130,9 +130,9 @@ and descreen are 0 (not applicable). With the sizes auto scan (0x0b) and auto
 multi scan (0x0c) the printer sends the whole glass. The PC cuts out the photos
 (see [Photos](configuration.md#photos)).
 
-The printer enforces some panel restrictions, not the protocol: compact PDF
-cannot be combined with unsharp mask or bleed-through reduction, and the panel
-shows a warning until the unsharp mask is switched off.
+The panel enforces some restrictions itself: compact PDF cannot be combined
+with unsharp mask or bleed-through reduction, and the panel shows a warning
+until the unsharp mask is switched off.
 
 The ADF orientation setting (portrait / landscape) did not change the data
 when scanning from the platen.
@@ -152,7 +152,10 @@ settings. The scan itself uses eSCL (AirScan), an open HTTP protocol:
    with a `Location` header.
 2. `GET <Location>/NextDocument` until `404`. The platen delivers one
    document; the ADF delivers one PDF with all pages.
-3. `GET /eSCL/ScannerStatus` reports `ScannerAdfLoaded` when paper is in the
+3. If the job does not end with that `404` (an error, a size limit, an empty
+   document), the program sends `DELETE <Location>` (the eSCL way to cancel
+   a job) and ignores its answer. Not yet observed on the TR8550.
+4. `GET /eSCL/ScannerStatus` reports `ScannerAdfLoaded` when paper is in the
    feeder.
 
 Notes for the TR8550:
@@ -268,11 +271,19 @@ byte of the answer is:
 |-------|---------|
 | `0x00` | no decision yet |
 | `0x01` | *Colour*: scan another page in colour |
-| `0x02` | *Black and white*: scan another page in black and white |
+| `0x02` | *Black and white*: scan another page in black and white (confirmed on the TR8550) |
 | `0xff` | *Finish* or *Stop* (identical answer `ff 00 00 00 00 00 00 01`) |
 
 For another page the PC sends `0xf320`, `0xd820`, `0xd920` again and reads
 the next image; to finish it sends `0xef20` and `EndJob`.
+
+`0xec20` only works after a page was scanned in the same native job. In a job
+in which no page was scanned the printer answers with status `0x1515`
+(cancelled) at once. After one scanned page the dialog appears. This is why a
+dialog after an eSCL feeder scan needs a dummy page first: the program scans a
+tiny area (1 x 1 inch at 150 dpi) from the glass in a native job, throws the
+image away, and then asks `0xec20`. After `0xef20` and `EndJob` a new eSCL
+feeder job starts right away. Observed on the TR8550.
 
 ### Sequence of a two-page scan
 

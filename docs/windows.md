@@ -35,7 +35,7 @@ Start "pushscan2folder" from the Start menu (or the desktop icon, or `pushscan2f
 - whether to open the folder after each scan (default yes, see [Open the folder after a scan](#open-the-folder-after-a-scan)),
 - whether to start the program automatically when you log in (default yes).
 
-Then it writes `%APPDATA%\pushscan2folder\config.toml`, shows where everything is and asks "Run in the background now?" (default yes, see below). If you answer no, it asks "Start now?" and runs in the console window. The web password is not stored in `config.toml` but in `web_password.txt` next to it. `%APPDATA%` belongs to your user account only.
+Then it writes `%APPDATA%\pushscan2folder\config.toml`, shows where everything is and asks "Run in the background now?" (default yes, see below). If you answer no, it asks "Start now?" and runs in the console window. The web password is stored in `web_password.txt` next to `config.toml`. `%APPDATA%` belongs to your user account only.
 
 The next time you start it by double click or from the Start menu, the program finds the config file and shows a menu with the version and whether the program runs in the background:
 
@@ -112,7 +112,7 @@ Type the number, or type an IP address if your printer is not listed, or `s` to 
 
 ## Open the folder after a scan
 
-With `open_after_scan = true` in `[defaults]` (or `--open-after-scan true`, `PUSHSCAN_OPEN_AFTER_SCAN=true`), Explorer opens the folder with the new file selected after each scan. The default is `false`. Older config files with `"folder"`, `"file"` or `"off"` are still read (`"folder"` and `"file"` mean `true`). Setup asks "Open the folder after each scan?" and writes `true` for yes. If an Explorer window already shows the folder, the new file is selected in that window and no new window opens. A scan with several pages or files opens once. A target can set its own `open_after_scan`, for example `false` for an archive folder that should not open (also in the target editor of the web page). If opening fails, the log shows a warning and the scan is kept anyway. The option is also in the Settings page of the web interface. It needs a logged-in desktop user, so it is meant for a PC, not for a server.
+With `open_after_scan = true` in the config file, Explorer opens the folder with the new file selected after each scan. The default is `false`. Setup asks "Open the folder after each scan?" and writes `true` for yes. If an Explorer window already shows the folder, the new file is selected in that window and no new window opens. A scan with several pages or files opens once. A target can set its own `open_after_scan`, for example `false` for an archive folder that should not open (also in the target editor of the web page). If opening fails, the log shows a warning and the scan is kept anyway. The option is also in the Settings page of the web interface. It needs a logged-in desktop user, so it is meant for a PC, not for a server.
 
 ## Firewall
 
@@ -143,11 +143,11 @@ When you let other devices reach the page, setup stores the password in `web_pas
 | Log file | `%LOCALAPPDATA%\pushscan2folder\pushscan2folder.log` for the background instance and autostart; with `--log-file PATH` anywhere else |
 | Background instance files (lock, PID, stop request) | `%LOCALAPPDATA%\pushscan2folder\` |
 
-The program looks for the config file automatically. Use `--config PATH` to use another one. If your Documents folder is moved (for example by OneDrive), set `output` in the config file to the real path, because the default is `Documents` below your user folder.
+The program looks for the config file automatically. Use `--config PATH` to use another one. If your Documents folder is moved (for example by OneDrive), set `folder` in the config file to the real path, because the default is `Documents` below your user folder.
 
 A new config file written by the web page is meant to be private. On Windows the "private" file mode (0600) cannot be applied; the file is protected by your user profile folder, which other standard users cannot read.
 
-A target with `output = "."` saves into the output directory itself, without a subfolder. That is what the setup questions write. Without `output`, a target saves into `<output>/<name>`.
+A target with `folder = "."` saves into the base folder itself, without a subfolder. That is what the setup questions write. Without `folder`, a target saves into `<folder>/<name>`. `document_folder`, `auto_folder` and `photo_folder` give one document type another folder, see [Folders](configuration.md#folders).
 
 Folder names for targets are made valid for Windows: characters such as `<>:"/\|?*` become `_`, names that end in a dot are trimmed, and reserved device names (`CON`, `PRN`, `AUX`, `NUL`, `COM1` to `COM9`, `LPT1` to `LPT9`) get a `_` in front. A target called `CON` therefore saves into `_CON`.
 
@@ -157,18 +157,15 @@ Save this as `%APPDATA%\pushscan2folder\config.toml`. Use forward slashes or sin
 
 ```toml
 printer = "192.168.1.50"
-output = 'D:\Scans'        # single quotes: backslashes are taken literally
-
-[defaults]
-resolution = 300
-format = "pdf"
+folder = 'D:\Scans'        # single quotes: backslashes are taken literally
+auto = { resolution = 300, format = "pdf" }    # for document type Auto
 
 [[target]]
 name = "Scan"
 
 [[target]]
 name = "Paperless"
-output = "paperless/inbox"    # below the output folder
+folder = "paperless/inbox"    # below the base folder
 ```
 
 Then `.\pushscan2folder.exe` is enough. The other keys are described in `config.example.toml`.
@@ -242,4 +239,4 @@ PYTHONPATH=src python3 -m pushscan2folder --printer 192.168.1.50
 
 Pillow is optional and cuts out photos. Install it with `pip install -r requirements.txt`.
 
-The config file is `~/.config/pushscan2folder/config.toml` (or `$XDG_CONFIG_HOME`), and scans go to `~/Documents/Scans` unless you set `output`. `--install-autostart` is Windows only; on macOS use a launchd agent if you want a background service. Reports from Mac users are welcome.
+The config file is `~/.config/pushscan2folder/config.toml` (or `$XDG_CONFIG_HOME`), and scans go to `~/Documents/Scans` unless you set `folder`. `--install-autostart` is Windows only; on macOS use a launchd agent if you want a background service. Reports from Mac users are welcome.

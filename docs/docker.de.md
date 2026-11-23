@@ -7,11 +7,11 @@ Zurück zur [README](../README.de.md).
 Ab Version 0.2.0 gibt es ein veröffentlichtes Image, das bei jedem Release
 gebaut wird: `ghcr.io/jamdevlab/pushscan2folder`, für linux/amd64 und
 linux/arm64 (zum Beispiel ein Raspberry Pi). Die Tags sind die genaue Version
-(`0.3.0`), Major.Minor (`0.3`) und `latest`. Du brauchst keinen Klon.
+(`0.4.0`), Major.Minor (`0.4`) und `latest`. Du brauchst keinen Klon.
 
 ## Docker Compose
 
-Die mitgelieferte `docker-compose.yml` hält Ziele und Scan-Einstellungen in
+Die mitgelieferte `docker-compose.yml` hält Ziele, Ordner und Scan-Einstellungen in
 `config/config.toml`; in der Compose-Datei stehen nur die Drucker-IP und die
 (auskommentierten) Einstellungen der Weboberfläche:
 
@@ -25,8 +25,13 @@ docker compose up -d
 docker compose logs -f
 ```
 
+Fehlt `config/config.toml` beim ersten Start, schreibt der Container dort eine
+kommentierte Beispieldatei und startet mit den eingebauten Standardwerten. Du
+kannst sie bearbeiten, während der Container läuft. Die zweite `curl`-Zeile
+ist dann nicht nötig.
+
 Zum Aktualisieren: `docker compose pull && docker compose up -d`. Nimm
-`:latest` oder lege eine Version fest, zum Beispiel `:0.3.0`.
+`:latest` oder lege eine Version fest, zum Beispiel `:0.4.0`.
 
 Die Datei sieht so aus (die Web-Zeilen sind auskommentiert, die Weboberfläche
 ist also standardmäßig aus):
@@ -34,7 +39,7 @@ ist also standardmäßig aus):
 ```yaml
 services:
   pushscan2folder:
-    image: ghcr.io/jamdevlab/pushscan2folder:latest   # or a fixed version, e.g. :0.3.0
+    image: ghcr.io/jamdevlab/pushscan2folder:latest   # or a fixed version, e.g. :0.4.0
     restart: unless-stopped
     user: "1000:1000"                    # owner of ./scans and ./config (id -u, id -g)
     environment:
@@ -87,8 +92,8 @@ docker build -t pushscan2folder .
 
 ## Benutzer, UID und GID
 
-Das Image läuft als Benutzer ohne Root-Rechte. Dieser Benutzer muss das
-Ausgabeverzeichnis beschreiben können. Übergib entweder
+Das Image läuft als Benutzer ohne Root-Rechte. Dieser Benutzer muss den
+Basisordner beschreiben können. Übergib entweder
 `--user "$(id -u):$(id -g)"` (wie oben, oder `user:` in Compose), damit die
 Dateien dir gehören, oder setze mit `chown` die UID des Container-Benutzers auf
 das Host-Verzeichnis (prüfe sie mit
@@ -96,11 +101,11 @@ das Host-Verzeichnis (prüfe sie mit
 
 ## Volumes
 
-- `./scans:/scans` ist das Ausgabeverzeichnis. Das Image setzt
-  `PUSHSCAN_OUTPUT=/scans`; das überschreibt den Schlüssel `output` der
+- `./scans:/scans` ist der Basisordner. Das Image setzt
+  `PUSHSCAN_FOLDER=/scans`; das überschreibt den Schlüssel `folder` der
   Konfigurationsdatei (siehe [Vorrang](configuration.de.md#vorrang)). Binde
   deine Ordner unterhalb von `/scans` ein oder verwende absolute
-  Ausgabepfade bei den Zielen.
+  Zielordner.
 - `./config:/config` enthält `config.toml`. Binde ein Verzeichnis ein, keine
   einzelne Datei: Eine einzeln eingebundene Datei lässt sich nicht atomar
   ersetzen, dann würde das Programm sie beim Speichern über die
@@ -148,8 +153,10 @@ Docker-Netzwerks zeigen statt der Adresse des echten Clients. Das passiert, wenn
 Dockers Userland-Proxy (`docker-proxy`) die Verbindung weiterleitet, zum
 Beispiel bei Rootless Docker, bei einer Verbindung über IPv6 auf eine
 IPv4-Portzuordnung oder bei manchen NAS-Systemen. Das Programm schreibt diese
-Adresse nur ins Log. Die Anmeldesperre gilt global und nicht pro Adresse (siehe
-[Sicherheitsmodell](web.de.md#sicherheitsmodell)), es geht also nichts kaputt.
+Adresse ins Log und zählt falsche Passwörter pro Adresse (siehe
+[Sicherheitsmodell](web.de.md#sicherheitsmodell)). Mit der Gateway-Adresse
+teilen sich alle Clients eine Sperre; ein falsches Passwort von einem Client
+zählt dann auch für die anderen.
 
 Um die echte Adresse zu sehen, gibt es diese Möglichkeiten:
 
@@ -160,8 +167,9 @@ Um die echte Adresse zu sehen, gibt es diese Möglichkeiten:
 
 ## Paperless-ngx
 
-Binde den Consume-Ordner von paperless innerhalb des Ausgabeverzeichnisses ein
-und nutze ein Ziel mit dem Namen des Ordners, zum Beispiel `Paperless@300dpi`:
+Binde den Consume-Ordner von paperless innerhalb des Basisordners ein und nutze
+ein Ziel mit dem Namen des Ordners, zum Beispiel `name = "Paperless"` in der
+Konfigurationsdatei (es speichert in `/scans/Paperless`):
 
 ```yaml
     volumes:
@@ -169,10 +177,8 @@ und nutze ein Ziel mit dem Namen des Ordners, zum Beispiel `Paperless@300dpi`:
 ```
 
 Der Ordner lässt sich auch auf der Weboberfläche wählen, weil er innerhalb des
-Ausgabeverzeichnisses liegt. Ein absoluter Zielordner wie
-`Paperless=/consume` funktioniert nur über die Kommandozeile oder die
-Konfigurationsdatei. Siehe
-[Voreinstellungen pro Ziel](configuration.de.md#voreinstellungen-pro-ziel).
+Basisordners liegt. Ein absoluter Zielordner wie `/consume` funktioniert nur in
+der Konfigurationsdatei. Siehe [Ordner](configuration.de.md#ordner).
 
 ## NAS-Hinweise
 
@@ -183,5 +189,3 @@ Konfigurationsdatei. Siehe
   [Sicherheitsmodell](web.de.md#sicherheitsmodell).
 - Nimm lieber `PUSHSCAN_WEB_PASSWORD_FILE` (ein Docker-Secret) als die
   einfache Variable, denn Umgebungsvariablen sind in `docker inspect` sichtbar.
-- Setze `PUSHSCAN_TARGETS` nicht, wenn du die Ziele auf der Weboberfläche
-  bearbeitest.

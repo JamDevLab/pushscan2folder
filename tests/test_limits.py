@@ -87,9 +87,12 @@ class EsclCountTests(unittest.TestCase):
     def test_document_count_and_job_bytes(self):
         limits = []
 
-        def fake_request(method, path, body=None, headers=None, limit=escl.MAX_RESPONSE):
+        def fake_request(method, path, body=None, headers=None, limit=escl.MAX_RESPONSE,
+                         timeout=None, deadline=None):
             if method == "POST":
                 return 201, {"Location": "/eSCL/ScanJobs/1"}, b""
+            if method == "DELETE":            # job dropped after a limit
+                return 200, {}, b""
             limits.append(limit)
             if 10 > limit:
                 raise EsclError("over the limit")

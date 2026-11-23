@@ -1,4 +1,5 @@
 """Web page: auth, CSRF, headers, target editor and config writing (127.0.0.1 only)."""
+import dataclasses
 import errno
 import html
 import io
@@ -18,8 +19,9 @@ from urllib.parse import urlencode
 from pushscan2folder import __main__ as cli
 from pushscan2folder import web
 from pushscan2folder.discovery import Scanner
-from pushscan2folder.config import Config, TargetSpec, dump_config, load_config, write_config
-from pushscan2folder.service import Target
+from pushscan2folder.config import (Config, TargetSpec, dump_config, load_config,
+                                    load_config_text, write_config)
+from pushscan2folder.service import DOC_TYPES, Target, Trim
 from pushscan2folder.status import LogBuffer, ScanRecord, ServiceStatus
 from support import CAN_SYMLINK, assert_mode, needs_symlinks
 
@@ -79,8 +81,6 @@ class Client:
 
 
 class WebTestBase(unittest.TestCase):
-    from_env = False
-
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
@@ -89,8 +89,7 @@ class WebTestBase(unittest.TestCase):
         self.logbuf = LogBuffer()
         self.config_path = self.dir / "cfg" / "config.toml"
         self.ctx = web.WebContext(self.service, self.logbuf, "192.0.2.1", self.dir / "scans",
-                                  multipage_mode="document", config_path=self.config_path,
-                                  targets_from_env=self.from_env)
+                                  config_path=self.config_path)
         self.server, self.thread = web.start_server(self.ctx, PASSWORD, "127.0.0.1", 0)
         self.addCleanup(web.stop_server, self.server, self.thread)
         self.client = Client(self.server.server_address[1])
@@ -135,7 +134,7 @@ class AuthTests(WebTestBase):
         self.assertIn("Path=/", cookie)
         self.assertEqual(self.client.request("GET", "/")[0], 200)
 
-    def test_global_lockout(self):
+    def test_lockout_same_address(self):
         clock = [1000.0]
         with mock.patch.object(web, "_now", lambda: clock[0]):
             for _ in range(5):
@@ -307,7 +306,7 @@ class NoAuthTests(unittest.TestCase):
     def test_folder_restriction_still_enforced(self):
         csrf = self.client.csrf()
         status, _, data = self.client.request(
-            "POST", "/targets", {"csrf": csrf, "rows": "1", "name_0": "b", "output_0": "../x",
+            "POST", "/targets", {"csrf": csrf, "rows": "1", "name_0": "b", "folder_0": "../x",
                                  "op": "save"})
         self.assertEqual(status, 400)
         self.assertIn("..", data)
@@ -530,10 +529,10 @@ class TargetEditorTests(WebTestBase):
         self.logged_in()
         csrf = self.client.csrf()
         status, _, data = self.client.request("POST", "/targets", self.ops_form(
-            csrf, "add", {"name": "scan1", "output": "x/y", "res": "600", "docmp": "1"}))
+            csrf, "add", {"name": "scan1", "folder": "x/y", "res": "600", "np_document": "1"}))
         self.assertEqual(status, 200)
         self.assertIn('name="name_0" value="scan1"', data)
-        self.assertIn('name="output_0" value="x/y"', data)
+        self.assertIn('name="folder_0" value="x/y"', data)
         self.assertIn('<option value="600" selected>', data)
         self.assertIn('name="name_1" value=""', data)
         self.assertNotIn('name="name_2"', data)
@@ -622,17 +621,6 @@ class TargetEditorTests(WebTestBase):
                                            self.ops_form(csrf, "save", {"name": "a"}))
         self.assertEqual(status, 303)
 
-    def test_disabled_when_from_env(self):
-        self.ctx.targets_from_env = True
-        self.logged_in()
-        data = self.client.request("GET", "/targets")[2]
-        self.assertIn("PUSHSCAN_TARGETS", data)
-        self.assertNotIn('<form method="post" action="/targets"', data)
-        csrf = self.client.csrf()
-        status, _, _ = self.client.request(
-            "POST", "/targets", self.form(csrf, {"name": "a", "docmp": "1"}))
-        self.assertEqual(status, 403)
-        self.assertFalse(self.config_path.exists())
 
     def test_disabled_without_config_path(self):
         self.ctx.config_path = None
@@ -645,56 +633,58 @@ class TargetEditorTests(WebTestBase):
         self.assertIn("does not exist yet", self.client.request("GET", "/targets")[2])
         status, resp, _ = self.client.request("POST", "/targets", self.form(
             csrf,
-            {"name": "scan1"},
-            {"name": "paperless", "output": "consume/in", "docmp": "1", "res": "600",
-             "fmt": "jpeg", "size": "a4", "automp": "1"},
+            {"name": "scan1", "np_document": "1"},
+            {"name": "paperless", "folder": "consume/in", "np_document": "1", "res": "600",
+             "fmt": "jpeg", "size": "a4", "np_auto": "1", "np_photo": "1"},
             {"name": ""}))
         self.assertEqual(status, 303)
         self.assertEqual(resp.getheader("Location"), "/")
         cfg = load_config(self.config_path)
         self.assertEqual([t.name for t in cfg.targets], ["scan1", "paperless"])
-        self.assertEqual(cfg.targets[0].document_multipage, False)
+        self.assertIsNone(cfg.targets[0].next_page)       # equals the global list
         assert_mode(self, self.config_path, 0o600)
         p = cfg.targets[1]
-        self.assertEqual((p.output, p.document_multipage, p.auto_multipage),
-                         ("consume/in", True, True))
-        self.assertEqual((p.preset["resolution"], p.preset["fmt"]), (600, "jpeg"))
-        self.assertNotIn("color", p.preset)
+        self.assertEqual((p.folder, p.next_page), ("consume/in", frozenset(DOC_TYPES)))
+        self.assertEqual(p.auto, {"resolution": 600, "format": "jpeg", "size": "a4"})
         (targets,) = self.service.requested
         self.assertEqual([t.name for t in targets], ["scan1", "paperless"])
         self.assertEqual(targets[0].outdir, self.dir / "scans" / "scan1")
         self.assertEqual(targets[1].outdir, self.dir / "scans" / "consume" / "in")
-        self.assertEqual(targets[1].multipage, frozenset({"document", "auto"}))
-        self.assertEqual(targets[0].multipage, frozenset())
-
+        self.assertEqual(targets[1].multipage, frozenset(DOC_TYPES))
+        self.assertIsNone(targets[0].multipage)
     def test_save_keeps_other_keys_and_deletes(self):
         self.config_path.parent.mkdir()
         self.config_path.write_text(
-            '# comment\nprinter = "192.168.1.50"\noutput = "/scans"\ninterval = 2\n'
-            'multipage = "document"\n\n[defaults]\nsize = "a4"\n\n'
+            '# comment\nprinter = "192.168.1.50"\nfolder = "/scans"\n'
+            'next_page = ["document", "auto"]\nauto = { size = "a4" }\n\n'
+            '[advanced]\ninterval = 2\n\n'
             '[[target]]\nname = "scan1"\n\n'
-            '[[target]]\nname = "paperless"\noutput = "/consume"\n')
+            '[[target]]\nname = "paperless"\nfolder = "/consume"\n')
         self.logged_in()
         data = self.client.request("GET", "/targets")[2]
         self.assertIn('value="scan1"', data)
         self.assertIn("<h2>paperless</h2>", data)
         self.assertNotIn("<legend", data)
+        # the global list is ticked for a target without its own
+        self.assertIn('name="np_auto_0" value="1" checked', data)
         # simulate a manual edit between page load and save
         self.config_path.write_text(self.config_path.read_text().replace(
             'printer = "192.168.1.50"', 'printer = "192.168.1.77"'))
         csrf = self.client.csrf()
         status, _, _ = self.client.request("POST", "/targets", self.form(
             csrf,
-            {"name": "scan1", "existing": "1", "orig": "scan1", "docmp": "1"},
+            {"name": "scan1", "existing": "1", "orig": "scan1", "np_document": "1",
+             "np_auto": "1"},
             {"existing": "1", "orig": "paperless", "del": "1"},
-            {"name": "new one", "docmp": "1"}))
+            {"name": "new one", "np_document": "1"}))
         self.assertEqual(status, 303)
         cfg = load_config(self.config_path)
         self.assertEqual(cfg.printer, "192.168.1.77")
-        self.assertEqual((cfg.output, cfg.interval, cfg.multipage, cfg.size),
-                         (Path("/scans"), 2.0, "document", "a4"))
+        self.assertEqual((cfg.folder, cfg.interval, cfg.next_page, cfg.auto),
+                         (Path("/scans"), 2.0, frozenset({"document", "auto"}),
+                          {"size": "a4"}))
         self.assertEqual([t.name for t in cfg.targets], ["scan1", "new one"])
-
+        self.assertEqual([t.next_page for t in cfg.targets], [None, frozenset({"document"})])
     def test_invalid_name_writes_nothing(self):
         self.logged_in()
         csrf = self.client.csrf()
@@ -725,6 +715,166 @@ class TargetEditorTests(WebTestBase):
         self.assertIn("At least one target", data)
 
 
+    def test_feeder_next_page_boxes(self):
+        self.logged_in()
+        csrf = self.client.csrf()
+        status, _, _ = self.client.request("POST", "/targets", self.form(
+            csrf,
+            {"name": "same"},                                           # = global (empty)
+            {"name": "docs", "fnp_document": "1", "fnp_auto": "1"},
+            {"name": "all", "fnp_document": "1", "fnp_auto": "1", "fnp_photo": "1"}))
+        self.assertEqual(status, 303)
+        cfg = load_config(self.config_path)
+        self.assertEqual([t.feeder_next_page for t in cfg.targets],
+                         [None, frozenset({"document", "auto"}), frozenset(DOC_TYPES)])
+        self.assertEqual([t.next_page for t in cfg.targets], [frozenset()] * 3)   # no np_ box ticked
+        page = self.client.request("GET", "/targets")[2]
+        self.assertIn("Next page dialog after the feeder", page)
+        self.assertEqual(page.count('name="fnp_document_1" value="1" checked'), 1)
+        self.assertEqual(page.count('name="fnp_photo_1" value="1" checked'), 0)
+        self.assertEqual(page.count('name="fnp_photo_2" value="1" checked'), 1)
+        self.assertEqual(page.count('name="fnp_document_0" value="1" checked'), 0)
+
+    def test_new_row_ticks_the_global_feeder_list(self):
+        self.ctx.feeder_next_page = frozenset({"auto"})
+        self.logged_in()
+        data = self.client.request("GET", "/targets")[2]
+        self.assertIn('name="fnp_auto_0" value="1" checked', data)
+        self.assertNotIn('name="fnp_document_0" value="1" checked', data)
+
+    def test_new_row_ticks_the_global_next_page_list(self):
+        self.ctx.next_page = frozenset({"document", "photo"})
+        self.logged_in()
+        data = self.client.request("GET", "/targets")[2]
+        self.assertIn('name="np_document_0" value="1" checked', data)
+        self.assertIn('name="np_photo_0" value="1" checked', data)
+        self.assertNotIn('name="np_auto_0" value="1" checked', data)
+
+    def test_next_page_boxes_incl_photo(self):
+        self.logged_in()
+        csrf = self.client.csrf()
+        status, _, _ = self.client.request("POST", "/targets", self.form(
+            csrf,
+            {"name": "same", "np_document": "1"},                       # = global list
+            {"name": "photos", "np_photo": "1"},
+            {"name": "all", "np_document": "1", "np_auto": "1", "np_photo": "1"},
+            {"name": "none"}))
+        self.assertEqual(status, 303)
+        cfg = load_config(self.config_path)
+        self.assertEqual([t.next_page for t in cfg.targets],
+                         [None, frozenset({"photo"}), frozenset(DOC_TYPES), frozenset()])
+        self.assertIn("next_page = []", self.config_path.read_text())
+        page = self.client.request("GET", "/targets")[2]
+        self.assertEqual(page.count('name="np_photo_1" value="1" checked'), 1)
+        self.assertEqual(page.count('name="np_photo_0" value="1" checked'), 0)
+        self.assertEqual(page.count('name="np_document_0" value="1" checked'), 1)
+        self.assertEqual(page.count('name="np_document_3" value="1" checked'), 0)
+
+    def test_next_page_follows_the_global_list_in_the_file(self):
+        self.config_path.parent.mkdir()
+        self.config_path.write_text('next_page = ["auto"]\n\n[[target]]\nname = "a"\n')
+        self.logged_in()
+        page = self.client.request("GET", "/targets")[2]
+        self.assertIn('name="np_auto_0" value="1" checked', page)
+        self.assertNotIn('name="np_document_0" value="1" checked', page)
+        csrf = self.client.csrf()
+        status, _, _ = self.client.request("POST", "/targets", self.form(
+            csrf, {"name": "a", "existing": "1", "orig": "a", "np_auto": "1"}))
+        self.assertEqual(status, 303)
+        self.assertIsNone(load_config(self.config_path).targets[0].next_page)
+
+    def test_type_folders_are_saved_and_shown(self):
+        self.logged_in()
+        csrf = self.client.csrf()
+        page = self.client.request("GET", "/targets")[2]
+        self.assertIn("<details", page)
+        self.assertIn("Other folder per document type", page)
+        self.assertNotIn("<details class=\"group\" open", page)
+        status, _, _ = self.client.request("POST", "/targets", self.form(
+            csrf, {"name": "a", "photo_folder": "Bilder/{now:%Y}", "document_folder": "Doku"},
+            {"name": "b"}))
+        self.assertEqual(status, 303)
+        cfg = load_config(self.config_path)
+        self.assertEqual(cfg.targets[0].type_folders,
+                         {"document": "Doku", "photo": "Bilder/{now:%Y}"})
+        self.assertEqual(cfg.targets[1].type_folders, {})
+        (targets,) = self.service.requested
+        self.assertEqual(targets[0].type_dirs,
+                         {"document": self.dir / "scans" / "Doku",
+                          "photo": self.dir / "scans" / "Bilder" / "{now:%Y}"})
+        page = self.client.request("GET", "/targets")[2]
+        self.assertIn('name="photo_folder_0" value="Bilder/{now:%Y}"', page)
+        self.assertIn('name="auto_folder_0" value=""', page)
+        self.assertIn('<details class="group" open>', page)      # one has type folders
+
+    def test_every_folder_of_a_row_is_checked(self):
+        self.logged_in()
+        csrf = self.client.csrf()
+        for key in ("folder", "document_folder", "auto_folder", "photo_folder"):
+            for bad in ("/etc", "../x", "a/../../x", "a\\b", "C:x", "con"):
+                status, _, data = self.client.request(
+                    "POST", "/targets", self.form(csrf, {"name": "a", key: bad}))
+                self.assertEqual(status, 400, (key, bad))
+                self.assertIn("Row 1", data)
+        self.assertFalse(self.config_path.exists())
+        self.assertEqual(self.service.requested, [])
+
+    def test_date_folders_accepted_and_escapes_rejected(self):
+        self.logged_in()
+        csrf = self.client.csrf()
+        for good in ("Paperless/{now:%Y}", "{now:%Y}/{now:%m}", "x/{date}", "{name}-{time}",
+                     "{now:%Y/%m}"):
+            status, _, data = self.client.request(
+                "POST", "/targets", self.form(csrf, {"name": "a", "folder": good}))
+            self.assertEqual(status, 303, (good, data))
+            self.assertEqual(load_config(self.config_path).targets[0].folder, good)
+        for bad in ("{now:%Y}/../x", "../{now:%Y}", "/abs/{now:%Y}", "{now:%Y}\\x",
+                    "{unknown}", "{now.__class__}", "{now:%Y", "a//{now:%Y}", "{now:%Y}/"):
+            status, _, data = self.client.request(
+                "POST", "/targets", self.form(csrf, {"name": "a", "folder": bad}))
+            self.assertEqual(status, 400, bad)
+            self.assertIn("Row 1", data)
+        self.assertEqual(load_config(self.config_path).targets[0].folder, "{now:%Y/%m}")
+
+    def test_status_page_shows_folders_and_next_page(self):
+        self.config_path.parent.mkdir()
+        self.config_path.write_text('auto = { resolution = 600 }\n\n[[target]]\nname = "a"\n')
+        self.service.status.set_targets([
+            Target("a", Path("/s/a"), session=1, type_dirs={"photo": Path("/s/Bilder")},
+                   preset={"fmt": "jpeg"}, multipage=frozenset({"auto", "photo"})),
+            Target("b", Path("/s/b"), session=2)])
+        self.logged_in()
+        page = self.client.request("GET", "/")[2]
+        self.assertIn(str(Path("/s/a")), page)            # a backslash path on Windows
+        self.assertIn(f"Photo: {Path('/s/Bilder')}", page)
+        self.assertIn("600 dpi, jpeg, a4", page)
+        self.assertIn("<td>Auto, Photo</td><td>none</td>", page)   # a: glass, feeder
+        self.assertIn("<td>Document</td><td>none</td>", page)      # b: the global defaults
+        self.ctx.next_page = frozenset()
+        self.ctx.feeder_next_page = frozenset({"document"})
+        self.assertIn("<td>none</td><td>Document</td>", self.client.request("GET", "/")[2])
+
+
+class FieldClassificationTests(unittest.TestCase):
+    def test_every_config_field_is_classified(self):
+        names = {f.name for f in dataclasses.fields(Config)}
+        self.assertEqual(set(web.WEB_EDITABLE_FIELDS) | set(web.LOCKED_FIELDS), names)
+        self.assertEqual(set(web.WEB_EDITABLE_FIELDS) & set(web.LOCKED_FIELDS), set())
+        self.assertLessEqual(set(web.WEB_FIELDS), set(web.LOCKED_FIELDS))
+        self.assertEqual(len(web.WEB_EDITABLE_FIELDS) + len(web.LOCKED_FIELDS), len(names))
+
+    def test_every_target_field_is_classified(self):
+        names = {f.name for f in dataclasses.fields(TargetSpec)}
+        self.assertEqual(set(web.FOLDER_FIELDS) | set(web.TARGET_OTHER_FIELDS), names)
+        self.assertEqual(set(web.FOLDER_FIELDS) & set(web.TARGET_OTHER_FIELDS), set())
+
+    def test_folder_fields_are_covered_by_folders(self):
+        spec = TargetSpec("n", folder="f", type_folders={"document": "d", "auto": "a",
+                                                         "photo": "p"})
+        self.assertEqual(spec.folders(), ["f", "d", "a", "p"])
+        self.assertEqual(TargetSpec("n").folders(), ["n"])
+
+
 class FolderCheckTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
@@ -742,6 +892,14 @@ class FolderCheckTests(unittest.TestCase):
             good += ["link_in", "link_in/sub"]
         for folder in good:
             web.check_web_folder(folder, self.base)
+
+    def test_date_templates(self):
+        for good in ("{now:%Y}", "a/{now:%Y}/{now:%m}", "{date}", "{name}/{time}", "{now:%Y/%m}"):
+            web.check_web_folder(good, self.base)
+        for bad in ("{now:%Y}/../x", "../{now:%Y}", "/{now:%Y}", "{now:%Y}\\x", "{bogus}",
+                    "{now.year}", "{now:%Y", "{now:%Y}//x", "{now:%Y}/", "{now:%Y}/./x"):
+            with self.assertRaises(ValueError, msg=repr(bad)):
+                web.check_web_folder(bad, self.base)
 
     def test_dot_alone_is_the_output_directory(self):
         web.check_web_folder(".", self.base)
@@ -785,15 +943,15 @@ class FolderRestrictionTests(WebTestBase):
     LOCKED = """\
 [[target]]
 name = "paperless"
-output = "/consume"
+folder = "/consume"
 
 [[target]]
 name = "up"
-output = "../elsewhere"
+folder = "../elsewhere"
 
 [[target]]
 name = "plain"
-output = "inbox"
+folder = "inbox"
 """
 
     def form(self, csrf, *rows):
@@ -812,7 +970,7 @@ output = "inbox"
         csrf = self.client.csrf()
         for bad in ("/consume", "../x", "a/../../x", "a\\b", "/etc/cron.d"):
             status, _, data = self.client.request(
-                "POST", "/targets", self.form(csrf, {"name": "a", "output": bad}))
+                "POST", "/targets", self.form(csrf, {"name": "a", "folder": bad}))
             self.assertEqual(status, 400, bad)
             self.assertIn("Row 1", data)
             self.assertFalse(self.config_path.exists())
@@ -826,10 +984,10 @@ output = "inbox"
         (self.dir / "scans" / "evil").symlink_to(self.dir / "outside")
         self.logged_in()
         csrf = self.client.csrf()
-        for row in ({"name": "a", "output": "evil"}, {"name": "evil"}):
+        for row in ({"name": "a", "folder": "evil"}, {"name": "evil"}):
             status, _, data = self.client.request("POST", "/targets", self.form(csrf, row))
             self.assertEqual(status, 400, row)
-            self.assertIn("outside the output directory", data)
+            self.assertIn("outside the base folder", data)
         self.assertFalse(self.config_path.exists())
 
     def test_locked_rows_shown_read_only(self):
@@ -839,12 +997,12 @@ output = "inbox"
         self.assertIn("<code>/consume</code>", data)
         self.assertIn("<code>../elsewhere</code>", data)
         self.assertIn("set in the config file", data)
-        for field in ("name", "output", "res", "docmp"):
+        for field in ("name", "folder", "res", "np_document", "photo_folder"):
             self.assertNotIn(f'name="{field}_0"', data)
             self.assertNotIn(f'name="{field}_1"', data)
         self.assertIn('name="del_0"', data)
-        self.assertIn('name="output_2" value="inbox"', data)
-        self.assertNotIn('name="output_3"', data)                # no spare rows
+        self.assertIn('name="folder_2" value="inbox"', data)
+        self.assertNotIn('name="folder_3"', data)                # no spare rows
 
     def ops_form(self, csrf, op, *rows):
         form = self.form(csrf, *rows)
@@ -857,7 +1015,7 @@ output = "inbox"
         self.logged_in()
         csrf = self.client.csrf()
         rows = ({"existing": "1", "orig": "paperless"}, {"existing": "1", "orig": "up"},
-                {"name": "plain", "existing": "1", "orig": "plain", "output": "inbox"})
+                {"name": "plain", "existing": "1", "orig": "plain", "folder": "inbox"})
         status, _, data = self.client.request("POST", "/targets", self.ops_form(
             csrf, "down_0", *rows))
         self.assertEqual(status, 200)
@@ -866,7 +1024,7 @@ output = "inbox"
         self.assertIn('data-dirty="1"', data)
         status, _, _ = self.client.request("POST", "/targets", self.form(
             csrf, {"existing": "1", "orig": "up"}, {"existing": "1", "orig": "paperless"},
-            {"name": "plain", "existing": "1", "orig": "plain", "output": "inbox"}))
+            {"name": "plain", "existing": "1", "orig": "plain", "folder": "inbox"}))
         self.assertEqual(status, 303)
         after = load_config(self.config_path).targets
         self.assertEqual([t.name for t in after], ["up", "paperless", "plain"])
@@ -880,14 +1038,14 @@ output = "inbox"
         csrf = self.client.csrf()
         status, _, _ = self.client.request("POST", "/targets", self.form(
             csrf,
-            {"name": "paperless", "existing": "1", "orig": "paperless", "output": "/etc"},
-            {"name": "renamed", "existing": "1", "orig": "up", "output": "x", "res": "600",
-             "docmp": "1"},
-            {"name": "plain", "existing": "1", "orig": "plain", "output": "inbox2"}))
+            {"name": "paperless", "existing": "1", "orig": "paperless", "folder": "/etc"},
+            {"name": "renamed", "existing": "1", "orig": "up", "folder": "x", "res": "600",
+             "np_document": "1"},
+            {"name": "plain", "existing": "1", "orig": "plain", "folder": "inbox2"}))
         self.assertEqual(status, 303)
         cfg = load_config(self.config_path)
         self.assertEqual(cfg.targets[:2], before[:2])
-        self.assertEqual([(t.name, t.output) for t in cfg.targets],
+        self.assertEqual([(t.name, t.folder) for t in cfg.targets],
                          [("paperless", "/consume"), ("up", "../elsewhere"),
                           ("plain", "inbox2")])
         # deleting a read-only target is allowed
@@ -914,7 +1072,7 @@ output = "inbox"
         status, _, data = self.client.request("POST", "/targets", self.form(
             csrf,
             {"name": "paperless", "existing": "1", "orig": "paperless"},
-            {"name": "copy", "existing": "1", "orig": "paperless", "output": "/consume"}))
+            {"name": "copy", "existing": "1", "orig": "paperless", "folder": "/consume"}))
         self.assertEqual(status, 400)
         self.assertIn("Row 2", data)
         status, _, _ = self.client.request("POST", "/targets", self.form(
@@ -923,13 +1081,13 @@ output = "inbox"
             {"name": "copy", "existing": "1", "orig": "paperless"}))
         self.assertEqual(status, 303)
         cfg = load_config(self.config_path)
-        self.assertEqual([(t.name, t.output) for t in cfg.targets], [("copy", None)])
+        self.assertEqual([(t.name, t.folder) for t in cfg.targets], [("copy", None)])
         # Without the "existing" flag an orig is ignored as well.
         self.config_path.write_text(self.LOCKED)
         status, _, _ = self.client.request("POST", "/targets", self.form(
             csrf, {"name": "new", "orig": "paperless"}))
         self.assertEqual(status, 303)
-        self.assertEqual([(t.name, t.output) for t in load_config(self.config_path).targets],
+        self.assertEqual([(t.name, t.folder) for t in load_config(self.config_path).targets],
                          [("new", None)])
 
     @needs_symlinks
@@ -945,7 +1103,7 @@ output = "inbox"
         status, _, _ = self.client.request("POST", "/targets", self.form(
             csrf, {"name": "other", "existing": "1", "orig": "evil"}))
         self.assertEqual(status, 303)
-        self.assertEqual([(t.name, t.output) for t in load_config(self.config_path).targets],
+        self.assertEqual([(t.name, t.folder) for t in load_config(self.config_path).targets],
                          [("evil", None)])
 
     def test_error_rerender_keeps_locked_display(self):
@@ -955,18 +1113,19 @@ output = "inbox"
         status, _, data = self.client.request("POST", "/targets", self.form(
             csrf,
             {"name": "paperless", "existing": "1", "orig": "paperless"},
-            {"name": "bad", "output": "/abs"}))
+            {"name": "bad", "folder": "/abs"}))
         self.assertEqual(status, 400)
         self.assertIn("<code>/consume</code>", data)
-        self.assertNotIn('name="output_0"', data)
+        self.assertNotIn('name="folder_0"', data)
         self.assertNotIn('name="name_0"', data)
-        self.assertIn('name="output_1" value="/abs"', data)
+        self.assertIn('name="folder_1" value="/abs"', data)
 
 
 class SettingsTests(WebTestBase):
-    BASE = {"resolution": "", "color": "", "format": "", "source": "", "size": "",
+    BASE = {"auto_resolution": "", "auto_format": "", "auto_size": "",
             "trim_left": "", "trim_top": "", "trim_right": "", "trim_bottom": "",
-            "interval": ""}
+            "adf_trim_left": "", "adf_trim_top": "", "adf_trim_right": "",
+            "adf_trim_bottom": "", "interval": ""}
 
     def post(self, **values):
         csrf = self.client.csrf("/settings")
@@ -977,15 +1136,19 @@ class SettingsTests(WebTestBase):
         self.logged_in()
         status, _, page = self.client.request("GET", "/settings")
         self.assertEqual(status, 200)
-        for name in ("resolution", "color", "format", "source", "size", "trim_left",
-                     "trim_top", "trim_right", "trim_bottom", "multipage_document",
-                     "multipage_auto", "interval",
-                     "ignore_panel"):
+        for name in ("auto_resolution", "auto_format", "auto_size", "trim_left",
+                     "trim_top", "trim_right", "trim_bottom", "adf_trim_left",
+                     "adf_trim_top", "adf_trim_right", "adf_trim_bottom", "next_page_document",
+                     "next_page_auto", "next_page_photo", "interval", "filename",
+                     "open_after_scan"):
             self.assertIn(f'name="{name}"', page)
-        self.assertNotIn('name="printer"', page)
-        self.assertNotIn('name="output"', page)
+        for name in ("ignore_panel", "color", "source", "printer", "folder", "multipage_auto",
+                     "resolution", "format", "size"):
+            self.assertNotIn(f'name="{name}"', page)
         self.assertIn("192.0.2.1", page)                 # shown read-only
         self.assertIn(str(self.dir / "scans"), page)
+        self.assertIn('name="next_page_document" value="1" checked', page)
+        self.assertNotIn('name="next_page_photo" value="1" checked', page)
         self.assertIn('href="/config"', page)
         self.assertIn("Edit config.toml directly", page)
         self.assertIn("data-warn-unsaved", page)
@@ -995,26 +1158,29 @@ class SettingsTests(WebTestBase):
     def test_save_writes_values_and_keeps_the_rest(self):
         self.logged_in()
         self.config_path.parent.mkdir()
-        self.config_path.write_text('printer = "10.0.0.9"\nverbose = true\n\n'
-                                    '[[target]]\nname = "a"\noutput = "/consume"\n')
-        status, resp, _ = self.post(resolution="600", color="gray", format="jpeg",
-                                    source="adf", size="letter", trim_right="3",
-                                    trim_bottom="2.5", multipage_document="1",
-                                    multipage_auto="1", interval="2.5",
-                                    ignore_panel="1")
+        self.config_path.write_text('printer = "10.0.0.9"\n\n[advanced]\nverbose = true\n\n'
+                                    '[[target]]\nname = "a"\nfolder = "/consume"\n')
+        status, resp, _ = self.post(auto_resolution="600", auto_format="jpeg",
+                                    auto_size="letter", trim_right="3",
+                                    trim_bottom="2.5", adf_trim_top="1.5",
+                                    adf_trim_left="4", next_page_document="1",
+                                    next_page_photo="1", interval="2.5",
+                                    open_after_scan="1")
         self.assertEqual((status, resp.getheader("Location")), (303, "/settings?saved=1"))
         cfg = load_config(self.config_path)
-        self.assertEqual((cfg.resolution, cfg.color, cfg.format, cfg.source, cfg.size),
-                         (600, "gray", "jpeg", "adf", "letter"))
-        self.assertEqual((cfg.trim_right, cfg.trim_bottom, cfg.trim_left), (3.0, 2.5, None))
-        self.assertEqual((cfg.multipage, cfg.interval, cfg.ignore_panel), ("both", 2.5, True))
+        self.assertEqual(cfg.auto, {"resolution": 600, "format": "jpeg", "size": "letter"})
+        self.assertEqual(cfg.trim, Trim(right=3, bottom=2.5))
+        self.assertEqual(cfg.adf_trim, Trim(left=4, top=1.5))
+        self.assertEqual((cfg.next_page, cfg.interval, cfg.open_after_scan),
+                         (frozenset({"document", "photo"}), 2.5, True))
         self.assertEqual((cfg.printer, cfg.verbose), ("10.0.0.9", True))
-        self.assertEqual([(t.name, t.output) for t in cfg.targets], [("a", "/consume")])
+        self.assertEqual([(t.name, t.folder) for t in cfg.targets], [("a", "/consume")])
         self.assertEqual(self.service.requested, [])      # the config watcher applies them
         page = self.client.request("GET", "/settings?saved=1")[2]
         self.assertIn("used from the next poll cycle", page)
         self.assertIn('<option value="600" selected>', page)
-        self.assertIn('id="f-ignore_panel" value="1" checked', page)
+        self.assertIn('name="next_page_photo" value="1" checked', page)
+        self.assertNotIn('name="next_page_auto" value="1" checked', page)
         self.assertNotIn("used from the next poll cycle",
                          self.client.request("GET", "/settings")[2].split("Source:")[0])
 
@@ -1029,36 +1195,87 @@ class SettingsTests(WebTestBase):
 
     def test_empty_values_remove_the_keys(self):
         self.logged_in()
-        self.post(resolution="150", trim_left="1")
-        self.assertEqual(load_config(self.config_path).resolution, 150)
+        self.post(auto_resolution="150", trim_left="1")
+        cfg = load_config(self.config_path)
+        self.assertEqual((cfg.auto, cfg.trim), ({"resolution": 150}, Trim(left=1)))
         self.post()
         cfg = load_config(self.config_path)
-        self.assertEqual((cfg.resolution, cfg.trim_left, cfg.ignore_panel), (None, None, None))
+        self.assertEqual((cfg.auto, cfg.trim, cfg.adf_trim), ({}, None, None))
+
+    def test_zero_trim_everywhere_is_no_trim(self):
+        self.logged_in()
+        self.assertEqual(self.post(trim_left="0", trim_top="0.0", adf_trim_right="0")[0], 303)
+        cfg = load_config(self.config_path)
+        self.assertEqual((cfg.trim, cfg.adf_trim), (None, None))
+        self.assertIsNone(re.search(r"^(adf_)?trim\b", self.config_path.read_text(), re.M))
 
     def test_first_save_creates_the_file(self):
         self.logged_in()
         self.assertFalse(self.config_path.exists())
-        self.assertEqual(self.post(color="gray")[0], 303)
-        self.assertEqual(load_config(self.config_path).color, "gray")
+        self.assertEqual(self.post(interval="3")[0], 303)
+        self.assertEqual(load_config(self.config_path).interval, 3.0)
         assert_mode(self, self.config_path, 0o600)
 
-    def test_multipage_boxes(self):
+    def test_next_page_boxes(self):
         self.logged_in()
-        for boxes, mode in (({}, "off"), ({"multipage_auto": "1"}, "auto"),
-                            ({"multipage_document": "1"}, "document")):
+        for boxes, types in (({}, frozenset()),
+                             ({"next_page_auto": "1"}, frozenset({"auto"})),
+                             ({"next_page_photo": "1"}, frozenset({"photo"})),
+                             ({"next_page_document": "1", "next_page_auto": "1",
+                               "next_page_photo": "1"}, frozenset(DOC_TYPES))):
             self.post(**boxes)
-            self.assertEqual(load_config(self.config_path).multipage, mode, boxes)
+            self.assertEqual(load_config(self.config_path).next_page, types, boxes)
+        self.post(next_page_document="1", next_page_photo="1")
         _, _, page = self.client.request("GET", "/settings")
-        self.assertIn('name="multipage_document" value="1" checked', page)
-        self.assertNotIn('name="multipage_auto" value="1" checked', page)
+        self.assertIn('name="next_page_document" value="1" checked', page)
+        self.assertIn('name="next_page_photo" value="1" checked', page)
+        self.assertNotIn('name="next_page_auto" value="1" checked', page)
+
+    def test_feeder_next_page_boxes(self):
+        self.logged_in()
+        self.post(feeder_next_page_document="1", feeder_next_page_photo="1")
+        cfg = load_config(self.config_path)
+        self.assertEqual(cfg.feeder_next_page, frozenset({"document", "photo"}))
+        self.assertEqual(cfg.next_page, frozenset())
+        page = self.client.request("GET", "/settings")[2]
+        self.assertIn('name="feeder_next_page_document" value="1" checked', page)
+        self.assertNotIn('name="feeder_next_page_auto" value="1" checked', page)
+        self.post()
+        self.assertEqual(load_config(self.config_path).feeder_next_page, frozenset())
+
+    def test_form_round_trip(self):
+        cfg = load_config_text(
+            'next_page = ["auto", "photo"]\nauto = { resolution = 150, format = "jpeg" }\n'
+            'filename = "{name}_{date}"\nopen_after_scan = true\n\n[advanced]\n'
+            'interval = 2.5\ntrim = { right = 1, bottom = 2.5 }\nadf_trim = { left = 3 }\n')
+        values = web.settings_values(cfg)
+        self.assertEqual(set(values), set(web.SETTING_KEYS))
+        self.assertEqual(values["next_page"], "auto,photo")
+        self.assertEqual(values["feeder_next_page"], "")
+        self.assertEqual((values["trim_bottom"], values["trim_left"], values["adf_trim_left"]),
+                         ("2.5", "", "3"))
+        new, errors = web.check_settings(values)
+        self.assertEqual(errors, [])
+        for key in ("next_page", "auto", "filename", "open_after_scan", "interval", "trim",
+                    "adf_trim"):
+            self.assertEqual(getattr(new, key), getattr(cfg, key), key)
+        # the form posts the same values back
+        form = {k: v for k, v in values.items() if k != "next_page"}
+        form.update({"next_page_auto": "1", "next_page_photo": "1", "open_after_scan": "1"})
+        self.assertEqual(web.settings_from_form(form), values)
+        # an empty config shows the built-in next page list and nothing else
+        empty = web.settings_values(Config())
+        self.assertEqual((empty["next_page"], empty["auto_format"], empty["trim_left"]),
+                         ("document", "", ""))
 
     def test_validation_errors_write_nothing(self):
         self.logged_in()
-        self.post(resolution="300")
+        self.post(auto_resolution="300")
         before = self.config_path.read_text()
-        for bad in ({"resolution": "123"}, {"resolution": "abc"}, {"color": "blue"},
-                    {"format": "tiff"}, {"source": "tray"}, {"size": "a0"},
-                    {"trim_left": "51"}, {"trim_top": "-1"},
+        for bad in ({"auto_resolution": "123"}, {"auto_resolution": "abc"},
+                    {"auto_format": "tiff"}, {"auto_size": "a0"},
+                    {"trim_left": "51"}, {"trim_top": "-1"}, {"adf_trim_left": "51"},
+                    {"adf_trim_top": "abc"},
                     {"trim_right": "abc"}, {"trim_bottom": "nan"}, {"interval": "0"},
                     {"interval": "-3"}, {"interval": "fast"}, {"interval": "inf"}):
             status, _, page = self.post(**bad)
@@ -1072,48 +1289,54 @@ class SettingsTests(WebTestBase):
         self.assertIn("data-dirty", page)
         self.assertIn("0 to 50", page)
 
-    def test_printer_and_output_cannot_be_set(self):
+    def test_printer_and_folder_cannot_be_set(self):
         self.logged_in()
-        self.post(color="gray", printer="10.9.9.9", output="/etc")
+        self.post(interval="3", printer="10.9.9.9", folder="/etc")
         cfg = load_config(self.config_path)
-        self.assertEqual((cfg.printer, cfg.output), (None, None))
+        self.assertEqual((cfg.printer, cfg.folder), (None, None))
+
+    def test_removed_settings_are_ignored(self):
+        self.logged_in()
+        self.post(interval="3", color="gray", source="adf", ignore_panel="1", format="jpeg")
+        text = self.config_path.read_text()
+        for word in ("color", "source", "ignore_panel", "format", "auto"):
+            self.assertIsNone(re.search(rf"^{word}\b", text, re.M), word)
+        self.assertEqual(load_config(self.config_path).interval, 3.0)
 
     def test_overrides_are_shown(self):
-        self.ctx.overrides = {"interval": "environment variable PUSHSCAN_INTERVAL",
-                              "trim_left": "environment variable PUSHSCAN_TRIM",
-                              "format": "command line option --format",
+        self.ctx.overrides = {"folder": "command line option --folder",
                               "printer": "environment variable PUSHSCAN_PRINTER"}
-        self.ctx.effective = {"interval": "9", "trim_left": "2", "format": "jpeg"}
         self.logged_in()
         page = self.client.request("GET", "/settings")[2]
-        self.assertIn("Overridden by environment variable PUSHSCAN_INTERVAL. In use: "
-                      "<code>9</code>", page)
-        self.assertIn("Overridden by environment variable PUSHSCAN_TRIM", page)
-        self.assertIn("Overridden by command line option --format", page)
+        self.assertIn("Overridden by command line option --folder", page)
         self.assertIn("Overridden by environment variable PUSHSCAN_PRINTER", page)
-        self.assertEqual(page.count("Overridden by"), 4)
+        self.assertEqual(page.count("Overridden by"), 2)
         self.ctx.overrides = {}
         self.assertNotIn("Overridden by", self.client.request("GET", "/settings")[2])
 
     def test_targets_page_shows_the_default(self):
-        self.ctx.effective = {"resolution": "600", "color": "gray", "format": "jpeg",
-                              "size": "letter"}
+        self.config_path.parent.mkdir()
+        self.config_path.write_text('auto = { resolution = 600, format = "jpeg", '
+                                    'size = "letter" }\nopen_after_scan = true\n')
         self.logged_in()
         page = self.client.request("GET", "/targets")[2]
-        for label in ("Default (600 dpi)", "Default (jpeg)", "Default (letter)"):
+        for label in ("Default (600 dpi)", "Default (jpeg)", "Default (letter)",
+                      "Default (yes)"):
             self.assertIn(f">{label}</option>", page)
         self.assertNotIn("keep default", page)
         self.assertNotIn("color_0", page)
         self.assertIn('href="/settings"', page)
-        self.ctx.effective = {}
-        self.assertIn(">Default (300 dpi)</option>", self.client.request("GET", "/targets")[2])
+        self.config_path.write_text("")
+        page = self.client.request("GET", "/targets")[2]
+        for label in ("Default (300 dpi)", "Default (pdf)", "Default (a4)", "Default (no)"):
+            self.assertIn(f">{label}</option>", page)
 
     def test_csrf_and_origin(self):
         self.logged_in()
         for form in ({}, {"csrf": "wrong"}):
             self.assertEqual(self.client.request("POST", "/settings", form)[0], 403)
         csrf = self.client.csrf("/settings")
-        status, _, _ = self.client.request("POST", "/settings", {"csrf": csrf, "color": "gray"},
+        status, _, _ = self.client.request("POST", "/settings", {"csrf": csrf, "interval": "3"},
                                            headers={"Origin": "http://evil.example"})
         self.assertEqual(status, 403)
         self.assertFalse(self.config_path.exists())
@@ -1128,15 +1351,15 @@ class SettingsTests(WebTestBase):
         self.assertIn("No config file is known", page)
         csrf = self.client.csrf("/settings")
         self.assertEqual(self.client.request("POST", "/settings",
-                                             {"csrf": csrf, "color": "gray"})[0], 403)
+                                             {"csrf": csrf, "interval": "3"})[0], 403)
         self.assertEqual(self.client.request("POST", "/config",
                                              {"csrf": csrf, "text": "", "hash": ""})[0], 403)
 
 
 class RawConfigTests(WebTestBase):
-    START = ('# my comment\nprinter = "192.0.2.1"\n\n[defaults]\nresolution = 300  # dpi\n\n'
-             '[[target]]\nname = "plain"\noutput = "inbox"\n\n'
-             '[[target]]\nname = "paperless"\noutput = "/consume"\n')
+    START = ('# my comment\nprinter = "192.0.2.1"\n\n[advanced]\ninterval = 4  # seconds\n\n'
+             '[[target]]\nname = "plain"\nfolder = "inbox"\n\n'
+             '[[target]]\nname = "paperless"\nfolder = "/consume"\n')
 
     def setUp(self):
         super().setUp()
@@ -1185,7 +1408,7 @@ class RawConfigTests(WebTestBase):
         self.assertIn("&lt;/textarea&gt;", page)
 
     def test_accept_keeps_comments_and_applies_targets(self):
-        text = self.START.replace("300  # dpi", "600  # sharper") + "# more\n"
+        text = self.START.replace("4  # seconds", "6  # slower") + "# more\n"
         text = text.replace('name = "plain"', 'name = "plain2"')
         status, resp, _ = self.save(text.replace("\n", "\r\n"))   # as a browser sends it
         self.assertEqual((status, resp.getheader("Location")), (303, "/config?saved=1"))
@@ -1207,41 +1430,63 @@ class RawConfigTests(WebTestBase):
         self.assertIn("data-dirty", page)
 
     def test_invalid_values_rejected(self):
-        self.assertRejected('[defaults]\nresolution = 100\n', "resolution")
+        self.assertRejected('auto = { resolution = 100 }\n', "resolution")
+        self.assertRejected('[advanced]\ninterval = 0\n', "interval")
         self.assertRejected('foo = 1\n', 'unknown key "foo"')
 
     def test_non_ascii_text_round_trips(self):
         self.assertEqual(self.save('printer = "192.0.2.1"\n# caf\u00e9 \u2603\n')[0], 303)
         self.assertIn("\u2603", self.client.request("GET", "/config")[2])
 
-    def test_output_change_rejected(self):
-        self.assertRejected('output = "/etc"\n' + self.START, '"output" cannot be changed')
-        self.config_path.write_text('output = "/scans"\n' + self.START)
-        self.assertRejected(self.START, '"output" cannot be changed')       # removal
-        self.assertRejected('output = "/other"\n' + self.START, '"output" cannot')
+    def test_folder_change_rejected(self):
+        self.assertRejected('folder = "/etc"\n' + self.START, '"folder" cannot be changed')
+        self.config_path.write_text('folder = "/scans"\n' + self.START)
+        self.assertRejected(self.START, '"folder" cannot be changed')       # removal
+        self.assertRejected('folder = "/other"\n' + self.START, '"folder" cannot')
         # unchanged is fine
-        self.assertEqual(self.save('output = "/scans"\n' + self.START + "# x\n")[0], 303)
-
-    def test_output_equal_to_the_one_in_use_is_accepted(self):
-        text = f'output = "{(self.dir / "scans").as_posix()}"\n' + self.START
+        self.assertEqual(self.save('folder = "/scans"\n' + self.START + "# x\n")[0], 303)
+    def test_folder_equal_to_the_one_in_use_is_accepted(self):
+        text = f'folder = "{(self.dir / "scans").as_posix()}"\n' + self.START
         self.assertEqual(self.save(text)[0], 303)
-
     def test_printer_change_rejected(self):
         self.assertRejected(self.START.replace("192.0.2.1", "10.9.9.9"),
                             '"printer" cannot be changed')
         self.assertRejected(self.START.replace('printer = "192.0.2.1"\n', ""),
                             '"printer" cannot be changed')                   # removal
 
-    def test_target_folder_outside_output_rejected(self):
-        for output in ("/etc", "../up", "a/../../b", "a\\\\b"):
-            text = self.START + f'\n[[target]]\nname = "evil"\noutput = "{output}"\n'
+    def test_target_folder_outside_base_rejected(self):
+        for folder in ("/etc", "../up", "a/../../b", "a\\\\b"):
+            text = self.START + f'\n[[target]]\nname = "evil"\nfolder = "{folder}"\n'
             self.assertRejected(text, 'Target "evil"')
 
-    @needs_symlinks
+    def test_type_folder_outside_base_rejected(self):
+        for key in ("document_folder", "auto_folder", "photo_folder"):
+            for folder in ("/etc", "../up", "a/../../b", "a\\\\b", "{now:%Y}/.."):
+                text = self.START + (f'\n[[target]]\nname = "evil"\nfolder = "fine"\n'
+                                     f'{key} = "{folder}"\n')
+                self.assertRejected(text, 'Target "evil"')
+        # inside the base folder, with a date field, it is accepted
+        text = self.START + ('\n[[target]]\nname = "ok"\nphoto_folder = "Photos/{now:%Y}"\n'
+                             'document_folder = "Docs"\n')
+        self.assertEqual(self.save(text)[0], 303)
+        self.assertEqual(self.service.requested[0][-1].type_dirs,
+                         {"photo": self.dir / "scans" / "Photos/{now:%Y}",
+                          "document": self.dir / "scans" / "Docs"})
+
+    def test_locked_target_with_a_bad_type_folder(self):
+        # a target that was fine before but now has a type folder outside is rejected;
+        # one that already was read-only and stays exactly as it is, is accepted
+        text = self.START.replace('name = "plain"\nfolder = "inbox"',
+                                  'name = "plain"\nfolder = "inbox"\nphoto_folder = "/etc"')
+        self.assertRejected(text, 'Target "plain"')
+        self.config_path.write_text(text)
+        self.assertEqual(self.save(text + "# edit\n")[0], 303)
+        self.service.requested.clear()
+        self.assertRejected(text.replace("/etc", "/other"), 'Target "plain"')
     def test_target_symlink_out_of_output_rejected(self):
         (self.dir / "scans").mkdir()
         (self.dir / "scans" / "link").symlink_to(self.dir)
-        text = self.START + '\n[[target]]\nname = "evil"\noutput = "link"\n'
+        text = self.START + '\n[[target]]\nname = "evil"\nfolder = "link"\n'
         self.assertRejected(text, 'Target "evil"')
 
     @needs_symlinks
@@ -1256,18 +1501,17 @@ class RawConfigTests(WebTestBase):
             self.assertRejected(self.START + extra, "The [web] table cannot be changed")
 
     def test_unchanged_locked_target_is_accepted(self):
-        text = self.START.replace('output = "inbox"', 'output = "inbox2"') + "# edit\n"
+        text = self.START.replace('folder = "inbox"', 'folder = "inbox2"') + "# edit\n"
         self.assertEqual(self.save(text)[0], 303)
-        self.assertIn('output = "/consume"', self.config_path.read_text())
+        self.assertIn('folder = "/consume"', self.config_path.read_text())
         self.assertEqual([t.outdir for t in self.service.requested[0]],
                          [self.dir / "scans" / "inbox2", self.dir / "scans" / "/consume"])   # Windows: drive of the base
-
     def test_locked_target_changes_rejected(self):
         self.assertRejected(self.START.replace("/consume", "/etc"), 'Target "paperless"')
         self.assertRejected(self.START.replace('name = "paperless"', 'name = "other"'),
                             'Target "other"')
         # another target cannot take over the locked folder
-        text = self.START + '\n[[target]]\nname = "copy"\noutput = "/consume"\n'
+        text = self.START + '\n[[target]]\nname = "copy"\nfolder = "/consume"\n'
         self.assertRejected(text, 'Target "copy"')
 
     def test_deleting_a_locked_target_is_fine(self):
@@ -1296,18 +1540,14 @@ class RawConfigTests(WebTestBase):
         self.config_path.unlink()
         page = self.client.request("GET", "/config")[2]
         self.assertIn("does not exist yet", page)
-        self.assertEqual(self.save('[defaults]\ncolor = "gray"\n')[0], 303)
-        self.assertEqual(load_config(self.config_path).color, "gray")
+        self.assertEqual(self.save('[advanced]\ninterval = 3\n')[0], 303)
+        self.assertEqual(load_config(self.config_path).interval, 3.0)
         assert_mode(self, self.config_path, 0o600)
 
     def test_no_targets_in_text_leaves_the_service_alone(self):
-        self.assertEqual(self.save('printer = "192.0.2.1"\n[defaults]\ncolor = "gray"\n')[0], 303)
+        self.assertEqual(self.save('printer = "192.0.2.1"\n[advanced]\ninterval = 3\n')[0], 303)
         self.assertEqual(self.service.requested, [])
 
-    def test_targets_from_env_not_applied(self):
-        self.ctx.targets_from_env = True
-        self.assertEqual(self.save(self.START + "# x\n")[0], 303)
-        self.assertEqual(self.service.requested, [])
 
     def test_unreadable_file(self):
         self.config_path.write_bytes(b"\xff\xfe")
@@ -1442,6 +1682,40 @@ class SessionTests(WebTestBase):
         for t in threads:
             t.join()
         self.assertEqual(len(calls), web.MAX_FAILURES)
+
+    def test_lockout_is_per_client_address(self):
+        clock = [1000.0]
+        sessions = web.Sessions()
+        with mock.patch.object(web, "_now", lambda: clock[0]):
+            for _ in range(web.MAX_FAILURES):
+                self.assertIsNone(sessions.login(lambda: False, "10.0.0.66"))
+            with self.assertRaises(PermissionError):
+                sessions.login(lambda: True, "10.0.0.66")
+            self.assertTrue(sessions.locked("10.0.0.66"))
+            self.assertFalse(sessions.locked("10.0.0.5"))
+            self.assertIsNotNone(sessions.login(lambda: True, "10.0.0.5"))
+            clock[0] += web.LOCKOUT_SECONDS + 1
+            self.assertIsNotNone(sessions.login(lambda: True, "10.0.0.66"))
+
+    def test_global_cap_over_many_addresses(self):
+        clock = [1000.0]
+        sessions = web.Sessions()
+        with mock.patch.object(web, "_now", lambda: clock[0]):
+            for i in range(web.GLOBAL_MAX_FAILURES):
+                sessions.login(lambda: False, f"10.0.{i}.1")   # one try per address
+            with self.assertRaises(PermissionError):
+                sessions.login(lambda: True, "10.9.9.9")
+            clock[0] += web.GLOBAL_WINDOW_SECONDS + 1
+            self.assertIsNotNone(sessions.login(lambda: True, "10.9.9.9"))
+
+    def test_address_table_is_bounded(self):
+        clock = [1000.0]
+        sessions = web.Sessions()
+        with mock.patch.object(web, "_now", lambda: clock[0]), \
+                mock.patch.object(web, "GLOBAL_MAX_FAILURES", 10 ** 6):
+            for i in range(web.MAX_TRACKED_CLIENTS + 50):
+                sessions.login(lambda: False, f"10.{i // 256}.{i % 256}.1")
+        self.assertLessEqual(len(sessions._clients), web.MAX_TRACKED_CLIENTS)
 
     @staticmethod
     def _attempt(sessions, check):
@@ -1609,12 +1883,16 @@ class ConfigWriteTests(unittest.TestCase):
         self.assertEqual(self.roundtrip(cfg), cfg)
 
     def test_roundtrip_edge_cases(self):
-        cfg = Config(printer='pr"in\\ter', output=Path("/a b/c"), interval=0.5, verbose=True,
-                     targets=[TargetSpec("x", output='dir "q" \\ \t\u0001\u007f ü',
-                                         preset={"resolution": 75, "width": 1181,
-                                                 "height": 1772},
-                                         document_multipage=False, auto_multipage=True),
-                              TargetSpec("y", auto_multipage=False)])
+        cfg = Config(printer='pr"in\\ter', folder=Path("/a b/c"), interval=0.5, verbose=True,
+                     next_page=frozenset({"auto", "photo"}),
+                     auto={"resolution": 150, "format": "jpeg", "size": "letter"},
+                     trim=Trim(right=1, bottom=2.5), adf_trim=Trim(left=3),
+                     targets=[TargetSpec("x", folder='dir "q" \\ \t\u0001\u007f ü',
+                                         type_folders={"photo": "Photos/{now:%Y}",
+                                                       "document": "Docs"},
+                                         auto={"resolution": 75, "size": "10x15"},
+                                         next_page=frozenset({"document", "auto"})),
+                              TargetSpec("y", next_page=frozenset())])
         self.assertEqual(self.roundtrip(cfg), cfg)
         self.assertEqual(self.roundtrip(Config()), Config())
 
@@ -1747,7 +2025,7 @@ class MainTests(unittest.TestCase):
         self.assertEqual([h for h in logging.getLogger().handlers
                           if isinstance(h, LogBuffer)], [])
         ctx = start.call_args.args[0]
-        self.assertFalse(ctx.targets_from_env)
+        self.assertEqual(ctx.next_page, frozenset({"document"}))
 
 
 class PrinterSearchTests(WebTestBase):

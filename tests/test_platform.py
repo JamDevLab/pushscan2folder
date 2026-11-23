@@ -11,6 +11,7 @@ from unittest import mock
 
 from pushscan2folder import __main__ as cli
 from pushscan2folder import autostart, platform_support as ps
+from pushscan2folder.platform_support import windows_program
 
 
 class DefaultPathTests(unittest.TestCase):
@@ -174,7 +175,7 @@ class AutostartTests(unittest.TestCase):
     def test_frozen_command(self):
         with self.frozen():
             cmd = autostart.install_command(["--config", "/abs/c.toml", "--log-file=/abs/p.log"])
-        self.assertEqual(cmd[:2], ["reg.exe", "add"])
+        self.assertEqual(cmd[:2], [windows_program("reg.exe"), "add"])
         self.assertIn(r"HKCU\Software\Microsoft\Windows\CurrentVersion\Run", cmd)
         self.assertEqual(cmd[cmd.index("/v") + 1], "pushscan2folder")
         self.assertEqual(cmd[-1], "/f")
@@ -192,7 +193,7 @@ class AutostartTests(unittest.TestCase):
 
     def test_paths_become_absolute(self):
         args = autostart.absolute_args(["--config", "c.toml", "--log-file=p.log", "-v",
-                                        "run", "--output", "out"])
+                                        "run", "--folder", "out"])
         self.assertEqual(args[1], os.path.abspath("c.toml"))
         self.assertEqual(args[2], "--log-file=" + os.path.abspath("p.log"))
         self.assertEqual(args[-1], os.path.abspath("out"))
@@ -203,6 +204,21 @@ class AutostartTests(unittest.TestCase):
             with self.frozen(), self.assertRaises(ValueError):
                 autostart.run_value(["run", "--name", bad])
 
+    def test_trailing_backslash_is_doubled_inside_quotes(self):
+        self.assertEqual(autostart._quote("C:\\"), '"C:\\\\"')
+        self.assertEqual(autostart._quote("C:\\a b\\\\"), '"C:\\a b\\\\\\\\"')
+        self.assertEqual(autostart._quote("C:\\a\\b"), '"C:\\a\\b"')
+
+    def test_windows_program_uses_system_root(self):
+        with mock.patch.dict(os.environ, {"SystemRoot": r"D:\Win"}):
+            self.assertEqual(windows_program("reg.exe"), r"D:\Win\System32\reg.exe")
+            self.assertEqual(windows_program("explorer.exe"), r"D:\Win\explorer.exe")
+            self.assertEqual(windows_program("powershell.exe"),
+                             r"D:\Win\System32\WindowsPowerShell\v1.0\powershell.exe")
+        env = {k: v for k, v in os.environ.items() if k != "SystemRoot"}
+        with mock.patch.dict(os.environ, env, clear=True):
+            self.assertEqual(windows_program("taskkill.exe"), r"C:\Windows\System32\taskkill.exe")
+
     def test_metacharacters_stay_inside_quotes(self):
         with self.frozen():
             value = autostart.run_value(["run", "--name", "a&b c|d"])
@@ -210,7 +226,7 @@ class AutostartTests(unittest.TestCase):
 
     def test_remove_command(self):
         self.assertEqual(autostart.remove_command(),
-                         ["reg.exe", "delete", autostart.RUN_KEY, "/v", "pushscan2folder", "/f"])
+                         [windows_program("reg.exe"), "delete", autostart.RUN_KEY, "/v", "pushscan2folder", "/f"])
 
 
 class AutostartMainTests(unittest.TestCase):
@@ -245,7 +261,7 @@ class AutostartMainTests(unittest.TestCase):
                                            "win32")
         self.assertEqual(code, 0, err)
         args, kwargs = run.call_args
-        self.assertEqual(args[0][:2], ["reg.exe", "add"])
+        self.assertEqual(args[0][:2], [windows_program("reg.exe"), "add"])
         self.assertFalse(kwargs.get("shell", False))
         self.assertIn(str(cfg), args[0][args[0].index("/d") + 1])
 
@@ -254,9 +270,9 @@ class AutostartMainTests(unittest.TestCase):
             cfg = Path(d) / "c.toml"
             cfg.write_text('printer = "192.0.2.1"\n')
             code, err, run = self.run_main(["--install-autostart", "--config", str(cfg),
-                                            "--output", str(Path(d) / "s")], "win32")
+                                            "--folder", str(Path(d) / "s")], "win32")
         self.assertEqual(code, 0, err)
-        self.assertEqual(run.call_args[0][0][:2], ["reg.exe", "add"])
+        self.assertEqual(run.call_args[0][0][:2], [windows_program("reg.exe"), "add"])
 
     def test_setup_callback_installs(self):
         # the setup questions use this callback; it must add the entry, not delete it
@@ -270,12 +286,12 @@ class AutostartMainTests(unittest.TestCase):
                 code = cli.install_autostart(["--config", str(cfg), "--log-file",
                                               str(Path(d) / "l.log")])
         self.assertEqual(code, 0)
-        self.assertEqual(run.call_args[0][0][:2], ["reg.exe", "add"])
+        self.assertEqual(run.call_args[0][0][:2], [windows_program("reg.exe"), "add"])
 
     def test_remove(self):
         code, _, run = self.run_main(["--remove-autostart"], "win32")
         self.assertEqual(code, 0)
-        self.assertEqual(run.call_args[0][0][:2], ["reg.exe", "delete"])
+        self.assertEqual(run.call_args[0][0][:2], [windows_program("reg.exe"), "delete"])
 
     def test_reg_failure_is_reported(self):
         err = __import__("io").StringIO()

@@ -7,15 +7,20 @@ Zurück zur [README](../README.de.md).
 - [Unterbefehle](#unterbefehle)
 - [Optionen](#optionen)
 - [Konfigurationsdatei](#konfigurationsdatei)
+- [Was das Bedienfeld entscheidet](#was-das-bedienfeld-entscheidet)
+- [Schlüssel](#schlüssel)
+- [Dialog für die nächste Seite](#dialog-für-die-nächste-seite)
+- [Ordner](#ordner)
+- [Datumsfelder in Ordnern](#datumsfelder-in-ordnern)
+- [Dokumenttyp Auto](#dokumenttyp-auto)
+- [Rand abschneiden](#rand-abschneiden)
+- [Die Datei prüfen](#die-datei-prüfen)
 - [Vorrang](#vorrang)
 - [Datei im laufenden Betrieb ändern](#datei-im-laufenden-betrieb-ändern)
 - [Einstellungen vom Bedienfeld](#einstellungen-vom-bedienfeld)
-- [Rand abschneiden](#rand-abschneiden)
-- [Mehrseitige Scans vom Vorlagenglas](#mehrseitige-scans-vom-vorlagenglas)
 - [Einzugsfach (ADF)](#einzugsfach-adf)
 - [Mehrere Ziele](#mehrere-ziele)
 - [Namen auf dem Bedienfeld](#namen-auf-dem-bedienfeld)
-- [Voreinstellungen pro Ziel](#voreinstellungen-pro-ziel)
 - [Dateinamen](#dateinamen)
 
 ## Unterbefehle
@@ -23,12 +28,12 @@ Zurück zur [README](../README.de.md).
 Ohne Unterbefehl wird `run` genommen: `pushscan2folder --printer 192.168.1.50`
 entspricht `pushscan2folder --printer 192.168.1.50 run`. Globale Optionen
 (`--config`, `--printer`, `--name`, `--log-file`, `--verbose`) stehen vor dem
-Unterbefehl; Optionen von `run` wie `--output` gehen auch ohne ihn.
+Unterbefehl; Optionen von `run` wie `--folder` gehen auch ohne ihn.
 
 Dienst starten:
 
 ```sh
-PYTHONPATH=src python3 -m pushscan2folder --printer 192.168.1.50 run --output ./scans
+PYTHONPATH=src python3 -m pushscan2folder --printer 192.168.1.50 run --folder ./scans
 ```
 
 Wähle dann den Host am Bedienfeld des Druckers (Scannen an PC) und starte den Scan.
@@ -65,6 +70,13 @@ trägt die Datei in `[web] password_file` ein. Hat die Datei schon
 Autostart und lässt die Ziele unverändert. Das Setup startet auch von selbst, wenn
 das Programm ohne Argument in einer Konsole gestartet wird und es noch keine
 Konfigurationsdatei gibt; nicht interaktive Starts (Docker, Dienste) fragen nie.
+
+Die Konfigurationsdatei prüfen, ohne den Dienst zu starten (siehe
+[Die Datei prüfen](#die-datei-prüfen)):
+
+```sh
+PYTHONPATH=src python3 -m pushscan2folder check
+```
 
 Ohne Fenster laufen (Einzelheiten für Windows in [windows.de.md](windows.de.md)):
 
@@ -123,290 +135,455 @@ PYTHONPATH=src python3 -m pushscan2folder health \
 PYTHONPATH=src python3 -m pushscan2folder --printer 192.168.1.50 probe
 
 # Scan once via eSCL without using the panel
-PYTHONPATH=src python3 -m pushscan2folder --printer 192.168.1.50 scan --output ./scans
+PYTHONPATH=src python3 -m pushscan2folder --printer 192.168.1.50 scan --folder ./scans
 ```
 
 ## Optionen
 
-Globale Optionen stehen vor dem Unterbefehl. Jede Option lässt sich auch über
-eine Umgebungsvariable setzen. Die Kommandozeile hat Vorrang vor der Umgebung,
-und die Umgebung hat Vorrang vor der [Konfigurationsdatei](#konfigurationsdatei).
-Mehr unter [Vorrang](#vorrang).
+Globale Optionen stehen vor dem Unterbefehl. Die Kommandozeile hat Vorrang vor
+der Umgebung, und die Umgebung hat Vorrang vor der
+[Konfigurationsdatei](#konfigurationsdatei). Mehr unter [Vorrang](#vorrang).
+Außer beim Debug-Befehl `scan` gibt es keine Optionen für Scan-Einstellungen
+wie Format, Auflösung, Farbe und Quelle. Sie kommen vom Bedienfeld und aus der
+Konfigurationsdatei, siehe
+[Was das Bedienfeld entscheidet](#was-das-bedienfeld-entscheidet).
 
 | Option         | Umgebungsvariable  | Standard            | Gilt für      | Beschreibung |
-|----------------|--------------------|---------------------|---------------|-------------|
+|----------------|--------------------|---------------------|---------------|--------------|
 | `--config`     | `PUSHSCAN_CONFIG`     | `~/.config/pushscan2folder/config.toml` falls vorhanden | alle | TOML-Konfigurationsdatei, siehe [Konfigurationsdatei](#konfigurationsdatei) |
 | `--printer`    | `PUSHSCAN_PRINTER`    | (erforderlich)      | alle          | IP oder Hostname des Druckers |
-| `--name`       | `PUSHSCAN_NAME`       | `USER  HOSTNAME`    | alle          | Name auf dem Bedienfeld, siehe [Namen auf dem Bedienfeld](#namen-auf-dem-bedienfeld). Der Standardwert ersetzt Zeichen, die das Bedienfeld nicht anzeigen kann, durch `-` |
-| `-v/--verbose` | `PUSHSCAN_VERBOSE`    | aus                 | alle          | Debug-Protokollierung. Die Umgebungsvariable aktiviert sie mit `1`, `true` oder `yes` |
-| `--output`     | `PUSHSCAN_OUTPUT`     | `./scans`           | run, scan     | Ausgabeverzeichnis (wird bei Bedarf angelegt) |
-| `--interval`   | `PUSHSCAN_INTERVAL`   | `4`                 | run           | Abfrageintervall in Sekunden |
-| `--format`     | `PUSHSCAN_FORMAT`     | `pdf`               | run (Umgebung: nur run) | `pdf` oder `jpeg`. Ersatzwert, siehe [Einstellungen vom Bedienfeld](#einstellungen-vom-bedienfeld) |
-| `--color`      | `PUSHSCAN_COLOR`      | `color`             | run           | `color` oder `gray`. Nur mit `--ignore-panel` oder wenn das Bedienfeld keine Farbe sendet |
-| `--resolution` | `PUSHSCAN_RESOLUTION` | `300`               | run           | DPI. Ersatzwert. Das Bedienfeld bietet 75, 150, 300, 600 |
-| `--source`     | `PUSHSCAN_SOURCE`     | `auto`              | run (Umgebung: nur run) | `auto`, `platen` oder `adf`. Ersatzwert |
-| `--trim`       | `PUSHSCAN_TRIM`       | keiner              | run           | Rand abschneiden, indem ein kleinerer Bereich gescannt wird, z. B. `right=1,bottom=2` (Schlüssel `left`, `top`, `right`, `bottom`, in mm, 0 bis 50). Nur Vorlagenglas. Ersetzt die `trim_*`-Werte der Konfigurationsdatei als Ganzes, siehe [Rand abschneiden](#rand-abschneiden) |
-| `--targets`    | `PUSHSCAN_TARGETS`    | -                   | run           | Mehrere Einträge auf dem Bedienfeld, jeder mit eigenem Ordner und optionaler Voreinstellung, siehe [Mehrere Ziele](#mehrere-ziele). Ersetzt `--name` für `run` |
-| `--ignore-panel` | `PUSHSCAN_IGNORE_PANEL` | aus             | run           | Ignoriert die Einstellungen vom Bedienfeld und nutzt immer die vier Optionen oben (`--format`, `--color`, `--resolution`, `--source`). Umgebungsvariable: `1`, `true` oder `yes`. Deaktiviert auch mehrseitige Scans |
-| `--multipage`  | `PUSHSCAN_MULTIPAGE`  | `document`          | run           | `document`, `auto`, `both` oder `off`, siehe [Mehrseitige Scans](#mehrseitige-scans-vom-vorlagenglas) |
-| `--open-after-scan` | `PUSHSCAN_OPEN_AFTER_SCAN` | `false`     | run, start    | `true` oder `false` (auch `yes`/`no`, `1`/`0`, `on`/`off`; die alten `folder` und `file` zählen als `true`). Nur für Desktop-PCs: nach dem Speichern eines Auftrags den Ordner öffnen (Windows: Explorer mit markierter neuer Datei), einmal pro Auftrag. Unter Linux ist `DISPLAY` oder `WAYLAND_DISPLAY` nötig. Ein Fehler schreibt nur eine Warnung. Docker hat keinen Desktop, dort `false` lassen |
-| `--filename`   | `PUSHSCAN_FILENAME`   | `scan_{now:%Y%m%d_%H%M%S}` | run    | Vorlage für den Dateinamen eines Scans, ohne Endung, siehe [Dateinamen](#dateinamen) |
-| `--heartbeat-file` | `PUSHSCAN_HEARTBEAT_FILE` | -          | run, health   | Datei, die `run` nach jedem erfolgreichen Kontakt mit dem Drucker berührt und die `health` prüft. Das Docker-Image setzt sie, siehe [Docker](docker.de.md#healthcheck) |
+| `--name`       | `PUSHSCAN_NAME`       | `USER  HOSTNAME`    | alle          | Name auf dem Bedienfeld, siehe [Namen auf dem Bedienfeld](#namen-auf-dem-bedienfeld). Wird genommen, wenn die Konfigurationsdatei kein `[[target]]` hat. Der Standard ersetzt Zeichen, die das Bedienfeld nicht anzeigen kann, durch `-` |
+| `-v/--verbose` | `PUSHSCAN_VERBOSE`    | aus                 | alle          | Debug-Protokoll. Die Variable schaltet es mit `1`, `true` oder `yes` ein |
+| `--folder`     | `PUSHSCAN_FOLDER`     | `folder` der Datei, sonst `./scans` | run, start, scan | Basisordner aller Ziele (wird angelegt, falls er fehlt) |
+| `--heartbeat-file` | `PUSHSCAN_HEARTBEAT_FILE` | -          | run, start, health | Datei, die `run` nach jedem erfolgreichen Kontakt mit dem Drucker berührt und die `health` prüft. Das Docker-Image setzt sie, siehe [Docker](docker.de.md#healthcheck) |
 | `--max-age`    | -                  | `120`               | health        | Sekunden, nach denen `health` die Heartbeat-Datei für zu alt hält |
-| `--no-pause`   | `PUSHSCAN_NO_PAUSE`   | aus                 | alle          | Windows: nicht auf Enter warten, bevor sich ein nur für dieses Programm geöffnetes Konsolenfenster schließt. Der Autostart-Eintrag setzt es |
-| `--web`        | `PUSHSCAN_WEB`        | aus                 | run           | Stellt die [Weboberfläche](web.de.md) bereit. Umgebungsvariable: `1`, `true` oder `yes` |
-| `--web-port`   | `PUSHSCAN_WEB_PORT`   | `8737`              | run           | Port der Weboberfläche |
-| `--web-bind`   | `PUSHSCAN_WEB_BIND`   | siehe `[web]` `bind` | run           | Adresse der Weboberfläche |
-| -              | `PUSHSCAN_WEB_PASSWORD` / `PUSHSCAN_WEB_PASSWORD_FILE` | (erforderlich mit `--web`, außer die Bind-Adresse ist Loopback) | run | Passwort der Weboberfläche (mind. 8 Zeichen) oder eine Datei, die es enthält. Per Umgebung oder `[web] password_file` der Konfigurationsdatei. Das Passwort selbst nie in der Konfigurationsdatei |
-| `--keep`       | -                  | aus                 | probe         | Gibt die Sitzung nicht frei |
+| `--no-pause`   | `PUSHSCAN_NO_PAUSE`   | aus                 | alle          | Windows: nie auf Enter warten, bevor sich ein für dieses Programm geöffnetes Konsolenfenster schließt. Der Autostart-Eintrag setzt sie |
+| `--web`        | `PUSHSCAN_WEB`        | aus                 | run, start    | Die [Weboberfläche](web.de.md) bereitstellen. Variable: `1`, `true` oder `yes` |
+| `--web-port`   | `PUSHSCAN_WEB_PORT`   | `8737`              | run, start    | Port der Weboberfläche |
+| `--web-bind`   | `PUSHSCAN_WEB_BIND`   | siehe `[web]` `bind` | run, start   | Adresse der Weboberfläche |
+| -              | `PUSHSCAN_WEB_PASSWORD` / `PUSHSCAN_WEB_PASSWORD_FILE` | (erforderlich mit `--web`, außer die Bind-Adresse ist Loopback) | run | Passwort der Weboberfläche (mind. 8 Zeichen) oder eine Datei damit. Umgebung, oder `[web] password_file` der Konfigurationsdatei. Nie das Passwort selbst in der Konfigurationsdatei |
+| `--keep`       | -                  | aus                 | probe         | Die Sitzung nicht freigeben |
 
-Hinweise:
-
-- `scan` hat eigene Optionen `--format` und `--source`. Sie lesen die Variablen
-  `PUSHSCAN_FORMAT` / `PUSHSCAN_SOURCE` nicht, und `scan` nutzt immer den
-  Standard-Farbmodus und die Standardauflösung (color, 300 dpi) sowie immer eSCL.
-- Der Scanbereich kommt aus der Größe vom Bedienfeld; ohne Daten vom Bedienfeld
-  ist es A4.
+Der Unterbefehl `scan` (ein Scan über eSCL ohne Bedienfeld) hat eigene
+Optionen: `--folder`, `--format` (`pdf` oder `jpeg`, Standard `pdf`), `--color`
+(`color` oder `gray`, Standard `color`), `--resolution` (Standard 300) und
+`--source` (`auto`, `platen` oder `adf`, Standard `auto`). Er nutzt dafür keine
+Einstellungen der Konfigurationsdatei.
 
 ## Konfigurationsdatei
 
-Statt einer langen Kommandozeile kannst du die Einstellungen in einer TOML-Datei
-halten (das braucht Python 3.11 wegen `tomllib`). Ein kommentiertes Beispiel
-steht in [config.example.toml](../config.example.toml).
+Statt einer langen Kommandozeile hältst du die Einstellungen in einer TOML-Datei
+(dafür braucht es Python 3.11 wegen `tomllib`). Ein kommentiertes Beispiel steht
+in [config.example.toml](../config.example.toml). Jeder Schlüssel ist optional.
 
-Ort: `--config PATH` / `PUSHSCAN_CONFIG`; ohne Angabe wird
-`$XDG_CONFIG_HOME/pushscan2folder/config.toml` (standardmäßig
-`~/.config/pushscan2folder/config.toml`) verwendet, falls es existiert. Ein
-ausdrücklich angegebener Pfad muss existieren, sonst beendet sich das Programm
-mit einem Fehler.
+Ort: `--config PFAD` / `PUSHSCAN_CONFIG`; ohne Angabe wird
+`$XDG_CONFIG_HOME/pushscan2folder/config.toml` (Standard
+`~/.config/pushscan2folder/config.toml`) genommen, falls es existiert. Ein
+ausdrücklich angegebener Pfad muss existieren, sonst endet das Programm mit
+einem Fehler.
 
 Unbekannte Schlüssel, falsche Typen und ungültige Werte werden mit einer
 Meldung abgelehnt, die Datei und Schlüssel nennt, damit Tippfehler auffallen.
+Schlüssel früherer Versionen werden nicht mehr gelesen, die Umbenennungen
+stehen im [Changelog](../CHANGELOG.md).
 
-| Schlüssel | Werte | Entspricht |
-|-----------|-------|------------|
-| `printer` | IP oder Hostname | `--printer` |
-| `output` | Ordner; relative Ausgabepfade der Ziele werden darauf bezogen | `--output` |
-| `[defaults]` `resolution` | `75`, `150`, `300`, `600` | `--resolution` |
-| `[defaults]` `color` | `color`, `gray` | `--color` |
-| `[defaults]` `format` | `pdf`, `jpeg` | `--format` |
-| `[defaults]` `source` | `auto`, `platen`, `adf` | `--source` |
-| `[defaults]` `size` | `a4`, `letter`, `legal`, `10x15`, `13x18` | Scanbereich ohne Daten vom Bedienfeld |
-| `[defaults]` `open_after_scan` | `true`, `false` (die alten `"off"`, `"folder"`, `"file"` werden weiter gelesen) | `--open-after-scan` |
-| `[defaults]` `filename` | Vorlage, siehe [Dateinamen](#dateinamen) | `--filename` |
-| `[defaults.document]` `multipage` | `true` / `false`, eingebaut `true` | `--multipage` (Dokumenttyp *Dokument* am Bedienfeld) |
-| `[defaults.auto]` `multipage` | `true` / `false`, eingebaut `false` | `--multipage` (Dokumenttyp *Automatisch* am Bedienfeld) |
-| `[advanced]` `interval` | Sekunden | `--interval` |
-| `[advanced]` `verbose`, `ignore_panel` | `true` / `false` | `--verbose`, `--ignore-panel` |
-| `[advanced]` `trim_left`, `trim_top`, `trim_right`, `trim_bottom` | Zahl, mm, 0 bis 50 | `--trim` |
-| `[web]` `enabled` | `true` / `false` | `--web` |
-| `[web]` `bind` | Adresse; nicht gesetzt: `0.0.0.0`, wenn ein Passwort gesetzt ist, sonst `127.0.0.1` (nur dieser PC). Auf einer Loopback-Adresse (`127.0.0.1`, `::1`, `localhost`) ist kein Passwort nötig | `--web-bind` |
-| `[web]` `port` | 1 bis 65535, Standard 8737 | `--web-port` |
-| `[web]` `password_file` | Datei mit dem Passwort; relativ zur Konfigurationsdatei. Das Passwort selbst ist nie ein Schlüssel | `PUSHSCAN_WEB_PASSWORD_FILE` |
-| `[[target]]` `name` | erforderlich, max. 31 Zeichen, eindeutig | `NAME` |
-| `[[target]]` `output` | Ordner; `"."` ist der Ausgabeordner selbst; Standard `<output>/<name>` | `NAME=DIR` |
-| `[[target]]` `filename` | Vorlage, siehe [Dateinamen](#dateinamen); gilt vor `[defaults]` für dieses Ziel | - |
-| `[[target]]` `open_after_scan` | `true`, `false`; gilt vor `[defaults]` für dieses Ziel, etwa `false` für einen Archivordner | - |
-| `[target.document]` `multipage` | `true` / `false` | `mp:` für den Dokumenttyp *Dokument* |
-| `[target.auto]` `resolution`, `format`, `size` | wie oben | die `@preset`-Optionen |
-| `[target.auto]` `multipage` | `true` / `false` | `mp:` für den Dokumenttyp *Automatisch* |
+Eine kleine Datei mit zwei Zielen:
 
-Die Booleschen Werte eines Ziels für mehrseitige Scans gehen von
-`[defaults.document]` und `[defaults.auto]` (oder `--multipage`) aus und ersetzen
-den Wert für dieses Ziel. Setzt ein Ziel keinen von beiden, folgt es den
-Vorgaben.
+```toml
+printer = "192.168.1.50"
+folder = "/scans"
 
-Das Bedienfeld kennt drei Dokumenttypen. *Foto* braucht keine Tabelle, denn das
-Bedienfeld sendet alle Einstellungen selbst (JPEG, Größe, Auflösung). Bei
-*Dokument* sendet es sie ebenfalls, und `[defaults.document]` entscheidet nur
-über den Dialog für mehrseitige Scans. Bei *Automatisch* sendet das Bedienfeld
-weder Größe noch Format noch Auflösung, daher entscheiden `[defaults]` und
-`[target.auto]`.
+[[target]]
+name = "Scans"
 
-Fehlt `[defaults.document]` oder `[defaults.auto]`, gilt der eingebaute Wert
-(`true` für *Dokument*, `false` für *Automatisch*). Setzt du nur eine der beiden
-Tabellen, behält die andere ihren eingebauten Wert.
+[[target]]
+name = "Paperless"
+next_page = ["document", "auto"]
+```
+
+Tabellen in geschweiften Klammern wie `auto = { ... }` und `trim = { ... }`
+müssen in einer Zeile stehen. TOML erlaubt darin keinen Zeilenumbruch.
+
+## Was das Bedienfeld entscheidet
+
+Das Bedienfeld des Druckers schickt seine Auswahl mit jeder Scan-Anfrage mit,
+und das Programm folgt ihr:
+
+- Die Farbe ist die Starttaste, die du drückst (Farbe oder Schwarzweiß).
+- Die Quelle ist das Einzugsfach, wenn Papier darin liegt, sonst das
+  Vorlagenglas.
+- Bei den Dokumenttypen *Dokument* und *Foto* schickt das Bedienfeld außerdem
+  Größe, Format und Auflösung.
+
+Für diese beiden Typen gibt es in der Konfigurationsdatei also keine Schlüssel
+für Farbe, Quelle, Größe, Format oder Auflösung. Die Datei bestimmt, was das
+Bedienfeld nicht schickt:
+
+- die Ordner, die Dateinamen und ob eine fertige Datei geöffnet wird,
+- welche Dokumenttypen den [Dialog für die nächste Seite](#dialog-für-die-nächste-seite)
+  bekommen, auf dem Glas und auf Wunsch nach dem Einzug,
+- die Einstellungen des Dokumenttyps *Auto*, bei dem das Bedienfeld weder
+  Größe noch Format noch Auflösung schickt ([Dokumenttyp Auto](#dokumenttyp-auto)),
+- den abgeschnittenen Rand ([Rand abschneiden](#rand-abschneiden)).
+
+## Schlüssel
+
+Oberste Ebene:
+
+| Schlüssel | Typ | Standard | Bedeutung |
+|-----------|-----|----------|-----------|
+| `printer` | Text | keiner (erforderlich, hier oder per `--printer`) | IP oder Hostname des Druckers |
+| `folder` | Text | `./scans`, unter Windows und macOS `Documents/Scans` | Basisordner; relative Zielordner beziehen sich darauf, siehe [Ordner](#ordner) |
+| `filename` | Text | `scan_{now:%Y%m%d_%H%M%S}` | Vorlage des Dateinamens ohne Endung, siehe [Dateinamen](#dateinamen) |
+| `next_page` | Liste aus `"document"`, `"auto"`, `"photo"` | `["document"]` | Dokumenttypen, die auf dem Vorlagenglas den Dialog für die nächste Seite bekommen, siehe [Dialog für die nächste Seite](#dialog-für-die-nächste-seite). `[]` heißt keiner |
+| `feeder_next_page` | Liste aus `"document"`, `"auto"`, `"photo"` | `[]` | Dokumenttypen, die nach einem Scan aus dem Einzug den Dialog für die nächste Seite bekommen, siehe [Dialog nach dem Einzug](#dialog-nach-dem-einzug). `[]` heißt keiner |
+| `auto` | Inline-Tabelle | `{ resolution = 300, format = "pdf", size = "a4" }` | Einstellungen für den Dokumenttyp *Auto*, siehe [Dokumenttyp Auto](#dokumenttyp-auto) |
+| `open_after_scan` | `true` / `false` | `false` | nur Desktop-PC: nach dem Speichern eines Auftrags den Ordner öffnen (Windows: Explorer mit markierter neuer Datei), einmal pro Auftrag. Unter Linux braucht es `DISPLAY` oder `WAYLAND_DISPLAY`. Ein Fehler erzeugt nur eine Warnung. Docker hat keinen Desktop, lass es `false` (sonst eine Warnung beim ersten Auftrag) |
+
+`[advanced]`, selten nötig:
+
+| Schlüssel | Typ | Standard | Bedeutung |
+|-----------|-----|----------|-----------|
+| `interval` | Zahl | `4` | Sekunden zwischen den Abfragen |
+| `verbose` | `true` / `false` | `false` | Debug-Protokoll, braucht einen Neustart |
+| `trim` | Inline-Tabelle | keine | Rand, der bei Scans vom Vorlagenglas abgeschnitten wird, Schlüssel `left`, `top`, `right`, `bottom`, mm, 0 bis 50, siehe [Rand abschneiden](#rand-abschneiden) |
+| `adf_trim` | Inline-Tabelle | keine | dasselbe für Scans aus dem Einzugsfach |
+
+`[web]`, siehe [Weboberfläche](web.de.md):
+
+| Schlüssel | Typ | Standard | Bedeutung |
+|-----------|-----|----------|-----------|
+| `enabled` | `true` / `false` | `false` | die Weboberfläche bereitstellen |
+| `bind` | Text | `0.0.0.0`, wenn ein Passwort gesetzt ist, sonst `127.0.0.1` (nur dieser PC) | Adresse der Weboberfläche. Bei einer Loopback-Adresse (`127.0.0.1`, `::1`, `localhost`) braucht es kein Passwort |
+| `port` | 1 bis 65535 | `8737` | Port der Weboberfläche |
+| `password_file` | Text | keine | Datei mit dem Passwort, relativ zur Konfigurationsdatei. Das Passwort selbst ist nie ein Schlüssel |
+
+`[[target]]`, ein Block pro Eintrag auf dem Bedienfeld:
+
+| Schlüssel | Typ | Standard | Bedeutung |
+|-----------|-----|----------|-----------|
+| `name` | Text | erforderlich | Name auf dem Bedienfeld, höchstens 31 Zeichen, eindeutig, siehe [Namen auf dem Bedienfeld](#namen-auf-dem-bedienfeld) |
+| `folder` | Text | der Name des Ziels | Ordner der Scans; `"."` ist der Basisordner selbst. Datumsfelder sind erlaubt, siehe [Ordner](#ordner) |
+| `document_folder`, `auto_folder`, `photo_folder` | Text | `folder` | anderer Ordner für Scans eines Dokumenttyps |
+| `filename` | Text | `filename` der obersten Ebene | Vorlage des Dateinamens für dieses Ziel |
+| `next_page` | Liste | `next_page` der obersten Ebene | ersetzt die globale Liste für dieses Ziel |
+| `feeder_next_page` | Liste | `feeder_next_page` der obersten Ebene | ersetzt die globale Liste für dieses Ziel |
+| `auto` | Inline-Tabelle | `auto` der obersten Ebene | hier gesetzte Schlüssel gelten vor dem globalen `auto`, die anderen bleiben |
+| `open_after_scan` | `true` / `false` | Wert der obersten Ebene | für dieses Ziel, zum Beispiel `false` für einen Archivordner |
+
+## Dialog für die nächste Seite
+
+Bei Scans vom Vorlagenglas kann der Drucker nach jeder Seite einen Dialog
+zeigen: *Stopp*, *Schwarzweiß*, *Farbe* und *Fertig*. Lege die nächste Seite auf
+das Glas und drücke *Farbe* oder *Schwarzweiß*, um sie zu scannen (jede Seite
+kann ihren eigenen Farbmodus haben), oder *Fertig*, um zu beenden. Alle Seiten
+werden als ein PDF gespeichert (bei Format JPEG: eine Datei pro Seite).
+
+Dafür wird Canons eigenes Scanner-Protokoll (`/canon/ij/command2/port3`) statt
+eSCL benutzt, denn nur dieses Protokoll kennt die Frage nach der nächsten Seite.
+Der Drucker liefert jede Seite als JPEG; das PDF bettet die JPEGs unverändert
+ein.
+
+`next_page` listet die Dokumenttypen, die den Dialog bekommen. Der Standard ist
+`["document"]`, wie bei der offiziellen Software. Ein Ziel kann eine eigene
+Liste setzen, und `next_page = []` schaltet den Dialog aus.
+
+```toml
+next_page = ["document", "auto"]       # auch bei Auto fragen
+```
+
+Das Einzugsfach scannt standardmäßig alle Seiten in einem Rutsch über eSCL, ohne
+Dialog. Einen optionalen Dialog nach dem Einzug beschreibt der nächste Abschnitt.
+
+Bei *Foto* erscheint der Dialog nur für feste Fotogrößen. Bei den Größen *Auto
+Scan* und *Auto Multi Scan* schickt der Drucker das ganze Glas, und die Fotos
+werden stattdessen am PC ausgeschnitten (siehe [Fotos](#fotos)). `"photo"` in
+der Liste wirkt bei diesen beiden Größen deshalb nicht.
+
+Geprüft mit A4 bei 300 dpi; andere Auflösungen und Größen nutzen dieselben
+Parameter, sind aber noch nicht getestet. Bei *Auto* schickt das Bedienfeld
+weder Auflösung noch Format, es gelten also die `auto`-Einstellungen. Der
+Drucker kann den Dokumenttyp nach einem Scan auf *Auto* zurücksetzen, prüfe ihn
+also vor dem nächsten mehrseitigen Scan.
+
+### Dialog nach dem Einzug
+
+Der Einzug zieht manchmal zwei Blätter auf einmal ein. Mit `feeder_next_page`
+zeigt das Bedienfeld nach dem Scan aus dem Einzug denselben Dialog, sodass du die
+Seitenzahl prüfen und ein Blatt neu einlegen kannst, bevor die Datei gespeichert
+wird. Der Schlüssel hat dieselbe Form wie `next_page`: eine Liste von
+Dokumenttypen aus `"document"`, `"auto"` und `"photo"`. Der Standard ist `[]`
+(aus). Die Liste eines Ziels ersetzt die globale.
+
+```toml
+feeder_next_page = ["document"]
+```
+
+Liegt Papier im Einzug und der Dokumenttyp steht in der Liste, scannt das
+Programm den Einzug über eSCL und zeigt dann den Dialog. Für weitere Blätter
+legst du sie zuerst in den Einzug und drückst dann *Farbe* oder *Schwarzweiß*.
+Der Einzug wird in dieser Farbe erneut gescannt. *Fertig* beendet den Auftrag.
+Alle Seiten landen in einem PDF (Format PDF) oder in einzelnen JPEG-Dateien.
+
+Der Drucker zeigt den Dialog nur, nachdem eine Seite mit Canons nativem
+Protokoll gescannt wurde. Deshalb scannt das Programm vor jedem Dialog einen
+winzigen Blindbereich (1 x 1 Zoll bei 150 dpi) vom Glas und wirft ihn weg. Das
+kostet etwa 10 Sekunden pro Runde, und der Scankopf bewegt sich kurz. Was auf dem
+Glas liegt, spielt keine Rolle.
+
+Ist der Einzug leer, wenn du mehr wählst, schreibt das Programm eine Warnung ins
+Log und fragt erneut. Nach 3 Runden in Folge ohne Seite beendet es den Auftrag.
+Stoppst du eine Einzugsrunde am Bedienfeld, endet der Auftrag sofort. Die bisher
+gescannten Seiten bleiben immer erhalten.
 
 ### Fotos
 
-Beim Dokumenttyp *Foto* bietet das Bedienfeld die Größen *auto scan* und
-*auto multi scan* an. Der Drucker sendet immer die ganze Glasfläche, und
-pushscan2folder schneidet die Fotos auf dem PC aus:
+Beim Dokumenttyp *Foto* bietet das Bedienfeld die Größen *Auto Scan* und *Auto
+Multi Scan* an. Der Drucker schickt immer das ganze Glas, und pushscan2folder
+schneidet die Fotos am PC aus:
 
-- *Auto scan* speichert eine Datei mit dem Bereich des Fotos oder der Fotos.
-- *Auto multi scan* speichert eine Datei pro Foto, sortiert von oben nach unten
+- *Auto Scan* speichert eine Datei mit dem Bereich des Fotos oder der Fotos.
+- *Auto Multi Scan* speichert eine Datei pro Foto, geordnet von oben nach unten
   und dann von links nach rechts.
 
-Das funktioniert mit offenem oder geschlossenem Deckel und nur auf dem Glas
-(nicht im Vorlageneinzug). Schiefe Fotos bleiben schief, denn der Ausschnitt ist
-ein umschließendes Rechteck ohne Geraderichten. Bei Bedienfeld-Format PDF scannt
-das Tool als JPEG, schneidet die Fotos aus und schreibt ein PDF pro Foto.
+Das geht mit offenem und geschlossenem Deckel und nur auf dem Glas (nicht im
+ADF). Schräge Fotos bleiben schräg, weil der Schnitt ein Rechteck ohne
+Geraderichten ist. Beim Bedienfeld-Format PDF scannt das Programm als JPEG,
+schneidet die Fotos aus und schreibt ein PDF pro Foto.
 
-Zum Ausschneiden braucht es das optionale Python-Paket Pillow. Die Windows-exe
-und das Docker-Image enthalten es. Beim Start aus dem Quellcode installierst du
-es mit `pip install -r requirements.txt`. Ohne Pillow funktioniert alles wie
-bisher und die ganze Glasfläche wird gespeichert; das Log sagt dann "install
+Das Ausschneiden braucht das optionale Python-Paket Pillow. Die Windows-exe und
+das Docker-Image enthalten es. Beim Start aus dem Quellcode installierst du es
+mit `pip install -r requirements.txt`. Ohne Pillow funktioniert alles wie
+bisher und das ganze Glas wird gespeichert; das Protokoll sagt dann "install
 Pillow to cut the photos out of the scan".
 
-### Ältere Konfigurationsdateien
+## Ordner
 
-Dateien aus früheren Versionen funktionieren weiter. Die alten Schlüssel werden
-gelesen, und das Log zeigt eine Warnung, die sie auflistet. Setup und die
-Weboberfläche schreiben das neue Layout.
+`folder` auf der obersten Ebene ist der Basisordner. Jedes `[[target]]` speichert
+darunter:
 
-| Alter Ort | Neuer Ort |
-|-----------|-----------|
-| `interval`, `verbose`, `ignore_panel` auf oberster Ebene | `[advanced]` |
-| `trim_*` in `[defaults]` | `[advanced]` |
-| `multipage = "document"` (oder `auto`, `both`, `off`) auf oberster Ebene | `multipage` in `[defaults.document]` und `[defaults.auto]` |
-| `document_multipage` in einem `[[target]]` | `multipage` in `[target.document]` |
+- Ohne `folder` speichert das Ziel in einem Unterordner mit seinem Namen. Zeichen
+  außer Buchstaben, Ziffern, `.`, `_` und `-` werden zu `_`.
+- Ein relativer `folder` bezieht sich auf den Basisordner, ein absoluter wird
+  unverändert benutzt, und `"."` ist der Basisordner selbst.
+- `document_folder`, `auto_folder` und `photo_folder` geben einem Dokumenttyp
+  einen anderen Ordner, mit denselben Regeln. Ohne sie nimmt der Typ `folder`.
 
-Stehen der alte und der neue Ort desselben Schlüssels gleichzeitig in der Datei,
-wird sie mit einer Meldung wie "keep only ..." abgelehnt.
+```toml
+folder = "/scans"
 
-## Vorrang
+[[target]]
+name = "Paperless"                # /scans/Paperless
+photo_folder = "Photos"           # Fotos landen in /scans/Photos
 
-Kommandozeile > Umgebungsvariable > Konfigurationsdatei > eingebauter
-Standardwert.
+[[target]]
+name = "Archive"
+folder = "Archive/{now:%Y}"       # /scans/Archive/2026
+```
 
-- Das Docker-Image setzt `PUSHSCAN_OUTPUT=/scans`, daher wird im Container der
-  Schlüssel `output` der Datei überschrieben. Binde deine Ordner unterhalb von
-  `/scans` ein oder verwende absolute Ausgabepfade bei den Zielen (siehe
-  [Docker](docker.de.md)).
-- Ist `--targets` / `PUSHSCAN_TARGETS` gesetzt, ersetzt es die
-  `[[target]]`-Liste der Datei vollständig.
-- Für den Scan selbst kommen die Einstellungen vom Bedienfeld zuerst, die
-  CLI-Optionen füllen nur auf, siehe
-  [Einstellungen vom Bedienfeld](#einstellungen-vom-bedienfeld) und
-  [Voreinstellungen pro Ziel](#voreinstellungen-pro-ziel).
+Zwei Ziele dürfen sich keinen Ordner teilen (`a b` und `a_b` ergeben zum
+Beispiel beide `a_b`). Das Docker-Image setzt `PUSHSCAN_FOLDER=/scans`, siehe
+[Vorrang](#vorrang).
 
-## Datei im laufenden Betrieb ändern
+## Datumsfelder in Ordnern
 
-Vor jedem Abfragezyklus, nie während eines Scans, prüft `run` Änderungsdatum
-und Größe der Konfigurationsdatei. Hat sie sich geändert, wird sie wie beim
-Start neu gelesen. Kommandozeilenoptionen und `PUSHSCAN_*`-Umgebungsvariablen
-gelten weiterhin vor der Datei. Das betrifft auch Änderungen von der
-[Weboberfläche](web.de.md).
+Die Ordner eines Ziels (`folder` und die drei Typ-Ordner) dürfen dieselben Felder
+enthalten wie die [Dateinamen](#dateinamen): `{name}` (der Zielname), `{date}`
+(`2026-11-22`), `{time}` (`183005`) und `{now:FORMAT}` mit Python-`strftime`-Codes.
+Die Felder werden beim Speichern eines Scans ausgefüllt, so kann der Ordner nach
+Jahr oder Monat wechseln, ohne dass du die Datei änderst.
 
-Sofort übernommen werden: die Scan-Vorgaben (Schlüssel in `[defaults]`, `size`,
-`filename`, die `multipage`-Schlüssel), `interval`, `ignore_panel` und die
-`trim_*`-Werte aus `[advanced]`, `open_after_scan`, die Ziele, `output` und `printer`. Ziele, deren Namen
-bleiben, behalten ihre Anmeldung am Bedienfeld. Ändert sich der Drucker, werden
-die Namen am alten Drucker freigegeben und am neuen angemeldet.
+```toml
+folder = "Archive/{now:%Y}/{now:%m}"    # Archive/2026/11
+```
 
-Einen Neustart brauchen: die Weboberfläche an oder aus, ihre Bind-Adresse, der
-Port und die Passwortdatei, die Logdatei, das Debug-Log (`verbose` in `[advanced]`) und die
-Heartbeat-Datei. Ändert die Datei eine davon, nennt eine Warnung im Log sie.
+Der Wert eines Felds ist immer ein einzelner Teil des Ordnernamens. Ein Feld
+fügt nie einen Pfadtrenner oder `..` ein: ein Format wie `{now:%d/%m}` ergibt
+`03_11` statt zwei Ordnern. Die Schrägstriche, die du zwischen die Felder
+schreibst, sind der einzige Weg zu Unterordnern. Ein falsches Feld wie
+`{now.year}` oder `{}` wird beim Lesen der Datei abgelehnt.
 
-Eine ungültige Datei oder eine ungültige Dateinamen-Vorlage wird einmal als
-Fehler ins Log geschrieben, und die laufenden Einstellungen bleiben. Eine
-gelöschte Datei ändert nichts. In Docker funktioniert das, wenn du
-`./config/config.toml` auf dem Host bearbeitest.
+## Dokumenttyp Auto
 
-## Einstellungen vom Bedienfeld
+Beim Dokumenttyp *Auto* schickt das Bedienfeld nur Typ, Farbe und Quelle. Die
+Tabelle `auto` bestimmt den Rest:
 
-Der Drucker sendet mit jeder Scan-Anforderung 32 Bytes: Dokumenttyp, Farbe,
-Quelle, Größe, Format, Auflösung, Durchscheinen, Entrasterung und
-Unscharfmaskierung. Das Tool bildet diese auf eSCL ab, sodass der Scan dem
-entspricht, was du am Bedienfeld gewählt hast.
+```toml
+auto = { resolution = 300, format = "pdf", size = "a4" }
+```
 
-Die CLI-Optionen `--format`, `--color`, `--resolution` und `--source` (und die
-`PUSHSCAN_*`-Umgebungsvariablen) sind nur der Ersatzwert. Sie gelten für den
-Dokumenttyp *Automatisch*, bei dem das Bedienfeld keine Details sendet, und für
-jedes Feld, das das Bedienfeld offen lässt. Mit `--ignore-panel` (oder
-`PUSHSCAN_IGNORE_PANEL=1`) gelten immer die CLI-Werte.
+| Schlüssel | Werte | Standard |
+|-----------|-------|----------|
+| `resolution` | `75`, `150`, `300`, `600` | `300` |
+| `format` | `"pdf"`, `"jpeg"` | `"pdf"` |
+| `size` | `"a4"`, `"letter"`, `"legal"`, `"10x15"`, `"13x18"` | `"a4"` |
 
-- Durchscheinen, Entrasterung und Unscharfmaskierung haben keine eSCL-Entsprechung
-  und werden ignoriert (siehe [Fehlersuche](troubleshooting.de.md#einschränkungen)).
-- "Kompaktes PDF" wird als normales PDF mit 300 dpi gescannt.
-- TIFF wird nicht unterstützt, weil weder eSCL noch das native Protokoll es
-  liefert. Solche Scans werden als JPEG gespeichert.
-- Die Größe "Auto" scannt die volle Breite des Vorlagenglases bei A4-Höhe (kein
-  automatischer Zuschnitt).
-- Die Auflösungen 75/150/300/600 dpi vom Bedienfeld funktionieren alle über
-  eSCL, obwohl die eSCL-Fähigkeiten nur 75, 100, 150, 200, 600 und 1200 auflisten.
-- Wird ein Scan am Bedienfeld abgebrochen, bleibt ein unvollständiges Dokument
-  zurück. Das Tool erkennt das und verwirft es, es wird also nichts gespeichert.
+Du kannst auch nur einzelne Schlüssel setzen. Ein `[[target]]` kann ein eigenes
+`auto` haben; seine Schlüssel gelten vor der globalen Tabelle und die übrigen
+bleiben, mit `auto = { format = "jpeg" }` in einem Ziel bleiben also globale
+Auflösung und Größe erhalten.
 
 ## Rand abschneiden
 
-Manche Scanner erfassen am Rand des Vorlagenglases einen dünnen Streifen. Der
-TR8550 entfernten laut Tests `trim_right = 1` und `trim_bottom = 2` (mm) den
-Rand. Mit `--trim right=1,bottom=2` (oder `PUSHSCAN_TRIM`, oder den
-`trim_*`-Schlüsseln in der Tabelle `[advanced]` der Konfigurationsdatei) fordert das Tool beim Drucker einen kleineren
-Scanbereich an, sodass der Rand gar nicht erst gescannt wird. Es gibt keine
-Bildverarbeitung. Der Zuschnitt gilt nur für das Vorlagenglas, ADF-Scans werden
-nicht zugeschnitten. Bliebe in einer Richtung weniger als 1 Zoll übrig, wird der
-Zuschnitt übersprungen und eine Warnung ins Log geschrieben. Die Einstellung ist
-global, nicht pro Ziel.
+Manche Scanner erfassen am Rand des Glases einen dünnen Streifen. Beim TR8550
+zeigten Tests, dass 1 mm rechts und 2 mm unten ihn entfernen. Mit der Tabelle
+`trim` in `[advanced]` fordert das Programm vom Drucker einen kleineren
+Scanbereich an, der Rand wird also nie gescannt. Es gibt keine Bildbearbeitung.
 
-## Mehrseitige Scans vom Vorlagenglas
+```toml
+[advanced]
+trim = { right = 1, bottom = 2 }     # Vorlagenglas
+adf_trim = { }                       # Einzugsfach, standardmäßig 0
+```
 
-Bei Scans vom Vorlagenglas mit dem Dokumenttyp *Dokument* zeigt der Drucker nach
-jeder Seite einen Dialog: *Stopp*, *Schwarzweiß*, *Farbe* und *Beenden*. Lege die
-nächste Seite auf das Glas und drücke *Farbe* oder *Schwarzweiß*, um sie zu
-scannen (jede Seite kann ihren eigenen Farbmodus haben), oder *Beenden*, um zu
-beenden. Alle Seiten werden in einem PDF gespeichert (beim Format JPEG: eine
-Datei pro Seite).
+Die Schlüssel sind `left`, `top`, `right` und `bottom`, in mm von 0 bis 50. Nicht
+genannte Seiten bleiben 0. `trim` gilt nur für das Vorlagenglas. Scans aus dem
+Einzugsfach haben die eigene Tabelle `adf_trim`, standardmäßig 0. Der TR8550
+beachtet den kleineren Bereich auch im Einzugsfach. Das Einzugsfach zieht eine
+Seite manchmal leicht schief ein, ein Trim kann dort also ein Stück der Seite
+abschneiden; lass die Tabelle leer, solange dich der Rand nicht stört. Bliebe in
+einer Richtung weniger als 1 Zoll übrig, wird der Trim übersprungen und eine
+Warnung protokolliert. Die Einstellung gilt global, nicht pro Ziel.
 
-Dafür verwendet das Tool Canons eigenes Scanner-Protokoll
-(`/canon/ij/command2/port3`) statt eSCL, weil nur dieses Protokoll die Frage
-nach der nächsten Seite kennt. Der Drucker liefert jede Seite als JPEG, und das
-PDF bettet die JPEGs unverändert ein.
+## Die Datei prüfen
 
-`--multipage` (`PUSHSCAN_MULTIPAGE`) legt fest, welche Dokumenttypen den Dialog
-bekommen. In der Konfigurationsdatei dienen dafür `multipage` in
-`[defaults.document]` (eingebaut `true`) und `[defaults.auto]` (eingebaut
-`false`):
+`pushscan2folder check` liest die Konfigurationsdatei wie `run`, meldet einen
+Fehler mit dem betroffenen Schlüssel oder zeigt, was die Datei bewirkt:
+Basisordner, Dateinamen, die Einstellungen für *Auto*, den Trim und für jedes
+Ziel seine Ordner mit dem heutigen Datum. Es nimmt keinen Kontakt zum Drucker
+auf. Führe es nach jeder Änderung der Datei aus. Die Ausgabe für
+[config.example.toml](../config.example.toml):
 
-| Wert                 | Dialog für                                        |
-|----------------------|---------------------------------------------------|
-| `document` (Standard)| Dokument, wie bei der offiziellen Software        |
-| `auto`               | nur *Automatisch*                                   |
-| `both`               | *Dokument* und *Automatisch*                          |
-| `off`                | nie; alle Scans nutzen eSCL                       |
+```
+$ pushscan2folder --config config.example.toml check
+config file: config.example.toml
+printer: 192.168.1.50
+base folder: /scans
+file names: scan_{now:%Y-%m-%d_%H-%M-%S}
+next page dialog: document
+next page dialog after the feeder: none
+document type Auto: 300 dpi, pdf, a4
+trim: glass right 1 mm, bottom 2 mm; feeder none
+open after scan: no
+poll interval: 4 s
+target 'Scans':
+  folder: /scans/Scans
+target 'Paperless':
+  folder: /scans/Paperless
+  photo scans: /scans/Photos
+  next page dialog: document, auto
+target 'Archive':
+  folder: /scans/Archive/2026
+  next page dialog: none
+  next page dialog after the feeder: document
+  document type Auto: 600 dpi, jpeg, a4
+OK
+```
 
-Geprüft mit A4 bei 300 dpi. Andere Auflösungen und Größen nutzen dieselben
-Parameter, sind aber noch nicht getestet.
+Der Exit-Code ist 0, wenn die Datei benutzt werden kann, sonst 2, auch wenn kein
+Drucker gesetzt ist.
 
-`1`/`true`/`yes` bedeuten `document`, `0`/`false`/`no` bedeuten `off`. Bei
-*Automatisch* sendet das Bedienfeld weder Auflösung noch Format, daher gelten die
-Ersatzoptionen. Scans über das Einzugsfach nutzen immer eSCL (das Einzugsfach
-liefert bereits alle Seiten in einem PDF).
+## Vorrang
 
-Der Drucker setzt den Dokumenttyp nach einem Scan unter Umständen auf *Automatisch*
-zurück. Prüfe ihn daher vor dem nächsten mehrseitigen Scan.
+Kommandozeile > Umgebungsvariable > Konfigurationsdatei > eingebauter Standard.
+
+Von den Schlüsseln der Datei lassen sich nur `printer` und `folder` so
+überschreiben (durch `--printer` / `PUSHSCAN_PRINTER` und `--folder` /
+`PUSHSCAN_FOLDER`), dazu die Web-Optionen aus `[web]` und `verbose`. Alles
+andere wird nur in der Datei gesetzt.
+
+- Das Docker-Image setzt `PUSHSCAN_FOLDER=/scans`, daher wird im Container der
+  Schlüssel `folder` der Datei überschrieben. Binde deine Ordner unterhalb von
+  `/scans` ein oder nimm absolute Zielordner (siehe [Docker](docker.de.md)).
+- Für den Scan selbst hat das Bedienfeld Vorrang, die Tabelle `auto` füllt nur
+  beim Dokumenttyp *Auto* auf, siehe
+  [Einstellungen vom Bedienfeld](#einstellungen-vom-bedienfeld).
+
+## Datei im laufenden Betrieb ändern
+
+Vor jedem Abfragezyklus, nie während eines Scans, prüft `run` Änderungszeit und
+Größe der Konfigurationsdatei. Hat sie sich geändert, wird sie wie beim Start
+neu gelesen. Kommandozeilen-Optionen und die Variablen `PUSHSCAN_FOLDER` und
+`PUSHSCAN_PRINTER` haben weiter Vorrang vor der Datei. Das gilt auch für
+Änderungen auf der [Weboberfläche](web.de.md).
+
+Sofort übernommen werden: `folder`, `filename`, `next_page`, `feeder_next_page`, `auto`,
+`open_after_scan`, `interval`, `trim` und `adf_trim`, die Ziele und `printer`.
+Ziele, deren Namen bleiben, behalten ihre Anmeldung am Bedienfeld. Ändert sich
+der Drucker, werden die Namen am alten Drucker freigegeben und am neuen
+angemeldet.
+
+Einen Neustart brauchen: die Weboberfläche an oder aus, ihre Bind-Adresse, Port
+und Passwortdatei, die Protokolldatei, das Debug-Protokoll (`verbose` in
+`[advanced]`) und die Heartbeat-Datei. Ändert die Datei eines davon, zeigt das
+Protokoll eine Warnung, die es nennt.
+
+Eine ungültige Datei oder eine ungültige Dateinamen-Vorlage wird einmal als
+Fehler protokolliert, und die laufenden Einstellungen bleiben. Eine gelöschte
+Datei ändert nichts. In Docker klappt das, wenn du `./config/config.toml` auf dem
+Host bearbeitest.
+
+## Einstellungen vom Bedienfeld
+
+Der Drucker schickt mit jeder Scan-Anfrage 32 Bytes: Dokumenttyp, Farbe, Quelle,
+Größe, Format, Auflösung, Durchscheinen, Entrastern und Unscharfmaske. Das
+Programm übersetzt sie nach eSCL, der Scan folgt also deiner Auswahl am
+Bedienfeld. Nur beim Dokumenttyp *Auto* liefert die
+[Tabelle `auto`](#dokumenttyp-auto) Größe, Format und Auflösung.
+
+- Durchscheinen, Entrastern und Unscharfmaske haben kein eSCL-Gegenstück und
+  werden ignoriert (siehe [Fehlersuche](troubleshooting.de.md#einschränkungen)).
+- "Kompaktes PDF" wird als normales PDF mit 300 dpi gescannt.
+- TIFF wird nicht unterstützt, weil weder eSCL noch das native Protokoll es
+  liefert. Solche Scans werden als JPEG gespeichert.
+- Die Größe "Auto" scannt die volle Glasbreite in A4-Höhe (ohne automatisches
+  Zuschneiden).
+- Die Bedienfeld-Auflösungen 75/150/300/600 dpi funktionieren alle über eSCL,
+  obwohl die eSCL-Fähigkeiten nur 75, 100, 150, 200, 600 und 1200 nennen.
+- Bricht man einen Scan am Bedienfeld ab, bleibt ein abgeschnittenes Dokument.
+  Das Programm erkennt das und verwirft es, es wird also nichts gespeichert.
 
 ## Einzugsfach (ADF)
 
-Der Drucker erkennt die Quelle selbst mit seinem Papiersensor, das Bedienfeld
-bietet keine Quellenauswahl. Das Format Legal gibt es nur über das Einzugsfach.
-Das Einzugsfach scannt nur einseitig. Ohne Daten vom Bedienfeld (*Automatisch*) und
-mit `--source auto` fragt das Tool den Drucker, ob Papier eingelegt ist. Ist das
-der Fall, nutzt es das Einzugsfach, sonst das Vorlagenglas.
+Der Drucker erkennt die Quelle mit seinem Papiersensor; das Bedienfeld bietet
+keine Quellenwahl. Legal-Größe gibt es nur aus dem ADF. Das ADF scannt nur
+einseitig. Das Programm nimmt das Einzugsfach, wenn Papier darin liegt, sonst
+das Vorlagenglas.
 
 ## Mehrere Ziele
 
-Eine Instanz kann mehrere Namen beim Drucker registrieren. Jeder Name erscheint
-als eigener Computer auf dem Bedienfeld, und seine Scans landen in einem
-eigenen Ordner:
+Eine Instanz kann mehrere Namen am Drucker anmelden. Jeder Name erscheint als
+eigener Computer am Bedienfeld, und seine Scans landen in einem eigenen Ordner.
+Du legst sie als `[[target]]`-Blöcke in der Konfigurationsdatei fest (oder auf
+der [Weboberfläche](web.de.md)):
 
-```sh
-PYTHONPATH=src python3 -m pushscan2folder --printer 192.168.1.50 run \
-  --output ./scans --targets "Scans,Paperless=consume,Archive=/data/archive"
+```toml
+folder = "/scans"
+
+[[target]]
+name = "Scans"
+
+[[target]]
+name = "Paperless"
+folder = "consume"
+
+[[target]]
+name = "Archive"
+folder = "/data/archive"
 ```
 
-Die Liste wird durch Kommas getrennt, und jeder Eintrag hat eine von zwei Formen:
+Wie die Ordner aufgelöst werden, steht unter [Ordner](#ordner). Namen müssen
+eindeutig sein und die [Regeln für Bedienfeld-Namen](#namen-auf-dem-bedienfeld)
+einhalten. Alle Namen teilen sich eine Abfrageschleife, das Intervall gilt also
+für die ganze Liste. Ohne `[[target]]` meldet das Programm einen Namen an,
+`--name` oder `USER  HOSTNAME`, und speichert im Basisordner.
 
-- `NAME` speichert in `<output>/NAME`. Andere Zeichen als Buchstaben, Ziffern,
-  `.`, `_` und `-` werden zu `_`.
-- `NAME=DIR` speichert in `DIR`. Ein relatives `DIR` wird relativ zu `--output`
-  aufgelöst, ein absolutes unverändert verwendet. `.` ist `--output` selbst, ohne Unterordner.
-
-Namen müssen eindeutig sein und die [Regeln für Namen auf dem Bedienfeld](#namen-auf-dem-bedienfeld)
-einhalten. Zwei Ziele dürfen sich keinen Ordner teilen (`a b` und `a_b`
-ergeben beide `a_b`, zum Beispiel). Alle Namen teilen sich eine Abfrageschleife,
-daher gilt das Abfrageintervall für die ganze Liste.
+Für paperless-ngx bindest du dessen Consume-Ordner innerhalb des Basisordners
+ein, in Docker zum Beispiel `- /path/to/paperless/consume:/scans/Paperless`
+(siehe [Docker](docker.de.md#paperless-ngx)), und nimmst ein Ziel namens
+`Paperless`. Ein Ordner innerhalb des Basisordners lässt sich auch auf der
+[Weboberfläche](web.de.md) wählen; ein absoluter wie `/consume` geht ebenfalls,
+aber nur in der Konfigurationsdatei.
 
 ## Namen auf dem Bedienfeld
 
@@ -422,56 +599,12 @@ Am TR8550 beobachtet:
   keine Obergrenze gefunden.
 - Die Liste ist nach Registrierungszeit sortiert, nicht alphabetisch.
 
-## Voreinstellungen pro Ziel
-
-Hänge `@` und mit `+` verbundene Optionen an, um einem Ziel eigene Einstellungen
-zu geben:
-
-```sh
---targets "Scans,Paperless@300dpi,Archive@600dpi+jpeg+mp:both"
-```
-
-| Option | Bedeutung |
-|--------|-----------|
-| `75dpi`, `150dpi`, `300dpi`, `600dpi` | Auflösung |
-| `pdf`, `jpeg` | Dateiformat |
-| `a4`, `letter`, `legal`, `10x15`, `13x18` | Scanbereich |
-| `mp:document`, `mp:auto`, `mp:both`, `mp:off` | Dialog für mehrseitige Scans, überschreibt `--multipage` für dieses Ziel |
-
-Welcher Wert gewinnt:
-
-- *Automatisch* am Bedienfeld: Die Voreinstellung gewinnt bei Auflösung,
-  Format und Größe. Die Farbe kommt immer vom Bedienfeld (die gedrückte
-  Starttaste), eine Voreinstellung hat keine Farbe. Einstellungen, die in der
-  Voreinstellung fehlen, kommen aus den globalen Optionen.
-- Dokument und Foto: Die Einstellungen vom Bedienfeld gewinnen, und die
-  Voreinstellung füllt nur auf, was das Bedienfeld nicht sendet.
-- Mit `--ignore-panel` gilt die Voreinstellung immer.
-
-Bei den Optionen wird nicht zwischen Groß- und Kleinschreibung unterschieden.
-Eine unbekannte Option stoppt das Programm mit einem Fehler, daher lässt sich
-`NAME=DIR` nicht mit einem Ordnernamen verwenden, der `@` enthält.
-
-Der `@preset`-String ist die Kurzform der Tabelle `[target.auto]` der
-[Konfigurationsdatei](#konfigurationsdatei).
-
-Für paperless-ngx bindest du dessen Consume-Ordner innerhalb des
-Ausgabeordners ein, in Docker zum Beispiel mit
-`- /path/to/paperless/consume:/scans/Paperless` (siehe
-[Docker](docker.de.md#paperless-ngx)), und nutzt das Ziel
-`Paperless@300dpi`. Ordner innerhalb des Ausgabeordners lassen sich auch
-auf der [Weboberfläche](web.de.md) wählen. Ein absoluter Pfad wie `Paperless=/consume`
-funktioniert ebenfalls, aber nur über die Kommandozeile oder die
-Konfigurationsdatei.
-
 ## Dateinamen
 
-Die Vorlage für den Namen einer Scan-Datei legst du mit `filename` in
-`[defaults]`, mit `--filename` oder mit `PUSHSCAN_FILENAME` fest. Ein
-`filename` in einem `[[target]]` gilt nur für dieses Ziel und hat Vorrang vor
-den anderen Einstellungen. Sonst gilt der übliche Vorrang (siehe
-[Vorrang](#vorrang)). Auf der [Weboberfläche](web.de.md#seiten) hat die
-Einstellungsseite ein Feld "File name".
+Die Vorlage für den Namen einer Scan-Datei legst du mit `filename` auf der
+obersten Ebene der Konfigurationsdatei fest. Ein `filename` in einem
+`[[target]]` gilt nur für dieses Ziel und hat Vorrang vor dem globalen. Auf der
+[Weboberfläche](web.de.md#seiten) hat die Einstellungsseite ein Feld "File name".
 
 Der Standard ist `scan_{now:%Y%m%d_%H%M%S}`. Er ergibt dieselben Namen wie
 bisher, zum Beispiel `scan_20261122_183005.pdf`. Die Vorlage hat keine Endung,
@@ -485,7 +618,6 @@ denn die Endung kommt vom Format (`.pdf` oder `.jpg`).
 | `{now:FORMAT}` | Datum und Uhrzeit mit Python-`strftime`-Codes | `{now:%Y%m%d_%H%M%S}` ergibt `20261122_183005` |
 
 ```toml
-[defaults]
 filename = "{name}_{date}_{time}"     # My_PC_2026-11-22_183005.pdf
 
 [[target]]
@@ -496,7 +628,7 @@ filename = "scan_{now:%Y%m%d_%H%M%S}"   # dieses Ziel behält den Standardstil
 Weitere Felder gibt es nicht. Attributzugriff wie `{now.year}` und
 Positionsfelder wie `{}` werden abgelehnt, ebenso eine Vorlage, die einen
 leeren Namen ergibt. Das Programm prüft die Vorlage beim Start, ein Fehler
-stoppt es also mit einer Meldung und nicht mitten in einem Scan.
+stoppt es also mit einer Meldung, statt mitten in einem Scan zu scheitern.
 
 Das Ergebnis wird für das Dateisystem bereinigt:
 

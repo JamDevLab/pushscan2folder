@@ -21,7 +21,7 @@ from pathlib import Path
 from typing import Callable
 
 from . import autostart
-from .platform_support import default_state_dir, is_windows
+from .platform_support import default_state_dir, is_windows, windows_program
 
 LOCK_NAME = "pushscan2folder.lock"
 INFO_NAME = "pushscan2folder.pid"
@@ -39,6 +39,8 @@ WINDOWS_FLAGS = CREATE_NO_WINDOW | DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP
 
 STOP_TIMEOUT = 30.0   # seconds to wait for a clean stop
 SCAN_STOP_TIMEOUT = 600.0   # longer while a scan runs: the job finishes and is saved first
+CLAIM_TRIES = 5       # claim() retries the lock: is_running() takes it for a moment
+CLAIM_DELAY = 0.05
 START_TIMEOUT = 10.0  # seconds to wait until the new instance holds its lock
 
 ALREADY_RUNNING = "already running"
@@ -108,19 +110,28 @@ class Instance:
         finally:
             os.close(fd)
 
-    def claim(self, log_file: str | None = None) -> bool:
+    def claim(self, log_file: str | None = None,
+              sleep: Callable[[float], None] = time.sleep) -> bool:
         """Become the instance. False if another one holds the lock. Clears an
         old stop request. Raises OSError if the state dir is not writable."""
-        self.dir.mkdir(parents=True, exist_ok=True)
+        self.dir.mkdir(mode=0o700, parents=True, exist_ok=True)   # private to the user
         fd = os.open(self.lock_path, os.O_RDWR | os.O_CREAT, 0o600)
-        if not _try_lock(fd):
+        # is_running() of another process holds the lock for a moment while it
+        # probes; wait a little so that is not taken for a running instance.
+        for attempt in range(CLAIM_TRIES):
+            if _try_lock(fd):
+                break
+            if attempt < CLAIM_TRIES - 1:
+                sleep(CLAIM_DELAY)
+        else:
             os.close(fd)
             return False
         self._fd = fd
         self._remove(self.stop_path)
         self._remove(self.busy_path)   # left over if the last instance crashed mid-scan
-        self.info_path.write_text(json.dumps({"pid": os.getpid(), "log": log_file}),
-                                  encoding="utf-8")
+        info = os.open(self.info_path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(info, "w", encoding="utf-8") as fh:
+            fh.write(json.dumps({"pid": os.getpid(), "log": log_file}))
         return True
 
     def release(self) -> None:
@@ -150,7 +161,7 @@ class Instance:
         return self.busy_path.exists()
 
     def request_stop(self) -> None:
-        self.dir.mkdir(parents=True, exist_ok=True)
+        self.dir.mkdir(mode=0o700, parents=True, exist_ok=True)
         self.stop_path.write_text("stop\n", encoding="utf-8")
 
     def read_info(self) -> Info:
@@ -158,12 +169,16 @@ class Instance:
             data = json.loads(self.info_path.read_text(encoding="utf-8"))
             pid = data.get("pid")
             log = data.get("log")
-            return Info(pid if isinstance(pid, int) else None, log if isinstance(log, str) else None)
+            return Info(pid if valid_pid(pid) else None, log if isinstance(log, str) else None)
         except (OSError, ValueError, AttributeError):
             return Info()
 
     def clean_stale(self) -> None:
-        """Remove the files of an instance that is gone."""
+        """Remove the files of an instance that is gone. Does nothing if an
+        instance runs again (a new one may have started in the meantime and
+        must keep its files)."""
+        if self.is_running():
+            return
         for path in (self.info_path, self.stop_path, self.busy_path):
             self._remove(path)
 
@@ -175,10 +190,18 @@ class Instance:
             pass
 
 
+def valid_pid(pid) -> bool:
+    """A real process id: an int (not a bool) above 1. 0, 1 and negative values
+    would make os.kill signal a whole group or every process of the user."""
+    return type(pid) is int and pid > 1
+
+
 def terminate(pid: int) -> None:
     """Last resort: end the process without a clean shutdown."""
+    if not valid_pid(pid):
+        raise OSError(f"refusing to terminate invalid PID {pid!r}")
     if is_windows():
-        subprocess.run(["taskkill", "/PID", str(pid), "/T", "/F"],
+        subprocess.run([windows_program("taskkill.exe"), "/PID", str(pid), "/T", "/F"],
                        capture_output=True, check=False)
     else:
         os.kill(pid, getattr(signal, "SIGKILL", signal.SIGTERM))   # no SIGKILL on Windows
@@ -258,7 +281,7 @@ def start_instance(argv: list[str], inst: Instance, popen=subprocess.Popen,
         pid = inst.read_info().pid
         return False, ALREADY_RUNNING + (f" (PID {pid})" if pid else "")
     try:
-        inst.dir.mkdir(parents=True, exist_ok=True)
+        inst.dir.mkdir(mode=0o700, parents=True, exist_ok=True)
         errors = open(inst.errors_path, "wb")
     except OSError:
         errors = None

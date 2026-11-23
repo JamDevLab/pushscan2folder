@@ -1,4 +1,21 @@
-"""Optional TOML configuration file (see config.example.toml)."""
+"""The TOML configuration file (see config.example.toml).
+
+Layout (every key is optional):
+
+    printer, folder, filename, next_page, feeder_next_page, auto = {...},
+                open_after_scan
+    [advanced]  interval, verbose, trim = {...}, adf_trim = {...}
+    [web]       enabled, bind, port, password_file
+    [[target]]  name, folder, document_folder, auto_folder, photo_folder,
+                filename, next_page, feeder_next_page, auto = {...}, open_after_scan
+
+The printer panel decides colour, source (the feeder when paper is in it)
+and, for the document types "Document" and "Photo", size, format and
+resolution. The file only sets what the panel does not: the folders, the
+file names, which document types get the "next page" dialog (on the glass
+and, if wanted, after the feeder), and the
+settings for document type "Auto".
+"""
 from __future__ import annotations
 
 import errno
@@ -12,16 +29,19 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from . import panel
-from .desktop import parse_open
 from .platform_support import replace_file
 from .protocol import check_name
-from .service import (MULTIPAGE_MODES, RESOLUTIONS, TRIM_MAX_MM, Target, Trim,
-                      check_filename, safe_dirname)
+from .service import (DEFAULT_FEEDER_NEXT_PAGE, DEFAULT_NEXT_PAGE, DOC_TYPES, RESOLUTIONS, TRIM_MAX_MM, Target, Trim,
+                      check_filename, check_folder, safe_dirname)
 
 
-COLORS = ("color", "gray")
 FORMATS = ("pdf", "jpeg")
-SOURCES = ("auto", "platen", "adf")
+SIZES = tuple(panel.REGIONS)
+TRIM_SIDES = ("left", "top", "right", "bottom")
+AUTO_KEYS = ("resolution", "format", "size")
+# Built-in values of the keys that have one.
+DEFAULT_AUTO = {"resolution": 300, "format": "pdf", "size": "a4"}
+DEFAULT_INTERVAL = 4.0
 
 log = logging.getLogger(__name__)
 
@@ -30,73 +50,97 @@ class ConfigError(ValueError):
     """The configuration file is unreadable or invalid."""
 
 
-SAME_FOLDER = "."  # target output: the output directory itself, no subfolder
+SAME_FOLDER = "."  # target folder: the base folder itself, no subfolder
+
+# Keys per table. A target folder key per document type: "photo_folder" ...
+TYPE_FOLDER_KEYS = {kind: f"{kind}_folder" for kind in DOC_TYPES}
+TOP_KEYS = ("printer", "folder", "filename", "next_page", "feeder_next_page", "auto",
+            "open_after_scan", "advanced", "web", "target")
+ADVANCED_KEYS = ("interval", "verbose", "trim", "adf_trim")
+WEB_KEYS = ("enabled", "bind", "port", "password_file")
+TARGET_KEYS = (("name", "folder") + tuple(TYPE_FOLDER_KEYS.values())
+               + ("filename", "next_page", "feeder_next_page", "auto", "open_after_scan"))
 
 
 @dataclass
 class TargetSpec:
-    """A [[target]] table; turned into a Target once the output dir is known."""
+    """A [[target]] table; turned into a Target once the base folder is known.
+
+    folder and type_folders (document type -> folder) are relative to the
+    base folder unless absolute; they may contain date fields. auto holds
+    the set keys of the target's auto table (config names). None means
+    "the global value"."""
     name: str
-    output: str | None = None
-    preset: dict = field(default_factory=dict)
-    document_multipage: bool | None = None
-    auto_multipage: bool | None = None
+    folder: str | None = None
+    type_folders: dict[str, str] = field(default_factory=dict)
     filename: str | None = None
-    open_after_scan: bool | None = None   # None = the global setting
+    next_page: frozenset[str] | None = None
+    feeder_next_page: frozenset[str] | None = None
+    auto: dict = field(default_factory=dict)
+    open_after_scan: bool | None = None
+
+    def folders(self) -> list[str]:
+        """Every folder this target writes to, as written (relative ones
+        relative to the base folder)."""
+        main = self.folder if self.folder else safe_dirname(self.name)
+        return [main] + [self.type_folders[k] for k in DOC_TYPES if k in self.type_folders]
 
 
 @dataclass
 class Config:
     printer: str | None = None
-    output: Path | None = None
+    folder: Path | None = None
+    filename: str | None = None
+    next_page: frozenset[str] | None = None
+    feeder_next_page: frozenset[str] | None = None
+    auto: dict = field(default_factory=dict)
+    open_after_scan: bool | None = None
     interval: float | None = None
     verbose: bool | None = None
-    ignore_panel: bool | None = None
-    multipage: str | None = None
-    resolution: int | None = None
-    color: str | None = None
-    format: str | None = None
-    source: str | None = None
-    open_after_scan: bool | None = None
-    filename: str | None = None
-    size: str | None = None
-    trim_left: float | None = None
-    trim_top: float | None = None
-    trim_right: float | None = None
-    trim_bottom: float | None = None
+    trim: Trim | None = None
+    adf_trim: Trim | None = None
     web_enabled: bool | None = None
     web_bind: str | None = None
     web_port: int | None = None
     web_password_file: str | None = None
     targets: list[TargetSpec] = field(default_factory=list)
-    # Keys found in the layout before 0.3.0, as "old place -> new place".
-    old_keys: list[str] = field(default_factory=list, compare=False)
 
-    def trim(self) -> Trim:
-        """The [defaults] trim_* values (unset sides are 0)."""
-        return Trim(self.trim_left or 0.0, self.trim_top or 0.0,
-                    self.trim_right or 0.0, self.trim_bottom or 0.0)
+    def auto_values(self) -> dict:
+        """The global auto settings with the built-in values filled in."""
+        return {**DEFAULT_AUTO, **self.auto}
 
-    def build_targets(self, base: Path, global_mode: str) -> list[Target]:
-        """Targets for output dir `base`. Relative target outputs resolve
-        against it; an unset multipage keeps the global mode (None)."""
+    def next_page_types(self) -> frozenset[str]:
+        return DEFAULT_NEXT_PAGE if self.next_page is None else self.next_page
+
+    def feeder_next_page_types(self) -> frozenset[str]:
+        return (DEFAULT_FEEDER_NEXT_PAGE if self.feeder_next_page is None
+                else self.feeder_next_page)
+
+    def build_targets(self, base: Path) -> list[Target]:
+        """Targets for base folder `base`. Relative folders resolve against
+        it; an unset next_page or feeder_next_page keeps the global one (None)."""
         result = []
         for spec in self.targets:
-            outdir = base / (spec.output if spec.output else safe_dirname(spec.name))
-            multipage = None
-            if spec.document_multipage is not None or spec.auto_multipage is not None:
-                modes = set(MULTIPAGE_MODES[global_mode])
-                for key, flag in (("document", spec.document_multipage),
-                                  ("auto", spec.auto_multipage)):
-                    if flag is True:
-                        modes.add(key)
-                    elif flag is False:
-                        modes.discard(key)
-                multipage = frozenset(modes)
-            result.append(Target(spec.name, outdir, preset=dict(spec.preset),
-                                 multipage=multipage, filename=spec.filename,
-                                 open_after_scan=spec.open_after_scan))
+            outdir = base / (spec.folder if spec.folder else safe_dirname(spec.name))
+            type_dirs = {kind: base / path for kind, path in spec.type_folders.items()}
+            result.append(Target(spec.name, outdir, preset=auto_preset(spec.auto),
+                                 multipage=spec.next_page,
+                                 feeder_multipage=spec.feeder_next_page,
+                                 filename=spec.filename,
+                                 open_after_scan=spec.open_after_scan, type_dirs=type_dirs))
         return result
+
+
+def auto_preset(auto: dict) -> dict:
+    """ScanSettings fields for an auto table (resolution, format, size)."""
+    preset: dict = {}
+    if "resolution" in auto:
+        preset["resolution"] = auto["resolution"]
+    if "format" in auto:
+        preset["fmt"] = auto["format"]
+    if "size" in auto:
+        preset["width"], preset["height"] = panel.REGIONS[auto["size"]]
+    return preset
 
 
 def _choice(values) -> str:
@@ -106,14 +150,15 @@ def _choice(values) -> str:
 class _Reader:
     """Typed access to one TOML table that rejects unknown keys."""
 
-    def __init__(self, table: dict, where: str, allowed: set[str]):
+    def __init__(self, table: dict, where: str, allowed):
         self.table, self.where = table, where
         for key in table:
             if key not in allowed:
-                raise ConfigError(f'{where}: unknown key "{key}"')
+                raise ConfigError(f'{where}: unknown key "{key}" (known keys: '
+                                  f"{_choice(allowed)})")
 
     def _bad(self, key: str, expected: str) -> ConfigError:
-        return ConfigError(f'{self.where}: key "{key}" must be {expected}, '
+        return ConfigError(f'{self.where}: "{key}" must be {expected}, '
                            f"got {self.table[key]!r}")
 
     def str_(self, key: str, choices=None) -> str | None:
@@ -121,7 +166,7 @@ class _Reader:
             return None
         value = self.table[key]
         if not isinstance(value, str) or not value.strip():
-            raise self._bad(key, "a non-empty string")
+            raise self._bad(key, "a non-empty text in quotes")
         if choices is not None and value not in choices:
             raise self._bad(key, f"one of: {_choice(choices)}")
         return value
@@ -150,15 +195,6 @@ class _Reader:
             raise self._bad(key, "a number greater than 0")
         return float(value)
 
-    def mm(self, key: str) -> float | None:
-        if key not in self.table:
-            return None
-        value = self.table[key]
-        if (isinstance(value, bool) or not isinstance(value, (int, float))
-                or not 0 <= value <= TRIM_MAX_MM):
-            raise self._bad(key, f"a number of mm from 0 to {TRIM_MAX_MM:g}")
-        return float(value)
-
     def port(self, key: str) -> int | None:
         if key not in self.table:
             return None
@@ -176,36 +212,68 @@ class _Reader:
                 raise self._bad(key, f"a file name template ({exc})") from None
         return value
 
+    def folder(self, key: str) -> str | None:
+        value = self.str_(key)
+        if value is not None:
+            try:
+                check_folder(value)
+            except ValueError as exc:
+                raise self._bad(key, f"a folder ({exc})") from None
+        return value
+
     def table_(self, key: str) -> dict | None:
         if key not in self.table:
             return None
         if not isinstance(self.table[key], dict):
-            raise self._bad(key, "a table")
+            raise self._bad(key, "a table, e.g. { ... }")
         return self.table[key]
 
+    def next_page(self, key: str) -> frozenset[str] | None:
+        if key not in self.table:
+            return None
+        value = self.table[key]
+        if (not isinstance(value, list) or not all(isinstance(v, str) for v in value)
+                or not set(value) <= set(DOC_TYPES)):
+            raise self._bad(key, f"a list of document types out of {_choice(DOC_TYPES)}, "
+                                 'e.g. ["document"] or [] for none')
+        return frozenset(value)
 
-def _preset(rd: _Reader) -> dict:
-    preset: dict = {}
-    for key, dest in (("resolution", "resolution"), ("format", "fmt")):
-        value = rd.int_(key, RESOLUTIONS) if key == "resolution" else rd.str_(key, FORMATS)
-        if value is not None:
-            preset[dest] = value
-    size = rd.str_("size", tuple(panel.REGIONS))
-    if size is not None:
-        preset["width"], preset["height"] = panel.REGIONS[size]
-    return preset
+    def auto(self, key: str) -> dict:
+        table = self.table_(key)
+        if table is None:
+            return {}
+        rd = _Reader(table, f"{self.where}: {key}", AUTO_KEYS)
+        values = {"resolution": rd.int_("resolution", RESOLUTIONS),
+                  "format": rd.str_("format", FORMATS),
+                  "size": rd.str_("size", SIZES)}
+        return {k: v for k, v in values.items() if v is not None}
+
+    def trim(self, key: str) -> Trim | None:
+        table = self.table_(key)
+        if table is None:
+            return None
+        rd = _Reader(table, f"{self.where}: {key}", TRIM_SIDES)
+        values = {}
+        for side in TRIM_SIDES:
+            if side not in table:
+                continue
+            value = table[side]
+            if (isinstance(value, bool) or not isinstance(value, (int, float))
+                    or not 0 <= value <= TRIM_MAX_MM):
+                raise rd._bad(side, f"a number of mm from 0 to {TRIM_MAX_MM:g}")
+            values[side] = float(value)
+        trim = Trim(**values)
+        return trim if trim else None   # { } or all 0: no trim
 
 
-def _target(table, index: int, name_for_msgs: str,
-            old_keys: list[str]) -> TargetSpec:
+def _target(table, index: int, fname: str) -> TargetSpec:
     if not isinstance(table, dict):
-        raise ConfigError(f"{name_for_msgs}: [[target]] #{index} must be a table")
-    label = f"{name_for_msgs}: target #{index}"
+        raise ConfigError(f"{fname}: [[target]] #{index} must be a table")
+    label = f"{fname}: target #{index}"
     name = table.get("name")
-    if name is not None and isinstance(name, str) and name.strip():
-        label = f'{name_for_msgs}: target "{name}"'
-    rd = _Reader(table, label, {"name", "output", "filename", "open_after_scan",
-                                "document", "auto", "document_multipage"})
+    if isinstance(name, str) and name.strip():
+        label = f'{fname}: target "{name.strip()}"'
+    rd = _Reader(table, label, TARGET_KEYS)
     if "name" not in table:
         raise ConfigError(f'{label}: missing required key "name"')
     name = rd.str_("name").strip()
@@ -213,64 +281,15 @@ def _target(table, index: int, name_for_msgs: str,
         check_name(name)
     except ValueError as exc:
         raise ConfigError(f"{label}: {exc}") from exc
-    spec = TargetSpec(name, output=rd.str_("output"),
-                      filename=rd.filename("filename"),
-                      open_after_scan=_open_flag(rd, "open_after_scan", old_keys,
-                                                 label.split(": ", 1)[1] + ": "))
-    document = rd.table_("document")
-    new_doc = None
-    if document is not None:
-        new_doc = _Reader(document, f"{label}.document", {"multipage"}).bool_("multipage")
-    spec.document_multipage = _moved(rd.bool_("document_multipage"), new_doc,
-                                     f"{label}: document_multipage",
-                                     f"[target.document] multipage", old_keys)
-    auto = rd.table_("auto")
-    if auto is not None and "color" in auto:
-        raise ConfigError(f'{label}.auto: unknown key "color": the colour comes from the '
-                          "start button on the printer panel (colour or black), or from "
-                          '[defaults] color when the panel sends none')
-    if auto is not None:
-        arw = _Reader(auto, f"{label}.auto",
-                      {"resolution", "format", "size", "multipage"})
-        spec.preset = _preset(arw)
-        spec.auto_multipage = arw.bool_("multipage")
-    return spec
-
-
-def _moved(old, new, old_name: str, new_name: str, old_keys: list[str]):
-    """A key that moved in 0.3.0: the old place still works (noted in
-    `old_keys`), both places at once is an error."""
-    if old is None:
-        return new
-    if new is not None:
-        raise ConfigError(f"{old_name} and {new_name} are the same setting; "
-                          f"keep only {new_name}")
-    old_keys.append(f"{old_name} -> {new_name}")
-    return old
-
-
-def _open_flag(rd: _Reader, key: str, old_keys: list[str], where: str) -> bool | None:
-    """open_after_scan: true or false. The strings of 0.2.x still work
-    ("off" is false, "folder" and "file" are true) and are noted in `old_keys`."""
-    value = rd.table.get(key)
-    if value is None or isinstance(value, bool):
-        return value
-    if isinstance(value, str) and value in ("off", "folder", "file"):
-        new = value != "off"
-        old_keys.append(f'{where}{key} = "{value}" -> {key} = {_value(new)}')
-        return new
-    raise rd._bad(key, "true or false")
-
-
-def mode_from_flags(document: bool | None, auto: bool | None) -> str | None:
-    """Global multipage mode from the [defaults.document] and [defaults.auto]
-    flags; an unset flag keeps the built-in mode (document on, auto off)."""
-    if document is None and auto is None:
-        return None
-    document = True if document is None else document
-    auto = False if auto is None else auto
-    return {(True, False): "document", (False, True): "auto",
-            (True, True): "both", (False, False): "off"}[(document, auto)]
+    type_folders = {}
+    for kind, key in TYPE_FOLDER_KEYS.items():
+        value = rd.folder(key)
+        if value is not None:
+            type_folders[kind] = value
+    return TargetSpec(name, folder=rd.folder("folder"), type_folders=type_folders,
+                      filename=rd.filename("filename"), next_page=rd.next_page("next_page"),
+                      feeder_next_page=rd.next_page("feeder_next_page"),
+                      auto=rd.auto("auto"), open_after_scan=rd.bool_("open_after_scan"))
 
 
 def load_config(path: Path) -> Config:
@@ -280,12 +299,8 @@ def load_config(path: Path) -> Config:
     except OSError as exc:
         raise ConfigError(f"{path.name}: cannot read file: {exc.strerror or exc}") from exc
     except UnicodeDecodeError as exc:
-        raise ConfigError(f"{path.name}: invalid TOML: {exc}") from exc
-    cfg = load_config_text(text, path.name)
-    if cfg.old_keys:
-        log.warning("%s uses keys from before 0.3.0 (still read; setup or the web page "
-                    "write the new layout): %s", path.name, "; ".join(cfg.old_keys))
-    return cfg
+        raise ConfigError(f"{path.name}: not UTF-8 text: {exc}") from exc
+    return load_config_text(text, path.name)
 
 
 def load_config_text(text: str, fname: str = "config.toml") -> Config:
@@ -294,66 +309,46 @@ def load_config_text(text: str, fname: str = "config.toml") -> Config:
     try:
         data = tomllib.loads(text)
     except tomllib.TOMLDecodeError as exc:
-        raise ConfigError(f"{fname}: invalid TOML: {exc}") from exc
+        hint = ""
+        for line in text.splitlines():
+            code = line.split("#", 1)[0]
+            if "{" in code and "}" not in code:
+                hint = " (a { ... } table such as auto or trim must stay on one line)"
+                break
+        raise ConfigError(f"{fname}: invalid TOML: {exc}{hint}") from exc
     return parse_config(data, fname)
 
 
 def parse_config(data: dict, fname: str = "config.toml") -> Config:
     """Validate an already parsed TOML table. Raises ConfigError."""
-    top = _Reader(data, fname, {"printer", "output", "defaults", "advanced", "web", "target",
-                                # before 0.3.0; now in [advanced] and [defaults.*]
-                                "interval", "verbose", "ignore_panel", "multipage"})
-    cfg = Config(printer=top.str_("printer"))
-    output = top.str_("output")
-    cfg.output = Path(output) if output is not None else None
-    old = cfg.old_keys
+    top = _Reader(data, fname, TOP_KEYS)
+    folder = top.str_("folder")
+    cfg = Config(printer=top.str_("printer"),
+                 folder=Path(folder) if folder is not None else None,
+                 filename=top.filename("filename"), next_page=top.next_page("next_page"),
+                 feeder_next_page=top.next_page("feeder_next_page"),
+                 auto=top.auto("auto"), open_after_scan=top.bool_("open_after_scan"))
 
-    adv = _Reader(top.table_("advanced") or {}, f"{fname}: [advanced]",
-                  {"interval", "verbose", "ignore_panel"} | set(_TRIM))
-    cfg.interval = _moved(top.number("interval"), adv.number("interval"),
-                          "interval", "[advanced] interval", old)
-    cfg.verbose = _moved(top.bool_("verbose"), adv.bool_("verbose"),
-                         "verbose", "[advanced] verbose", old)
-    cfg.ignore_panel = _moved(top.bool_("ignore_panel"), adv.bool_("ignore_panel"),
-                              "ignore_panel", "[advanced] ignore_panel", old)
+    adv = _Reader(top.table_("advanced") or {}, f"{fname}: [advanced]", ADVANCED_KEYS)
+    cfg.interval = adv.number("interval")
+    cfg.verbose = adv.bool_("verbose")
+    cfg.trim = adv.trim("trim")
+    cfg.adf_trim = adv.trim("adf_trim")
 
-    d = _Reader(top.table_("defaults") or {}, f"{fname}: [defaults]",
-                {"resolution", "color", "format", "source", "size", "open_after_scan",
-                 "filename", "document", "auto"} | set(_TRIM))
-    cfg.resolution = d.int_("resolution", RESOLUTIONS)
-    cfg.color = d.str_("color", COLORS)
-    cfg.format = d.str_("format", FORMATS)
-    cfg.source = d.str_("source", SOURCES)
-    cfg.size = d.str_("size", tuple(panel.REGIONS))
-    cfg.open_after_scan = _open_flag(d, "open_after_scan", old, "[defaults] ")
-    cfg.filename = d.filename("filename")
-    for key in _TRIM:
-        setattr(cfg, key, _moved(d.mm(key), adv.mm(key), f"[defaults] {key}",
-                                 f"[advanced] {key}", old))
-    flags = []
-    for kind in ("document", "auto"):
-        sub = _Reader(d.table_(kind) or {}, f"{fname}: [defaults.{kind}]", {"multipage"})
-        flags.append(sub.bool_("multipage"))
-    cfg.multipage = _moved(top.str_("multipage", tuple(MULTIPAGE_MODES)),
-                           mode_from_flags(*flags), "multipage",
-                           "[defaults.document] / [defaults.auto] multipage", old)
-
-    web = top.table_("web")
-    if web is not None:
-        w = _Reader(web, f"{fname}: [web]", {"enabled", "bind", "port", "password_file"})
-        cfg.web_enabled = w.bool_("enabled")
-        cfg.web_bind = w.str_("bind")
-        cfg.web_port = w.port("port")
-        cfg.web_password_file = w.str_("password_file")
+    web = _Reader(top.table_("web") or {}, f"{fname}: [web]", WEB_KEYS)
+    cfg.web_enabled = web.bool_("enabled")
+    cfg.web_bind = web.str_("bind")
+    cfg.web_port = web.port("port")
+    cfg.web_password_file = web.str_("password_file")
 
     raw_targets = data.get("target", [])
     if not isinstance(raw_targets, list):
-        raise ConfigError(f'{fname}: "target" must be an array of tables ([[target]])')
+        raise ConfigError(f'{fname}: "target" must be written as [[target]] blocks')
     seen: set[str] = set()
     for i, table in enumerate(raw_targets, 1):
-        spec = _target(table, i, fname, old)
+        spec = _target(table, i, fname)
         if spec.name in seen:
-            raise ConfigError(f'{fname}: duplicate target name "{spec.name}"')
+            raise ConfigError(f'{fname}: two targets are called "{spec.name}"')
         seen.add(spec.name)
         cfg.targets.append(spec)
     return cfg
@@ -368,6 +363,9 @@ def size_name(preset: dict) -> str | None:
         if region == pair:
             return name
     return None
+
+
+_ESCAPES = {"\b": "\\b", "\t": "\\t", "\n": "\\n", "\f": "\\f", "\r": "\\r"}
 
 
 def _quote(value: str) -> str:
@@ -387,102 +385,85 @@ def _quote(value: str) -> str:
     return '"' + "".join(out) + '"'
 
 
-_TRIM = ("trim_left", "trim_top", "trim_right", "trim_bottom")
-_ESCAPES = {"\b": "\\b", "\t": "\\t", "\n": "\\n", "\f": "\\f", "\r": "\\r"}
-
-
 def _value(value) -> str:
     if isinstance(value, bool):
         return "true" if value else "false"
+    if isinstance(value, float) and value.is_integer():
+        return str(int(value))
     if isinstance(value, (int, float)):
         return repr(value)
+    if isinstance(value, frozenset):
+        return "[" + ", ".join(_quote(k) for k in DOC_TYPES if k in value) + "]"
+    if isinstance(value, Trim):
+        return "{ " + ", ".join(f"{side} = {_value(getattr(value, side))}"
+                                for side in TRIM_SIDES if getattr(value, side)) + " }"
+    if isinstance(value, dict):   # an auto table, one line (TOML 1.0)
+        return "{ " + ", ".join(f"{k} = {_value(value[k])}" for k in AUTO_KEYS
+                                if k in value) + " }"
     return _quote(str(value))
 
 
-def _lines(pairs) -> list[str]:
-    return [f"{key} = {_value(value)}" for key, value in pairs if value is not None]
+def _line(key: str, value, comment: str = "") -> list[str]:
+    if value is None or (isinstance(value, (dict, Trim)) and not value):
+        return []
+    line = f"{key} = {_value(value)}"
+    return [f"{line:<40} # {comment}" if comment else line]
 
 
 HEADER = """\
 # pushscan2folder configuration.
 # Changes are used while the program runs, within a few seconds. Only [web]
-# and verbose in [advanced] need a restart: pushscan2folder stop, then
-# pushscan2folder start.
-# Lines starting with "#" are examples; remove the "#" to use one.
+# and verbose in [advanced] need a restart.
+# The printer panel decides colour, source (the feeder when paper is in it)
+# and, for "Document" and "Photo", size, format and resolution.
 # All keys: https://github.com/JamDevLab/pushscan2folder/blob/main/docs/configuration.md"""
 
-# Commented examples for keys that are not set (dump_config).
-_DEFAULTS_EXAMPLES = (
-    ("open_after_scan", "# open_after_scan = true            # desktop PC only: open the folder"),
-    ("filename", '# filename = "scan_{now:%Y-%m-%d_%H-%M-%S}"   # scan_2026-11-22_18-30-05\n'
-                 "# (date and time codes: %Y year, %m month, %d day, %H hour, %M minute, %S second)"),
-    ("resolution", "# resolution = 300                   # 75 | 150 | 300 | 600"),
-    ("format", '# format = "pdf"                     # pdf | jpeg'),
-)
-_TARGET_EXAMPLES = (
-    ("open_after_scan", "# open_after_scan = false           # this target only, e.g. an archive"),
-    ("filename", '# filename = "archive_{now:%Y%m%d}"   # this target only'),
-)
-_EXAMPLE_TARGET = "\n".join((
-    "# Another panel entry with its own folder:",
-    "# [[target]]",
-    '# name = "Archive"',
-    '# output = "Archive"   # a subfolder of the scan folder (output)',
-    "# open_after_scan = false",
-    "# [target.document]",
-    "# multipage = false"))
+_EXAMPLE_TARGET = """\
+# Another entry on the printer panel, with its own folder:
+# [[target]]
+# name = "Archive"
+# folder = "Archive/{now:%Y}"             # date fields are allowed
+# photo_folder = "Photos"                 # photos of this entry go elsewhere
+# next_page = []                          # no "next page" dialog
+# auto = { resolution = 600, format = "jpeg" }"""
 
 
 def dump_config(cfg: Config) -> str:
-    """Render a Config as TOML (the exact schema load_config reads), with a
-    short header and commented examples for some keys that are not set.
-    Comments of an existing file are not preserved, and keys from before
-    0.3.0 are written at their new place. A preset size that matches no
-    known paper size is dropped."""
+    """Render a Config as TOML (the schema load_config reads), with a header
+    and comments. Comments of an existing file are not kept."""
     blocks: list[list[str]] = [[HEADER]]
-    top = _lines([("printer", cfg.printer),
-                  ("output", str(cfg.output) if cfg.output is not None else None)])
-    if top:
-        blocks.append(top)
-    defaults = _lines([("resolution", cfg.resolution), ("color", cfg.color),
-                       ("format", cfg.format), ("source", cfg.source), ("size", cfg.size),
-                       ("open_after_scan", cfg.open_after_scan), ("filename", cfg.filename)])
-    defaults += [line for key, line in _DEFAULTS_EXAMPLES if getattr(cfg, key) is None]
-    blocks.append(["# Used where the printer panel sends nothing.", "[defaults]"] + defaults)
-    modes = MULTIPAGE_MODES.get(cfg.multipage) if cfg.multipage else None
-    notes = {"document": '# Document type "Document" on the printer panel.',
-             "auto": '# Document type "Auto" on the printer panel. The panel sends no size,\n'
-                     "# format or resolution then, so [defaults] and [target.auto] decide."}
-    for kind in ("document", "auto"):
-        flag = "#" if modes is None else ""
-        value = ("document" == kind) if modes is None else (kind in modes)
-        blocks.append([notes[kind],
-                       f"[defaults.{kind}]",
-                       f"{flag + ' ' if flag else ''}multipage = {_value(value)}"
-                       "   # true: ask for more pages after each one"])
-    advanced = _lines([("interval", cfg.interval), ("verbose", cfg.verbose),
-                       ("ignore_panel", cfg.ignore_panel)]
-                      + [(key, getattr(cfg, key)) for key in _TRIM])
+    top = (_line("printer", cfg.printer, "printer IP address or host name")
+           + _line("folder", str(cfg.folder) if cfg.folder is not None else None,
+                   "base folder of all targets"))
+    general = (_line("filename", cfg.filename, "fields {name} {date} {time} {now:%Y-%m-%d}")
+               + _line("next_page", cfg.next_page, "document types with the next page dialog")
+               + _line("feeder_next_page", cfg.feeder_next_page,
+                       "the same after a feeder scan")
+               + _line("auto", cfg.auto, 'panel type "Auto": resolution, format, size')
+               + _line("open_after_scan", cfg.open_after_scan, "desktop PC only"))
+    if not general:
+        general = ['# filename = "scan_{now:%Y-%m-%d_%H-%M-%S}"',
+                   '# next_page = ["document"]          # "document", "auto", "photo"',
+                   '# auto = { resolution = 300, format = "pdf", size = "a4" }']
+    blocks.append(top + ([""] if top else []) + ["# Defaults for all targets"] + general)
+    advanced = (_line("interval", cfg.interval, "seconds between polls")
+                + _line("verbose", cfg.verbose, "debug log, needs a restart")
+                + _line("trim", cfg.trim, "glass, mm cut off per side")
+                + _line("adf_trim", cfg.adf_trim, "feeder, mm cut off per side"))
     if advanced:
         blocks.append(["[advanced]"] + advanced)
-    web = _lines([("enabled", cfg.web_enabled), ("bind", cfg.web_bind),
-                  ("port", cfg.web_port), ("password_file", cfg.web_password_file)])
+    web = (_line("enabled", cfg.web_enabled) + _line("bind", cfg.web_bind)
+           + _line("port", cfg.web_port) + _line("password_file", cfg.web_password_file))
     if web:
         blocks.append(["[web]"] + web)
     for spec in cfg.targets:
-        block = ["[[target]]"] + _lines([("name", spec.name), ("output", spec.output),
-                                         ("filename", spec.filename),
-                                         ("open_after_scan", spec.open_after_scan)])
-        block += [line for key, line in _TARGET_EXAMPLES if getattr(spec, key) is None]
+        block = ["[[target]]"] + _line("name", spec.name) + _line("folder", spec.folder)
+        for kind in DOC_TYPES:
+            block += _line(TYPE_FOLDER_KEYS[kind], spec.type_folders.get(kind))
+        block += (_line("filename", spec.filename) + _line("next_page", spec.next_page)
+                  + _line("feeder_next_page", spec.feeder_next_page)
+                  + _line("auto", spec.auto) + _line("open_after_scan", spec.open_after_scan))
         blocks.append(block)
-        if spec.document_multipage is not None:
-            blocks.append(["[target.document]"] + _lines([("multipage", spec.document_multipage)]))
-        auto = _lines([("resolution", spec.preset.get("resolution")),
-                       ("format", spec.preset.get("fmt")),
-                       ("size", size_name(spec.preset)),
-                       ("multipage", spec.auto_multipage)])
-        if auto:
-            blocks.append(["[target.auto]"] + auto)
     blocks.append([_EXAMPLE_TARGET])
     return "\n\n".join("\n".join(b) for b in blocks) + "\n"
 

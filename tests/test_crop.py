@@ -81,6 +81,28 @@ class CutOutTests(unittest.TestCase):
         self.assertEqual(crop.cut_out(b"\xff\xd8broken", DPI, multi=True), [b"\xff\xd8broken"])
 
 
+@unittest.skipIf(Image is None, "Pillow is not installed")
+class BadImageTests(unittest.TestCase):
+    def test_decompression_bomb_saves_whole(self):
+        data = glass("white", [PHOTO_A])
+        with mock.patch.object(Image, "open", side_effect=Image.DecompressionBombError("big")):
+            self.assertEqual(crop.cut_out(data, DPI, multi=True), [data])
+
+    def test_any_error_in_analysis_saves_whole(self):
+        data = glass("white", [PHOTO_A])
+        for exc in (MemoryError(), RuntimeError("x")):
+            with mock.patch.object(crop, "find_photos", side_effect=exc):
+                self.assertEqual(crop.cut_out(data, DPI, multi=True), [data])
+        with mock.patch.object(crop, "_encode", side_effect=ValueError("x")):
+            self.assertEqual(crop.cut_out(data, DPI, multi=True), [data])
+
+    def test_too_many_areas_means_no_photo(self):
+        boxes = [(i, 0, i + 1, 1) for i in range(crop.MAX_AREAS + 1)]
+        image = Image.new("RGB", (300, 300), "white")
+        with mock.patch.object(crop, "_areas", return_value=boxes):
+            self.assertEqual(crop.find_photos(image, DPI), [])
+
+
 class WithoutPillowTests(unittest.TestCase):
     def test_scan_unchanged(self):
         with mock.patch.object(crop, "Image", None):
@@ -142,6 +164,14 @@ class ServiceCutTests(unittest.TestCase):
         self.service.step()
         self.assertIn("image/jpeg", self.printer.state["settings"])
         self.assertEqual([f.suffix for f in self.files()], [".jpg", ".jpg"])
+
+    def test_pdf_failure_saves_jpegs(self):
+        self.printer.state["interrupt"] = PHOTO_MULTI[:11] + bytes([3]) + PHOTO_MULTI[12:]
+        with mock.patch("pushscan2folder.service.jpegs_to_pdf", side_effect=ValueError("bad")):
+            self.service.step()
+        files = self.files()
+        self.assertEqual([f.suffix for f in files], [".jpg", ".jpg"])
+        self.assertTrue(files[0].read_bytes().startswith(b"\xff\xd8"))
 
     def test_multi_pdf_gives_one_pdf_per_photo(self):
         self.printer.state["interrupt"] = PHOTO_MULTI[:11] + bytes([3]) + PHOTO_MULTI[12:]

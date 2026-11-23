@@ -6,6 +6,7 @@ from pathlib import Path
 from unittest import mock
 
 from pushscan2folder import __main__ as cli
+from pushscan2folder import panel
 from pushscan2folder.escl import ScanSettings
 from pushscan2folder.service import PushScanService, Target
 
@@ -38,11 +39,11 @@ class WatcherTests(unittest.TestCase):
         self.dir = Path(tmp.name)
         os.environ["XDG_CONFIG_HOME"] = str(self.dir / "xdg")
         self.path = self.dir / "config.toml"
-        self.write('printer = "10.0.0.5"\noutput = "%s"\n[defaults]\nresolution = 300\n'
+        self.write('printer = "10.0.0.5"\nfolder = "%s"\n'
+                   'auto = { resolution = 300 }\n'
                    '[[target]]\nname = "Scans"\n' % (self.dir / "out").as_posix())
         self.argv = ["--config", str(self.path), "run"]
         self.args, self.cfg = cli.parse_args(self.argv)
-        cli.check_run_options(self.args)
         self.service = FakeService()
         self.clients = mock.Mock(return_value=("chmp", "escl", "native"))
         self.watcher = cli.ConfigWatcher(self.path, self.argv, self.args, self.cfg,
@@ -59,17 +60,42 @@ class WatcherTests(unittest.TestCase):
         self.assertIsNone(self.service.options)
 
     def test_changed_settings_and_targets_are_applied(self):
-        self.write('printer = "10.0.0.5"\n[defaults]\nresolution = 600\n'
+        self.write('printer = "10.0.0.5"\nauto = { resolution = 600 }\n'
                    'filename = "{name}_{date}"\n'
                    '[[target]]\nname = "Scans"\n[[target]]\nname = "Paperless"\n')
         with self.assertLogs(level="INFO") as logs:
             self.assertTrue(self.watcher.check())
         self.assertEqual(self.service.options["settings"].resolution, 600)
         self.assertEqual(self.service.options["filename"], "{name}_{date}")
+        self.assertFalse(self.service.options["adf_trim"])
         self.assertEqual([t.name for t in self.service.targets], ["Scans", "Paperless"])
         self.assertEqual(self.service.printers, [])
         self.assertTrue(any("new settings are in use" in line for line in logs.output))
         self.assertFalse(self.watcher.check())   # applied once
+
+    def test_next_page_table_is_applied(self):
+        self.write('printer = "10.0.0.5"\nnext_page = ["document", "photo"]\n')
+        self.assertTrue(self.watcher.check())
+        self.assertEqual(self.service.options["multipage"], frozenset({"document", "photo"}))
+        self.write('printer = "10.0.0.5"\nnext_page = []\n')
+        self.assertTrue(self.watcher.check())
+        self.assertEqual(self.service.options["multipage"], frozenset())
+
+    def test_auto_table_is_applied(self):
+        self.write('printer = "10.0.0.5"\n'
+                   'auto = { resolution = 150, format = "jpeg", size = "10x15" }\n')
+        self.assertTrue(self.watcher.check())
+        settings = self.service.options["settings"]
+        self.assertEqual((settings.resolution, settings.fmt), (150, "jpeg"))
+        self.assertEqual((settings.width, settings.height), panel.REGIONS["10x15"])
+
+    def test_trim_tables_are_applied(self):
+        self.write('printer = "10.0.0.5"\n[advanced]\n'
+                   'trim = { right = 1.5, bottom = 2 }\nadf_trim = { top = 3 }\n')
+        self.assertTrue(self.watcher.check())
+        trim = self.service.options["trim"]
+        self.assertEqual((trim.right, trim.bottom, trim.left), (1.5, 2.0, 0.0))
+        self.assertEqual(self.service.options["adf_trim"].top, 3.0)
 
     def test_printer_change_switches_the_clients(self):
         self.write('printer = "10.0.0.9"\n[[target]]\nname = "Scans"\n')
@@ -77,14 +103,15 @@ class WatcherTests(unittest.TestCase):
         self.clients.assert_called_once_with("10.0.0.9")
         self.assertEqual(self.service.printers, [("chmp", "escl", "native")])
 
-    def test_environment_still_wins(self):
-        os.environ["PUSHSCAN_RESOLUTION"] = "150"
-        self.write('printer = "10.0.0.5"\n[defaults]\nresolution = 600\n')
+    def test_environment_folder_still_wins(self):
+        os.environ["PUSHSCAN_FOLDER"] = str(self.dir / "env")
+        self.write('printer = "10.0.0.5"\nfolder = "%s"\n[[target]]\nname = "Scans"\n'
+                   % (self.dir / "other").as_posix())
         self.assertTrue(self.watcher.check())
-        self.assertEqual(self.service.options["settings"].resolution, 150)
+        self.assertEqual(self.service.targets[0].outdir, self.dir / "env" / "Scans")
 
     def test_invalid_file_keeps_the_running_settings(self):
-        self.write('printer = "10.0.0.5"\n[defaults]\nresolution = "lots"\n')
+        self.write('printer = "10.0.0.5"\nauto = { resolution = "lots" }\n')
         with self.assertLogs(level="ERROR") as logs:
             self.assertFalse(self.watcher.check())
         self.assertIsNone(self.service.options)
@@ -92,7 +119,7 @@ class WatcherTests(unittest.TestCase):
         self.assertFalse(self.watcher.check())   # logged once, not every cycle
 
     def test_bad_filename_template_is_refused(self):
-        self.write('printer = "10.0.0.5"\n[defaults]\nfilename = "{secret}"\n')
+        self.write('printer = "10.0.0.5"\nfilename = "{secret}"\n')
         with self.assertLogs(level="ERROR"):
             self.assertFalse(self.watcher.check())
         self.assertIsNone(self.service.options)
@@ -113,10 +140,12 @@ class WatcherTests(unittest.TestCase):
     def test_web_context_is_updated(self):
         ctx = mock.Mock()
         self.watcher.ctx = ctx
-        self.write('printer = "10.0.0.9"\n[defaults]\nresolution = 600\n')
+        self.write('printer = "10.0.0.9"\nfolder = "%s"\nnext_page = ["auto"]\n'
+                   % (self.dir / "new").as_posix())
         self.watcher.check()
         self.assertEqual(ctx.printer, "10.0.0.9")
-        self.assertEqual(ctx.effective["resolution"], "600")
+        self.assertEqual(ctx.folder, self.dir / "new")
+        self.assertEqual(ctx.next_page, frozenset({"auto"}))
 
 
 class ServiceHookTests(unittest.TestCase):

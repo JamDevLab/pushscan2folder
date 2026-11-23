@@ -1,4 +1,5 @@
-FROM python:3.15-slim
+# Pinned by digest (multi-arch index); Dependabot updates it.
+FROM python:3.15-slim@sha256:65a65fc7b30b06cb6df4930fd4650697cb23f4c2698ab81fc87e4b031bc36928
 
 # Non-root user; the mounted /scans directory must be writable by it
 # (use `docker run --user` or chown the host directory).
@@ -14,7 +15,7 @@ COPY src/ /app/src/
 ENV PYTHONPATH=/app/src \
     PUSHSCAN_WEB_BIND=0.0.0.0 \
     PYTHONUNBUFFERED=1 \
-    PUSHSCAN_OUTPUT=/scans \
+    PUSHSCAN_FOLDER=/scans \
     PUSHSCAN_WEB_PORT=8080 \
     PUSHSCAN_HEARTBEAT_FILE=/tmp/pushscan2folder.alive
 
