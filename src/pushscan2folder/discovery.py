@@ -15,6 +15,7 @@ Plain stdlib; build_query and parse_response work on bytes, so they are
 tested without a network."""
 from __future__ import annotations
 
+import re
 import socket
 import struct
 import time
@@ -25,7 +26,17 @@ SERVICE = "_uscan._tcp.local"
 TYPE_A, TYPE_PTR, TYPE_TXT, TYPE_SRV = 1, 12, 16, 33
 MAX_PACKET = 9000
 TIMEOUT = 5.0                   # seconds to collect answers
+MAX_TEXT = 100                  # longest name or model text kept
 RESEND_AT = (0.0, 1.0, 2.5)     # seconds after the start: send the query (again)
+
+
+_CONTROL = re.compile(r"[\x00-\x1f\x7f-\x9f]")
+
+
+def clean_text(text: str, limit: int = MAX_TEXT) -> str:
+    """Text from the network, safe to print: no control characters (they
+    could carry terminal escape sequences), at most `limit` characters."""
+    return _CONTROL.sub("", text)[:limit]
 
 
 @dataclass(frozen=True)
@@ -63,7 +74,7 @@ def _name(data: bytes, offset: int, depth: int = 0) -> tuple[str, int]:
         start, offset = offset + 1, offset + 1 + length
         if offset > len(data):
             raise ValueError("bad label")
-        labels.append(data[start:offset].decode("utf-8", "replace"))
+        labels.append(clean_text(data[start:offset].decode("utf-8", "replace"), 255))
 
 
 def _txt(rdata: bytes) -> dict[str, str]:
@@ -104,7 +115,7 @@ def parse_response(data: bytes, service: str = SERVICE) -> tuple[list[str], dict
             if target.lower().endswith(suffix) and target not in instances:
                 instances.append(target)
         elif rtype == TYPE_TXT and owner.lower().endswith(suffix):
-            model = _txt(data[start:offset]).get("ty", "")
+            model = clean_text(_txt(data[start:offset]).get("ty", ""))
             if model:
                 models[owner] = model
     return instances, models
@@ -178,16 +189,19 @@ def discover(timeout: float = TIMEOUT, service: str = SERVICE,
                 _send(sock, query, interfaces)
             sock.settimeout(min([left] + [r - now for r in resend[:1]]) or 0.01)
             try:
-                data, (address, _port) = sock.recvfrom(MAX_PACKET)
+                data, (address, port) = sock.recvfrom(MAX_PACKET)
             except socket.timeout:
                 continue
             except OSError:
                 break
+            if port != MDNS_ADDR[1]:   # a real mDNS responder answers from port 5353
+                continue
             try:
                 instances, models = parse_response(data, service)
             except ValueError:
                 continue
+            by_name = {k.lower(): v for k, v in models.items()}   # DNS names ignore case
             for instance in instances:
-                found.setdefault(address, Scanner(address, instance_label(instance, service),
-                                                  models.get(instance, "")))
+                found.setdefault(address, Scanner(address, clean_text(instance_label(instance, service)),
+                                                  by_name.get(instance.lower(), "")))
     return sorted(found.values(), key=lambda s: tuple(int(p) for p in s.address.split(".")))

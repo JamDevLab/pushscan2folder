@@ -88,6 +88,28 @@ class FakeSocket:
 
 
 class DiscoverTests(unittest.TestCase):
+    def test_control_characters_and_length_are_cleaned(self):
+        evil = "Printer\x1b[31m\x07 red"
+        sock = FakeSocket([(answer(evil, "ty\x1b]0;x\x07\x9b" + "m" * 200), ("192.168.1.50", 5353))])
+        found = discovery.discover(timeout=1, sock_factory=lambda: sock, interfaces=[])
+        self.assertEqual(found[0].name, "Printer[31m red")
+        self.assertNotIn("\x1b", found[0].model)
+        self.assertEqual(len(found[0].model), discovery.MAX_TEXT)
+
+    def test_ignores_replies_from_other_ports(self):
+        sock = FakeSocket([(answer(), ("192.168.1.50", 40000))])
+        self.assertEqual(discovery.discover(timeout=1, sock_factory=lambda: sock,
+                                            interfaces=[]), [])
+
+    def test_model_lookup_ignores_case(self):
+        upper = answer().replace(b"\x0c", b"\x0c", 1)
+        models = {"Canon TR8500 series._uscan._tcp.local": "M"}
+        with mock.patch.object(discovery, "parse_response",
+                               return_value=(["canon tr8500 series._uscan._tcp.local"], models)):
+            sock = FakeSocket([(upper, ("192.168.1.50", 5353))])
+            found = discovery.discover(timeout=1, sock_factory=lambda: sock, interfaces=[])
+        self.assertEqual(found[0].model, "M")
+
     def test_collects_answers_by_sender(self):
         sock = FakeSocket([(answer(), ("192.168.1.50", 5353)),
                            (b"garbage", ("192.168.1.9", 5353)),
