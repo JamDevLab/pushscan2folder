@@ -64,6 +64,10 @@ class Config:
     trim_top: float | None = None
     trim_right: float | None = None
     trim_bottom: float | None = None
+    adf_trim_left: float | None = None
+    adf_trim_top: float | None = None
+    adf_trim_right: float | None = None
+    adf_trim_bottom: float | None = None
     web_enabled: bool | None = None
     web_bind: str | None = None
     web_port: int | None = None
@@ -76,6 +80,11 @@ class Config:
         """The [defaults] trim_* values (unset sides are 0)."""
         return Trim(self.trim_left or 0.0, self.trim_top or 0.0,
                     self.trim_right or 0.0, self.trim_bottom or 0.0)
+
+    def adf_trim(self) -> Trim:
+        """The [advanced] adf_trim_* values (unset sides are 0)."""
+        return Trim(self.adf_trim_left or 0.0, self.adf_trim_top or 0.0,
+                    self.adf_trim_right or 0.0, self.adf_trim_bottom or 0.0)
 
     def build_targets(self, base: Path, global_mode: str) -> list[Target]:
         """Targets for output dir `base`. Relative target outputs resolve
@@ -309,13 +318,16 @@ def parse_config(data: dict, fname: str = "config.toml") -> Config:
     old = cfg.old_keys
 
     adv = _Reader(top.table_("advanced") or {}, f"{fname}: [advanced]",
-                  {"interval", "verbose", "ignore_panel"} | set(_TRIM))
+                  {"interval", "verbose", "ignore_panel"} | set(_TRIM) | set(_ADF_TRIM))
     cfg.interval = _moved(top.number("interval"), adv.number("interval"),
                           "interval", "[advanced] interval", old)
     cfg.verbose = _moved(top.bool_("verbose"), adv.bool_("verbose"),
                          "verbose", "[advanced] verbose", old)
     cfg.ignore_panel = _moved(top.bool_("ignore_panel"), adv.bool_("ignore_panel"),
                               "ignore_panel", "[advanced] ignore_panel", old)
+
+    for key in _ADF_TRIM:
+        setattr(cfg, key, adv.mm(key))
 
     d = _Reader(top.table_("defaults") or {}, f"{fname}: [defaults]",
                 {"resolution", "color", "format", "source", "size", "open_after_scan",
@@ -388,6 +400,7 @@ def _quote(value: str) -> str:
 
 
 _TRIM = ("trim_left", "trim_top", "trim_right", "trim_bottom")
+_ADF_TRIM = ("adf_trim_left", "adf_trim_top", "adf_trim_right", "adf_trim_bottom")
 _ESCAPES = {"\b": "\\b", "\t": "\\t", "\n": "\\n", "\f": "\\f", "\r": "\\r"}
 
 
@@ -462,7 +475,7 @@ def dump_config(cfg: Config) -> str:
                        "   # true: ask for more pages after each one"])
     advanced = _lines([("interval", cfg.interval), ("verbose", cfg.verbose),
                        ("ignore_panel", cfg.ignore_panel)]
-                      + [(key, getattr(cfg, key)) for key in _TRIM])
+                      + [(key, getattr(cfg, key)) for key in _TRIM + _ADF_TRIM])
     if advanced:
         blocks.append(["[advanced]"] + advanced)
     web = _lines([("enabled", cfg.web_enabled), ("bind", cfg.web_bind),

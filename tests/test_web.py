@@ -19,7 +19,7 @@ from pushscan2folder import __main__ as cli
 from pushscan2folder import web
 from pushscan2folder.discovery import Scanner
 from pushscan2folder.config import Config, TargetSpec, dump_config, load_config, write_config
-from pushscan2folder.service import Target
+from pushscan2folder.service import Target, Trim
 from pushscan2folder.status import LogBuffer, ScanRecord, ServiceStatus
 from support import CAN_SYMLINK, assert_mode, needs_symlinks
 
@@ -966,7 +966,8 @@ output = "inbox"
 class SettingsTests(WebTestBase):
     BASE = {"resolution": "", "color": "", "format": "", "source": "", "size": "",
             "trim_left": "", "trim_top": "", "trim_right": "", "trim_bottom": "",
-            "interval": ""}
+            "adf_trim_left": "", "adf_trim_top": "", "adf_trim_right": "",
+            "adf_trim_bottom": "", "interval": ""}
 
     def post(self, **values):
         csrf = self.client.csrf("/settings")
@@ -978,7 +979,8 @@ class SettingsTests(WebTestBase):
         status, _, page = self.client.request("GET", "/settings")
         self.assertEqual(status, 200)
         for name in ("resolution", "color", "format", "source", "size", "trim_left",
-                     "trim_top", "trim_right", "trim_bottom", "multipage_document",
+                     "trim_top", "trim_right", "trim_bottom", "adf_trim_left",
+                     "adf_trim_top", "adf_trim_right", "adf_trim_bottom", "multipage_document",
                      "multipage_auto", "interval",
                      "ignore_panel"):
             self.assertIn(f'name="{name}"', page)
@@ -999,7 +1001,8 @@ class SettingsTests(WebTestBase):
                                     '[[target]]\nname = "a"\noutput = "/consume"\n')
         status, resp, _ = self.post(resolution="600", color="gray", format="jpeg",
                                     source="adf", size="letter", trim_right="3",
-                                    trim_bottom="2.5", multipage_document="1",
+                                    trim_bottom="2.5", adf_trim_top="1.5",
+                                    adf_trim_left="4", multipage_document="1",
                                     multipage_auto="1", interval="2.5",
                                     ignore_panel="1")
         self.assertEqual((status, resp.getheader("Location")), (303, "/settings?saved=1"))
@@ -1007,6 +1010,7 @@ class SettingsTests(WebTestBase):
         self.assertEqual((cfg.resolution, cfg.color, cfg.format, cfg.source, cfg.size),
                          (600, "gray", "jpeg", "adf", "letter"))
         self.assertEqual((cfg.trim_right, cfg.trim_bottom, cfg.trim_left), (3.0, 2.5, None))
+        self.assertEqual(cfg.adf_trim(), Trim(left=4, top=1.5))
         self.assertEqual((cfg.multipage, cfg.interval, cfg.ignore_panel), ("both", 2.5, True))
         self.assertEqual((cfg.printer, cfg.verbose), ("10.0.0.9", True))
         self.assertEqual([(t.name, t.output) for t in cfg.targets], [("a", "/consume")])
@@ -1058,7 +1062,8 @@ class SettingsTests(WebTestBase):
         before = self.config_path.read_text()
         for bad in ({"resolution": "123"}, {"resolution": "abc"}, {"color": "blue"},
                     {"format": "tiff"}, {"source": "tray"}, {"size": "a0"},
-                    {"trim_left": "51"}, {"trim_top": "-1"},
+                    {"trim_left": "51"}, {"trim_top": "-1"}, {"adf_trim_left": "51"},
+                    {"adf_trim_top": "abc"},
                     {"trim_right": "abc"}, {"trim_bottom": "nan"}, {"interval": "0"},
                     {"interval": "-3"}, {"interval": "fast"}, {"interval": "inf"}):
             status, _, page = self.post(**bad)

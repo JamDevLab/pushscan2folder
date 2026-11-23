@@ -325,6 +325,46 @@ class TrimConfigTests(ConfigTestBase):
         args, _ = cli.parse_args(["--config", str(path), "run", "--trim", ""])
         self.assertFalse(args.trim)
 
+    def test_adf_trim_parse_and_validation(self):
+        cfg = load_config(self.write("[advanced]\nadf_trim_right = 3\nadf_trim_bottom = 2.5\n"))
+        self.assertEqual(cfg.adf_trim(), Trim(right=3.0, bottom=2.5))
+        self.assertFalse(cfg.trim())
+        self.assertFalse(Config().adf_trim())
+        for value in ("true", '"3"', "-1", "50.5"):
+            self.assertError(f"[advanced]\nadf_trim_left = {value}", "adf_trim_left",
+                             "[advanced]")
+        self.assertError("[defaults]\nadf_trim_left = 1", 'unknown key "adf_trim_left"')
+
+    def test_adf_trim_dump_round_trip(self):
+        cfg = load_config(self.write("[advanced]\nadf_trim_left = 1\nadf_trim_top = 0\n"
+                                     "adf_trim_right = 3\nadf_trim_bottom = 2.5\n"))
+        again = load_config(self.write(dump_config(cfg), "again.toml"))
+        self.assertEqual(again.adf_trim(), Trim(1, 0, 3, 2.5))
+        self.assertNotIn("adf_trim", dump_config(Config(resolution=300)))
+
+    def test_adf_trim_precedence(self):
+        path = self.write("[advanced]\nadf_trim_left = 1\nadf_trim_bottom = 2\n"
+                          "[defaults]\ntrim_top = 7\n")
+        args, _ = cli.parse_args(["--config", str(path), "run"])
+        self.assertEqual((args.adf_trim, args.trim), (Trim(left=1, bottom=2), Trim(top=7)))
+        os.environ["PUSHSCAN_ADF_TRIM"] = "right=3"
+        args, _ = cli.parse_args(["--config", str(path), "run"])
+        self.assertEqual(args.adf_trim, Trim(right=3))
+        self.assertEqual(args.trim, Trim(top=7))
+        args, _ = cli.parse_args(["--config", str(path), "run", "--adf-trim", "top=4,right=5"])
+        self.assertEqual(args.adf_trim, Trim(top=4, right=5))
+        args, _ = cli.parse_args(["--config", str(path), "run", "--adf-trim", ""])
+        self.assertFalse(args.adf_trim)
+        self.assertEqual(cli.service_options(args, load_config(path))["adf_trim"], Trim())
+
+    def test_adf_trim_bad_input_exits_2(self):
+        for argv, env in ((["run", "--adf-trim", "right=99"], {}),
+                          (["run"], {"PUSHSCAN_ADF_TRIM": "right=abc"})):
+            with mock.patch.dict(os.environ, env), \
+                    mock.patch("sys.stderr"), self.assertRaises(SystemExit) as cm:
+                cli.parse_args(argv)
+            self.assertEqual(cm.exception.code, 2)
+
     def test_builtin_default_is_no_trim(self):
         args, _ = cli.parse_args(["run"])
         self.assertFalse(args.trim)
@@ -373,6 +413,7 @@ class PrecedenceTests(ConfigTestBase):
         self.assertEqual(overrides["interval"], "environment variable PUSHSCAN_INTERVAL")
         self.assertEqual(overrides["trim_left"], "environment variable PUSHSCAN_TRIM")
         self.assertEqual(overrides["trim_bottom"], "environment variable PUSHSCAN_TRIM")
+        self.assertNotIn("adf_trim_left", overrides)
         self.assertEqual(overrides["format"], "command line option --format")
         self.assertEqual(overrides["resolution"], "command line option --resolution")
         self.assertEqual(overrides["printer"], "environment variable PUSHSCAN_PRINTER")
@@ -381,6 +422,14 @@ class PrecedenceTests(ConfigTestBase):
         self.assertEqual((effective["interval"], effective["format"], effective["resolution"],
                           effective["color"], effective["size"], effective["trim_left"]),
                          ("9", "jpeg", "75", "gray", "letter", "2"))
+
+    def test_web_overrides_adf_trim(self):
+        os.environ["PUSHSCAN_ADF_TRIM"] = "bottom=2"
+        args, cfg = cli.parse_args(["run"])
+        overrides, effective = cli.web_overrides(args, cfg, ["run"])
+        self.assertEqual(overrides["adf_trim_top"], "environment variable PUSHSCAN_ADF_TRIM")
+        self.assertNotIn("trim_top", overrides)
+        self.assertEqual((effective["adf_trim_bottom"], effective["adf_trim_left"]), ("2", "0"))
 
     def test_web_overrides_none(self):
         argv = ["--config", str(self.write(FULL)), "run"]

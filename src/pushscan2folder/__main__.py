@@ -175,11 +175,14 @@ def _trim_arg(text: str) -> Trim:
         raise argparse.ArgumentTypeError(str(exc)) from None
 
 
-def _trim_default(cfg: Config) -> Trim:
-    """PUSHSCAN_TRIM (replaces the file values as a whole) or the config file.
-    An invalid env value is reported by argparse when it is applied as a default."""
-    value = env("TRIM")
-    return cfg.trim() if value is None else value
+def _trim_default(cfg: Config, adf: bool = False) -> Trim:
+    """PUSHSCAN_TRIM / PUSHSCAN_ADF_TRIM (replaces the file values as a whole)
+    or the config file. An invalid env value is reported by argparse when it
+    is applied as a default."""
+    value = env("ADF_TRIM" if adf else "TRIM")
+    if value is not None:
+        return value
+    return cfg.adf_trim() if adf else cfg.trim()
 
 
 def build_parser(cfg: Config | None = None) -> argparse.ArgumentParser:
@@ -226,6 +229,11 @@ def build_parser(cfg: Config | None = None) -> argparse.ArgumentParser:
                          help="cut off a border by scanning a smaller area (platen only), "
                               "e.g. right=1,bottom=2 (keys left/top/right/bottom, mm, 0 to 50); "
                               "replaces the four trim_* values of the config file")
+        opts.add_argument("--adf-trim", type=_trim_arg, default=_trim_default(cfg, adf=True),
+                         metavar="SIDES",
+                         help="cut off a border of document feeder (ADF) scans by scanning a "
+                              "smaller area, same syntax as --trim; replaces the four "
+                              "adf_trim_* values of the config file")
         opts.add_argument("--targets", default=env("TARGETS"),
                          help='several panel entries, e.g. "scan1,paperless=consume@300dpi,archiv@600dpi"; '
                               "each scans into its own folder below --output, optional preset after @. "
@@ -353,6 +361,8 @@ OVERRIDABLE = {
     "filename": ("FILENAME", "--filename"),
     "trim_left": ("TRIM", "--trim"), "trim_top": ("TRIM", "--trim"),
     "trim_right": ("TRIM", "--trim"), "trim_bottom": ("TRIM", "--trim"),
+    "adf_trim_left": ("ADF_TRIM", "--adf-trim"), "adf_trim_top": ("ADF_TRIM", "--adf-trim"),
+    "adf_trim_right": ("ADF_TRIM", "--adf-trim"), "adf_trim_bottom": ("ADF_TRIM", "--adf-trim"),
 }
 
 
@@ -381,6 +391,7 @@ def web_overrides(args: argparse.Namespace, cfg: Config,
         elif env(var) is not None:
             overrides[key] = f"environment variable PUSHSCAN_{var}"
     trim = getattr(args, "trim", None) or Trim()
+    adf_trim = getattr(args, "adf_trim", None) or Trim()
     effective = {
         "printer": args.printer, "output": str(args.output), "interval": f"{args.interval:g}",
         "ignore_panel": "yes" if args.ignore_panel else "no", "multipage": args.multipage,
@@ -390,6 +401,8 @@ def web_overrides(args: argparse.Namespace, cfg: Config,
         "filename": args.filename,
         "trim_left": f"{trim.left:g}", "trim_top": f"{trim.top:g}",
         "trim_right": f"{trim.right:g}", "trim_bottom": f"{trim.bottom:g}",
+        "adf_trim_left": f"{adf_trim.left:g}", "adf_trim_top": f"{adf_trim.top:g}",
+        "adf_trim_right": f"{adf_trim.right:g}", "adf_trim_bottom": f"{adf_trim.bottom:g}",
     }
     return overrides, effective
 
@@ -419,6 +432,7 @@ def service_options(args: argparse.Namespace, cfg: Config) -> dict:
                 use_panel=not getattr(args, "ignore_panel", True),
                 multipage=MULTIPAGE_MODES.get(getattr(args, "multipage", "off"), frozenset()),
                 trim=getattr(args, "trim", None) or Trim(),
+                adf_trim=getattr(args, "adf_trim", None) or Trim(),
                 open_after_scan=bool(getattr(args, "open_after_scan", False)),
                 filename=getattr(args, "filename", DEFAULT_FILENAME))
 

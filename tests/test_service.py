@@ -478,9 +478,9 @@ if __name__ == "__main__":
 
 
 class TrimTests(unittest.TestCase):
-    def service(self, trim, source="platen"):
+    def service(self, trim, source="platen", adf_trim=None):
         return PushScanService(None, None, [], ScanSettings(source=source), auto_source=False,
-                               trim=trim)
+                               trim=trim, adf_trim=adf_trim)
 
     def test_escl_xml_offsets(self):
         xml = escl.build_scan_settings(ScanSettings(x_offset=12, y_offset=34))
@@ -501,6 +501,31 @@ class TrimTests(unittest.TestCase):
         s = self.service(Trim(right=3, bottom=2), source="adf").settings_for(b"")
         self.assertEqual((s.x_offset, s.y_offset, s.width, s.height),
                          (0, 0, escl.A4_WIDTH, escl.A4_HEIGHT))
+
+    def test_adf_has_its_own_trim(self):
+        s = self.service(Trim(left=9), source="adf",
+                         adf_trim=Trim(left=1, top=2, right=3, bottom=4)).settings_for(b"")
+        left, top, right, bottom = Trim(1, 2, 3, 4).units()
+        self.assertEqual((s.x_offset, s.y_offset), (left, top))
+        self.assertEqual((s.width, s.height),
+                         (escl.A4_WIDTH - left - right, escl.A4_HEIGHT - top - bottom))
+
+    def test_adf_trim_does_not_affect_the_platen(self):
+        s = self.service(None, adf_trim=Trim(right=3, bottom=2)).settings_for(b"")
+        self.assertEqual((s.x_offset, s.y_offset, s.width, s.height),
+                         (0, 0, escl.A4_WIDTH, escl.A4_HEIGHT))
+
+    def test_too_large_adf_trim_is_skipped(self):
+        svc = self.service(None, source="adf", adf_trim=Trim(left=50, right=50, top=50, bottom=50))
+        svc.settings = ScanSettings(source="adf", width=1000, height=1000)
+        with self.assertLogs("pushscan2folder.service", "WARNING"):
+            s = svc.settings_for(b"")
+        self.assertEqual((s.x_offset, s.width, s.height), (0, 1000, 1000))
+
+    def test_update_options_applies_adf_trim(self):
+        svc = self.service(None, source="adf")
+        svc.update_options(adf_trim=Trim(right=3))
+        self.assertEqual(svc.settings_for(b"").width, escl.A4_WIDTH - Trim(right=3).units()[2])
 
     def test_no_trim_by_default(self):
         s = self.service(None).settings_for(b"")

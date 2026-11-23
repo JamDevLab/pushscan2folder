@@ -66,6 +66,7 @@ class WatcherTests(unittest.TestCase):
             self.assertTrue(self.watcher.check())
         self.assertEqual(self.service.options["settings"].resolution, 600)
         self.assertEqual(self.service.options["filename"], "{name}_{date}")
+        self.assertFalse(self.service.options["adf_trim"])
         self.assertEqual([t.name for t in self.service.targets], ["Scans", "Paperless"])
         self.assertEqual(self.service.printers, [])
         self.assertTrue(any("new settings are in use" in line for line in logs.output))

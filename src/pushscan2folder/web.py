@@ -463,8 +463,11 @@ def apply_targets(ctx: WebContext, rows: list[Row]) -> tuple[list[TargetSpec], l
 BUILTIN = {"resolution": "300", "color": "color", "format": "pdf", "source": "auto",
            "size": "a4", "multipage": "document", "interval": "4", "open_after_scan": "no",
            "filename": DEFAULT_FILENAME,
-           "trim_left": "0", "trim_top": "0", "trim_right": "0", "trim_bottom": "0"}
-TRIM_KEYS = ("trim_left", "trim_top", "trim_right", "trim_bottom")
+           "trim_left": "0", "trim_top": "0", "trim_right": "0", "trim_bottom": "0",
+           "adf_trim_left": "0", "adf_trim_top": "0", "adf_trim_right": "0",
+           "adf_trim_bottom": "0"}
+TRIM_KEYS = ("trim_left", "trim_top", "trim_right", "trim_bottom",
+             "adf_trim_left", "adf_trim_top", "adf_trim_right", "adf_trim_bottom")
 # Config keys the settings form edits (top level and [defaults]).
 SETTING_KEYS = ("interval", "ignore_panel", "multipage", "resolution", "color", "format",
                 "source", "size", "open_after_scan", "filename") + TRIM_KEYS
@@ -1300,7 +1303,13 @@ def render_settings(ctx: WebContext, csrf: str, values: dict[str, str] | None = 
     trims = [
         _field(f"Trim {side} (mm)", _text_input(f"trim_{side}", v(f"trim_{side}"), "0"),
                f"trim_{side}", f"Cuts this border off by scanning a smaller area, 0 to "
-               f"{TRIM_MAX_MM:g} mm. Glass only, the document feeder is not trimmed.", ctx)
+               f"{TRIM_MAX_MM:g} mm. Glass only; the document feeder has its own fields "
+               "below.", ctx)
+        for side in ("left", "top", "right", "bottom")]
+    adf_trims = [
+        _field(f"Trim {side} (mm)", _text_input(f"adf_trim_{side}", v(f"adf_trim_{side}"), "0"),
+               f"adf_trim_{side}", "Cuts this border off feeder scans by scanning a smaller "
+               f"area, 0 to {TRIM_MAX_MM:g} mm.", ctx)
         for side in ("left", "top", "right", "bottom")]
     behaviour = [
         _multipage_field(v("multipage"), ctx),
@@ -1329,6 +1338,8 @@ def render_settings(ctx: WebContext, csrf: str, values: dict[str, str] | None = 
             "panel nor the target (Auto scan preset) sets a value.</p>"
             '<div class="fields">' + "".join(scan) + "</div></section>"
             "<h2>Trim</h2><section>" '<div class="fields">' + "".join(trims) + "</div></section>"
+            "<h2>Trim, document feeder (ADF)</h2><section>" '<div class="fields">'
+            + "".join(adf_trims) + "</div></section>"
             "<h2>Behaviour</h2><section>" '<div class="fields">' + "".join(behaviour)
             + "</div></section>"
             '<p class="save"><button type="submit">Save</button>'

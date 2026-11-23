@@ -273,8 +273,9 @@ class PushScanService:
                  use_panel: bool = True, native: NativeScanner | None = None,
                  multipage: frozenset[str] = frozenset({"document"}),
                  trim: Trim | None = None, open_after_scan: bool = False,
-                 filename: str = DEFAULT_FILENAME):
+                 filename: str = DEFAULT_FILENAME, adf_trim: Trim | None = None):
         self.trim = trim or Trim()
+        self.adf_trim = adf_trim or Trim()
         self.filename = filename
         # Optional file touched after every successful contact with the
         # printer (`pushscan2folder health`, the Docker healthcheck).
@@ -351,7 +352,7 @@ class PushScanService:
         log.info("targets updated: %s", ", ".join(new_names) or "none")
 
     OPTIONS = ("settings", "interval", "auto_source", "use_panel", "multipage", "trim",
-               "open_after_scan", "filename")
+               "adf_trim", "open_after_scan", "filename")
 
     def update_options(self, **options) -> None:
         """Change scan options (names in OPTIONS). Call it from the poll loop
@@ -418,20 +419,22 @@ class PushScanService:
         return self.apply_trim(settings)
 
     def apply_trim(self, settings: ScanSettings) -> ScanSettings:
-        """Shrink the scan region by the configured trim. Platen only: ADF
-        scans are not trimmed. Skipped (with a warning) if less than 1 inch
-        would remain in either direction."""
-        if not self.trim or settings.source != "platen":
+        """Shrink the scan region by the configured trim: `trim` for the
+        platen, `adf_trim` for the document feeder. Skipped (with a warning)
+        if less than 1 inch would remain in either direction."""
+        trim = self.adf_trim if settings.source == "adf" else self.trim
+        if not trim or settings.source not in ("platen", "adf"):
             return settings
-        left, top, right, bottom = self.trim.units()
+        what = "feeder" if settings.source == "adf" else "glass"
+        left, top, right, bottom = trim.units()
         width = settings.width - left - right
         height = settings.height - top - bottom
         if width < MIN_TRIMMED or height < MIN_TRIMMED:
-            log.warning("trim too large for the scan area (%dx%d, 1/300 inch left), "
-                        "scanning without trim", width, height)
+            log.warning("%s trim too large for the scan area (%dx%d, 1/300 inch left), "
+                        "scanning without trim", what, width, height)
             return settings
-        log.debug("trim left=%s top=%s right=%s bottom=%s mm: offset %d,%d size %dx%d",
-                  self.trim.left, self.trim.top, self.trim.right, self.trim.bottom,
+        log.debug("%s trim left=%s top=%s right=%s bottom=%s mm: offset %d,%d size %dx%d",
+                  what, trim.left, trim.top, trim.right, trim.bottom,
                   settings.x_offset + left, settings.y_offset + top, width, height)
         return replace(settings, x_offset=settings.x_offset + left,
                        y_offset=settings.y_offset + top, width=width, height=height)
