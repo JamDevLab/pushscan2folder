@@ -220,7 +220,7 @@ Bedienfeld nicht schickt:
 
 - die Ordner, die Dateinamen und ob eine fertige Datei geöffnet wird,
 - welche Dokumenttypen den [Dialog für die nächste Seite](#dialog-für-die-nächste-seite)
-  bekommen,
+  bekommen, auf dem Glas und auf Wunsch nach dem Einzug,
 - die Einstellungen des Dokumenttyps *Auto*, bei dem das Bedienfeld weder
   Größe noch Format noch Auflösung schickt ([Dokumenttyp Auto](#dokumenttyp-auto)),
 - den abgeschnittenen Rand ([Rand abschneiden](#rand-abschneiden)).
@@ -235,6 +235,7 @@ Oberste Ebene:
 | `folder` | Text | `./scans`, unter Windows und macOS `Documents/Scans` | Basisordner; relative Zielordner beziehen sich darauf, siehe [Ordner](#ordner) |
 | `filename` | Text | `scan_{now:%Y%m%d_%H%M%S}` | Vorlage des Dateinamens ohne Endung, siehe [Dateinamen](#dateinamen) |
 | `next_page` | Liste aus `"document"`, `"auto"`, `"photo"` | `["document"]` | Dokumenttypen, die auf dem Vorlagenglas den Dialog für die nächste Seite bekommen, siehe [Dialog für die nächste Seite](#dialog-für-die-nächste-seite). `[]` heißt keiner |
+| `feeder_next_page` | Liste aus `"document"`, `"auto"`, `"photo"` | `[]` | Dokumenttypen, die nach einem Scan aus dem Einzug den Dialog für die nächste Seite bekommen, siehe [Dialog nach dem Einzug](#dialog-nach-dem-einzug). `[]` heißt keiner |
 | `auto` | Inline-Tabelle | `{ resolution = 300, format = "pdf", size = "a4" }` | Einstellungen für den Dokumenttyp *Auto*, siehe [Dokumenttyp Auto](#dokumenttyp-auto) |
 | `open_after_scan` | `true` / `false` | `false` | nur Desktop-PC: nach dem Speichern eines Auftrags den Ordner öffnen (Windows: Explorer mit markierter neuer Datei), einmal pro Auftrag. Unter Linux braucht es `DISPLAY` oder `WAYLAND_DISPLAY`. Ein Fehler erzeugt nur eine Warnung. Docker hat keinen Desktop, lass es `false` (sonst eine Warnung beim ersten Auftrag) |
 
@@ -265,6 +266,7 @@ Oberste Ebene:
 | `document_folder`, `auto_folder`, `photo_folder` | Text | `folder` | anderer Ordner für Scans eines Dokumenttyps |
 | `filename` | Text | `filename` der obersten Ebene | Vorlage des Dateinamens für dieses Ziel |
 | `next_page` | Liste | `next_page` der obersten Ebene | ersetzt die globale Liste für dieses Ziel |
+| `feeder_next_page` | Liste | `feeder_next_page` der obersten Ebene | ersetzt die globale Liste für dieses Ziel |
 | `auto` | Inline-Tabelle | `auto` der obersten Ebene | hier gesetzte Schlüssel gelten vor dem globalen `auto`, die anderen bleiben |
 | `open_after_scan` | `true` / `false` | Wert der obersten Ebene | für dieses Ziel, zum Beispiel `false` für einen Archivordner |
 
@@ -289,8 +291,8 @@ Liste setzen, und `next_page = []` schaltet den Dialog aus.
 next_page = ["document", "auto"]       # auch bei Auto fragen
 ```
 
-Das Einzugsfach scannt immer alle Seiten in einem Rutsch, zeigt den Dialog also
-nie und nutzt immer eSCL.
+Das Einzugsfach scannt standardmäßig alle Seiten in einem Rutsch über eSCL, ohne
+Dialog. Einen optionalen Dialog nach dem Einzug beschreibt der nächste Abschnitt.
 
 Bei *Foto* erscheint der Dialog nur für feste Fotogrößen. Bei den Größen *Auto
 Scan* und *Auto Multi Scan* schickt der Drucker das ganze Glas, und die Fotos
@@ -302,6 +304,35 @@ Parameter, sind aber noch nicht getestet. Bei *Auto* schickt das Bedienfeld
 weder Auflösung noch Format, es gelten also die `auto`-Einstellungen. Der
 Drucker kann den Dokumenttyp nach einem Scan auf *Auto* zurücksetzen, prüfe ihn
 also vor dem nächsten mehrseitigen Scan.
+
+### Dialog nach dem Einzug
+
+Der Einzug zieht manchmal zwei Blätter auf einmal ein. Mit `feeder_next_page`
+zeigt das Bedienfeld nach dem Scan aus dem Einzug denselben Dialog, sodass du die
+Seitenzahl prüfen und ein Blatt neu einlegen kannst, bevor die Datei gespeichert
+wird. Der Schlüssel hat dieselbe Form wie `next_page`: eine Liste von
+Dokumenttypen aus `"document"`, `"auto"` und `"photo"`. Der Standard ist `[]`
+(aus). Die Liste eines Ziels ersetzt die globale.
+
+```toml
+feeder_next_page = ["document"]
+```
+
+Liegt Papier im Einzug und der Dokumenttyp steht in der Liste, scannt das
+Programm den Einzug über eSCL und zeigt dann den Dialog. Für weitere Blätter
+legst du sie zuerst in den Einzug und drückst dann *Farbe* oder *Schwarzweiß*.
+Der Einzug wird in dieser Farbe erneut gescannt. *Fertig* beendet den Auftrag.
+Alle Seiten landen in einem PDF (Format PDF) oder in einzelnen JPEG-Dateien.
+
+Der Drucker zeigt den Dialog nur, nachdem eine Seite mit Canons nativem
+Protokoll gescannt wurde. Deshalb scannt das Programm vor jedem Dialog einen
+winzigen Blindbereich (1 x 1 Zoll bei 150 dpi) vom Glas und wirft ihn weg. Das
+kostet etwa 10 Sekunden pro Runde, und der Scankopf bewegt sich kurz. Was auf dem
+Glas liegt, spielt keine Rolle.
+
+Ist der Einzug leer, wenn du mehr wählst, schreibt das Programm eine Warnung ins
+Log und fragt erneut. Nach 3 Runden in Folge ohne Seite beendet es den Auftrag.
+Die bisher gescannten Seiten bleiben immer erhalten.
 
 ### Fotos
 
@@ -428,6 +459,7 @@ printer: 192.168.1.50
 base folder: /scans
 file names: scan_{now:%Y-%m-%d_%H-%M-%S}
 next page dialog: document
+next page dialog after the feeder: none
 document type Auto: 300 dpi, pdf, a4
 trim: glass right 1 mm, bottom 2 mm; feeder none
 open after scan: no
@@ -441,6 +473,7 @@ target 'Paperless':
 target 'Archive':
   folder: /scans/Archive/2026
   next page dialog: none
+  next page dialog after the feeder: document
   document type Auto: 600 dpi, jpeg, a4
 OK
 ```
@@ -472,7 +505,7 @@ neu gelesen. Kommandozeilen-Optionen und die Variablen `PUSHSCAN_FOLDER` und
 `PUSHSCAN_PRINTER` haben weiter Vorrang vor der Datei. Das gilt auch für
 Änderungen auf der [Weboberfläche](web.de.md).
 
-Sofort übernommen werden: `folder`, `filename`, `next_page`, `auto`,
+Sofort übernommen werden: `folder`, `filename`, `next_page`, `feeder_next_page`, `auto`,
 `open_after_scan`, `interval`, `trim` und `adf_trim`, die Ziele und `printer`.
 Ziele, deren Namen bleiben, behalten ihre Anmeldung am Bedienfeld. Ändert sich
 der Drucker, werden die Namen am alten Drucker freigegeben und am neuen

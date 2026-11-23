@@ -82,7 +82,8 @@ GitHub ask for the details. To report a new printer model, see
 - The next page dialog does not appear: it is only shown for platen scans and
   only for the document types listed in `next_page` (by default only
   *Document*). For *Photo* with the sizes *auto scan* and *auto multi scan* it
-  never appears. See [Next page dialog](configuration.md#next-page-dialog).
+  never appears. After a feeder scan it only appears if `feeder_next_page` lists
+  the document type. See [Next page dialog](configuration.md#next-page-dialog).
 - Scans cannot be written in Docker: the base folder must be writable
   for the container user, see [User, uid and gid](docker.md#user-uid-and-gid).
 - The web page refuses to start: see [Password options](web.md#password-options).

@@ -122,7 +122,8 @@ Fehler, damit ein Tippfehler keinen Schutz ausschaltet.
   erhalten.
 - Einstellungen (`/settings`) bearbeitet `interval`, den Dialog für die nächste
   Seite (je ein Haken für Document, Auto und Photo, geschrieben nach
-  `next_page`), die "Auto settings" (`resolution`, `format` und `size` der
+  `next_page`), die Haken-Gruppe "Next page dialog after the feeder"
+  (geschrieben nach `feeder_next_page`), die "Auto settings" (`resolution`, `format` und `size` der
   Tabelle `auto`), `open_after_scan`, `filename` (angezeigt als "File name",
   siehe [Dateinamen](configuration.de.md#dateinamen)), "Glass trim" (`trim`) und
   "Feeder trim" (`adf_trim`), die letzten beiden mit einem Feld pro Seite. Die
@@ -176,7 +177,7 @@ Einstellungsformular verloren, bis auf den kurzen Kopf und die auskommentierten
 Beispiele, die neu geschrieben werden. Die Datei wird neu geschrieben; andere Schlüssel
 behalten ihre Werte. Nur der Rohtext-Editor behält Kommentare. Ein Ziel, dessen Haken für die
 nächste Seite der globalen Liste entsprechen, bekommt keinen Schlüssel
-`next_page`.
+`next_page`; für `feeder_next_page` gilt dasselbe.
 
 Ordner, die du auf der Weboberfläche einträgst, liegen immer innerhalb des
 Basisordners (`--folder` / `PUSHSCAN_FOLDER`, in Docker `/scans`). Gib einen

@@ -93,7 +93,8 @@ melden, siehe [CONTRIBUTING.md](../CONTRIBUTING.md) (auf Englisch).
 - Der Dialog für die nächste Seite erscheint nicht: Er wird nur bei Scans vom
   Vorlagenglas gezeigt und nur für die Dokumenttypen in `next_page`
   (standardmäßig nur *Dokument*). Bei *Foto* mit den Größen *auto scan* und
-  *auto multi scan* erscheint er nie. Siehe
+  *auto multi scan* erscheint er nie. Nach einem Scan aus dem Einzug erscheint er nur, wenn
+  `feeder_next_page` den Dokumenttyp enthält. Siehe
   [Dialog für die nächste Seite](configuration.de.md#dialog-für-die-nächste-seite).
 - Scans lassen sich in Docker nicht schreiben: Der Basisordner muss für
   den Container-Benutzer beschreibbar sein, siehe

@@ -20,8 +20,12 @@ folder = "/scans"                        # base folder of all targets
 # Existing files are never overwritten (-1, -2 ... is added).
 filename = "scan_{now:%Y-%m-%d_%H-%M-%S}"
 # Document types that get the "next page" dialog for scans on the glass:
-# "document", "auto", "photo". The feeder always scans all pages.
+# "document", "auto", "photo". The feeder scans all pages in one go.
 next_page = ["document"]
+# Optional: the same dialog after a scan from the document feeder, to check
+# the page count (the feeder sometimes pulls two sheets). Adds about 10 s per
+# round. Off by default.
+# feeder_next_page = ["document"]
 # Document type "Auto": the panel sends no settings, these are used.
 # resolution 75 | 150 | 300 | 600, format "pdf" | "jpeg",
 # size "a4" | "letter" | "legal" | "10x15" | "13x18"
@@ -60,4 +64,5 @@ photo_folder = "Photos"                  # photos of this entry go to /scans/Pho
 name = "Archive"
 folder = "Archive/{now:%Y}"              # one folder per year
 next_page = []                           # never ask for more pages
+feeder_next_page = ["document"]          # but check the page count after the feeder
 auto = { resolution = 600, format = "jpeg" }

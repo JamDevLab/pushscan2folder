@@ -23,7 +23,7 @@ scans and saves the result as a PDF or JPEG file. Tested with a Canon PIXMA TR85
 
 - Adds a "scan to PC" entry to the printer panel
 - Several targets, each with its own folder
-- Multi-page PDFs from the glass, with the next-page dialog on the panel
+- Multi-page PDFs from the glass, with the next-page dialog on the panel; optionally the same dialog after a scan from the document feeder (`feeder_next_page`)
 - Settings per target for the auto document type, and a folder per document type
 - Optional password-protected web page for status, log, targets and settings
 - Docker and NAS ready, only outbound connections to the printer (TCP 80)
@@ -121,7 +121,7 @@ name = "Paperless"
 folder = "consume"
 ```
 
-The full key table, folders, the next page dialog, trimming and panel
+The full key table, folders, the next page dialog (also after the feeder), trimming and panel
 settings are in [docs/configuration.md](docs/configuration.md).
 
 ## Web page

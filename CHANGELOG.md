@@ -19,6 +19,13 @@ All notable changes are documented here. The format follows
 - The next page dialog for the document type Photo (`"photo"` in
   `next_page`), for fixed photo sizes. With the sizes auto scan and auto
   multi scan the photos are still cut out.
+- The next page dialog after a scan from the document feeder: the new key
+  `feeder_next_page` (top level and per target, same form as `next_page`,
+  off by default). It lets you check the page count and feed a sheet again
+  when the feeder pulled two at once. Before each dialog a tiny dummy area is
+  scanned from the glass and thrown away, which adds about 10 seconds per
+  round. `pushscan2folder check` shows the setting, and the web page has a
+  checkbox group for it.
 - `pushscan2folder check` checks the config file and shows the folders and
   settings of every target.
 - Docker: if the file in `PUSHSCAN_CONFIG` does not exist and its folder

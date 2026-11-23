@@ -97,7 +97,8 @@ error, so a typo cannot turn a protection off.
 - Log (`/log`) shows the last 500 log lines (INFO and above).
 - Targets (`/targets`) adds, changes and deletes targets. A target card has
   the name and folder, "Open after a scan", the auto scan settings (resolution,
-  format, size), three next page boxes (Document, Auto and Photo) and the
+  format, size), three next page boxes (Document, Auto and Photo), three boxes for the
+  "Next page dialog after the feeder" and the
   fold-out "Other folder per document type" with one folder for each type.
   Names and folders are validated as in the config file, and date fields such
   as `{now:%Y}` are allowed in folders. The cards can be reordered with "Move
@@ -111,7 +112,8 @@ error, so a typo cannot turn a protection off.
   The editor has no field for the file name template of a target. A `filename`
   that a target has in the config file is kept when you save.
 - Settings (`/settings`) edits `interval`, the next page dialog (one box each
-  for Document, Auto and Photo, written to `next_page`), the "Auto settings"
+  for Document, Auto and Photo, written to `next_page`), the checkbox group "Next page dialog after the
+  feeder" (written to `feeder_next_page`), the "Auto settings"
   (`resolution`, `format` and `size` of the `auto` table), `open_after_scan`,
   `filename` (shown as "File name", see
   [File names](configuration.md#file-names)), "Glass trim" (`trim`) and
@@ -161,7 +163,7 @@ Comments in the config file are lost when saving from the Targets or Settings
 form, except the short header and the commented examples, which are written
 again. The file is rewritten; other keys keep their values. Only the raw editor
 keeps comments. A target whose next page boxes equal the global list gets no
-`next_page` key.
+`next_page` key, and the same holds for `feeder_next_page`.
 
 Folders set on the web page are always inside the base folder
 (`--folder` / `PUSHSCAN_FOLDER`, `/scans` in Docker). Enter a plain relative

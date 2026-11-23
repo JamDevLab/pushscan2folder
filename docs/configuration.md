@@ -211,7 +211,8 @@ So the config file has no keys for colour, source, size, format or resolution
 of these two types. It decides what the panel does not send:
 
 - the folders, the file names and whether a finished file is opened,
-- which document types get the [next page dialog](#next-page-dialog),
+- which document types get the [next page dialog](#next-page-dialog), on the
+  glass and, if you want it, after the feeder,
 - the settings of the document type *Auto*, where the panel sends no size,
   format or resolution ([Document type Auto](#document-type-auto)),
 - the border trim ([Trimming a border](#trimming-a-border)).
@@ -226,6 +227,7 @@ Top level:
 | `folder` | text | `./scans`, on Windows and macOS `Documents/Scans` | base folder; relative target folders resolve against it, see [Folders](#folders) |
 | `filename` | text | `scan_{now:%Y%m%d_%H%M%S}` | template of the file name without extension, see [File names](#file-names) |
 | `next_page` | list of `"document"`, `"auto"`, `"photo"` | `["document"]` | document types that get the next page dialog on the glass, see [Next page dialog](#next-page-dialog). `[]` means none |
+| `feeder_next_page` | list of `"document"`, `"auto"`, `"photo"` | `[]` | document types that get the next page dialog after a scan from the document feeder, see [Next page dialog after the feeder](#next-page-dialog-after-the-feeder). `[]` means none |
 | `auto` | inline table | `{ resolution = 300, format = "pdf", size = "a4" }` | settings for the document type *Auto*, see [Document type Auto](#document-type-auto) |
 | `open_after_scan` | `true` / `false` | `false` | desktop PC only: after a job is saved, open the folder (Windows: Explorer with the new file selected), once per job. On Linux it needs `DISPLAY` or `WAYLAND_DISPLAY`. A failure only logs a warning. Docker has no desktop, keep it `false` (else one warning at the start of the first job) |
 
@@ -256,6 +258,7 @@ Top level:
 | `document_folder`, `auto_folder`, `photo_folder` | text | `folder` | another folder for scans of one document type |
 | `filename` | text | top level `filename` | file name template for this target |
 | `next_page` | list | top level `next_page` | replaces the global list for this target |
+| `feeder_next_page` | list | top level `feeder_next_page` | replaces the global list for this target |
 | `auto` | inline table | top level `auto` | keys set here win over the global `auto`, the others stay |
 | `open_after_scan` | `true` / `false` | top level value | for this target, for example `false` for an archive folder |
 
@@ -279,8 +282,8 @@ delivers each page as a JPEG; the PDF embeds the JPEGs unchanged.
 next_page = ["document", "auto"]       # also ask with Auto
 ```
 
-The feeder always scans all pages in one go, so it never shows the dialog and
-always uses eSCL.
+By default the feeder scans all pages in one go and uses eSCL without a dialog.
+See the next section for an optional dialog after the feeder.
 
 For *Photo* the dialog is only shown for fixed photo sizes. With the sizes
 *auto scan* and *auto multi scan* the printer sends the whole glass and the
@@ -292,6 +295,35 @@ parameters but have not been tested yet. With *Auto* the panel sends no
 resolution or format, so the `auto` settings are used. The printer may reset the
 document type to *Auto* after a scan, so check it before the next multi-page
 scan.
+
+### Next page dialog after the feeder
+
+The feeder sometimes pulls two sheets at once. With `feeder_next_page` the
+panel shows the same dialog after the feeder was scanned, so you can check the
+page count and feed a sheet again before the file is saved. The key has the
+same form as `next_page`: a list of document types out of `"document"`,
+`"auto"` and `"photo"`. The default is `[]` (off). A target's list replaces the
+global one.
+
+```toml
+feeder_next_page = ["document"]
+```
+
+If paper is in the feeder and the document type is in the list, the program
+scans the feeder via eSCL and then shows the dialog. To scan more sheets, put
+them into the feeder first and then press *Colour* or *Black and white*. The
+feeder is scanned again in that colour. *Finish* ends the job. All pages end up
+in one PDF (format PDF) or as single JPEG files.
+
+The printer only shows the dialog after a page was scanned with Canon's native
+protocol. So before each dialog the program scans a tiny dummy area (1 x 1 inch
+at 150 dpi) from the glass and throws it away. This adds about 10 seconds per
+round, and the scan head moves briefly. It does not matter what is on the
+glass.
+
+If the feeder is empty when you choose more, the program logs a warning and
+asks again. After 3 rounds in a row without a page it finishes. The pages
+scanned so far are always kept.
 
 ### Photos
 
@@ -415,6 +447,7 @@ printer: 192.168.1.50
 base folder: /scans
 file names: scan_{now:%Y-%m-%d_%H-%M-%S}
 next page dialog: document
+next page dialog after the feeder: none
 document type Auto: 300 dpi, pdf, a4
 trim: glass right 1 mm, bottom 2 mm; feeder none
 open after scan: no
@@ -428,6 +461,7 @@ target 'Paperless':
 target 'Archive':
   folder: /scans/Archive/2026
   next page dialog: none
+  next page dialog after the feeder: document
   document type Auto: 600 dpi, jpeg, a4
 OK
 ```
@@ -459,7 +493,7 @@ startup. The command line options and the `PUSHSCAN_FOLDER` and
 `PUSHSCAN_PRINTER` variables still win over the file. This also applies to
 changes made on the [web page](web.md).
 
-These are applied right away: `folder`, `filename`, `next_page`, `auto`,
+These are applied right away: `folder`, `filename`, `next_page`, `feeder_next_page`, `auto`,
 `open_after_scan`, `interval`, `trim` and `adf_trim`, the targets and
 `printer`. Targets whose names stay keep their registration on the panel. If the
 printer changes, the names are released on the old printer and registered on the
