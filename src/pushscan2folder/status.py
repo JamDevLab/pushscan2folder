@@ -20,7 +20,7 @@ LOG_LINES = 1000
 class ScanRecord:
     time: float
     target: str
-    method: str            # "native" | "eSCL" | "" (failed before choosing)
+    method: str            # "native" | "eSCL" | "eSCL, next page dialog" | ""
     pages: int
     files: tuple[str, ...]
     result: str            # "ok" | "nothing saved" | "error"
@@ -35,6 +35,7 @@ class TargetState:
     preset: dict = field(default_factory=dict)
     multipage: tuple[str, ...] | None = None
     type_dirs: tuple[tuple[str, str], ...] = ()   # (document type, folder) pairs
+    feeder_multipage: tuple[str, ...] | None = None
 
 
 class ServiceStatus:
@@ -59,7 +60,9 @@ class ServiceStatus:
     def set_targets(self, targets) -> None:
         states = tuple(TargetState(t.name, str(t.outdir), t.session is not None, dict(t.preset),
                                    tuple(sorted(t.multipage)) if t.multipage is not None else None,
-                                   tuple((kind, str(path)) for kind, path in t.type_dirs.items()))
+                                   tuple((kind, str(path)) for kind, path in t.type_dirs.items()),
+                                   tuple(sorted(t.feeder_multipage))
+                                   if t.feeder_multipage is not None else None)
                        for t in targets)
         with self._lock:
             self._targets = states

@@ -43,7 +43,7 @@ from .config import (DEFAULT_AUTO, DEFAULT_INTERVAL, FORMATS, SAME_FOLDER, TRIM_
                      load_config, load_config_text, parse_config, size_name, write_config)
 from .platform_support import component_problem
 from .protocol import PANEL_CHARS, VISIBLE_NAME_CHARS, check_name
-from .service import (DEFAULT_FILENAME, DEFAULT_NEXT_PAGE, DOC_TYPES, RESOLUTIONS,
+from .service import (DEFAULT_FEEDER_NEXT_PAGE, DEFAULT_FILENAME, DEFAULT_NEXT_PAGE, DOC_TYPES, RESOLUTIONS,
                       TRIM_MAX_MM, check_targets, render_folder, safe_dirname)
 from .status import LogBuffer
 
@@ -105,6 +105,7 @@ class WebContext:
 
     printer, folder: the printer address and the base folder in use.
     next_page: the document types with the next page dialog (global setting).
+    feeder_next_page: the same after a feeder scan.
     config_path: file the editors write (None = unknown, no editing).
     overrides: config key ("printer" or "folder") -> what overrides its file
     value (environment variable or command line option), shown on the
@@ -121,6 +122,7 @@ class WebContext:
     printer: str
     folder: Path
     next_page: frozenset = DEFAULT_NEXT_PAGE
+    feeder_next_page: frozenset = DEFAULT_FEEDER_NEXT_PAGE
     config_path: Path | None = None
     overrides: dict = field(default_factory=dict)
     auth: bool = True
@@ -318,7 +320,8 @@ def check_web_folder(value: str, base: Path) -> None:
 # these lists with dataclasses.fields(), so a new field cannot be forgotten.
 # Config fields the raw editor may change (their values are validated by the
 # config parser, folders of targets by folder_problems).
-WEB_EDITABLE_FIELDS = ("filename", "next_page", "auto", "open_after_scan", "interval",
+WEB_EDITABLE_FIELDS = ("filename", "next_page", "feeder_next_page", "auto", "open_after_scan",
+                       "interval",
                        "verbose", "trim", "adf_trim", "targets")
 # Config fields the web page may not change: where scans go, which printer is
 # used and who can reach the page.
@@ -328,7 +331,8 @@ WEB_FIELDS = ("web_enabled", "web_bind", "web_port", "web_password_file")
 # TargetSpec fields that hold folders (all checked with check_web_folder) ...
 FOLDER_FIELDS = ("folder", "type_folders")
 # ... and the other ones.
-TARGET_OTHER_FIELDS = ("name", "filename", "next_page", "auto", "open_after_scan")
+TARGET_OTHER_FIELDS = ("name", "filename", "next_page", "feeder_next_page", "auto",
+                       "open_after_scan")
 
 
 def folder_problems(spec: TargetSpec, base: Path) -> list[str]:
@@ -361,6 +365,7 @@ class Row:
     folder: str = ""
     type_folders: dict = field(default_factory=dict)   # document type -> folder text
     next_page: frozenset = frozenset()   # document types with the next page dialog
+    feeder_next_page: frozenset = frozenset()   # the same after a feeder scan
     res: str = ""
     fmt: str = ""
     size: str = ""
@@ -374,17 +379,21 @@ def _yes_no(flag: bool | None) -> str:
     return "" if flag is None else "yes" if flag else "no"
 
 
-def row_from_spec(spec: TargetSpec, global_next_page: frozenset) -> Row:
+def row_from_spec(spec: TargetSpec, global_next_page: frozenset,
+                  global_feeder: frozenset = DEFAULT_FEEDER_NEXT_PAGE) -> Row:
     return Row(
         name=spec.name, folder=spec.folder or "", type_folders=dict(spec.type_folders),
         next_page=global_next_page if spec.next_page is None else spec.next_page,
+        feeder_next_page=(global_feeder if spec.feeder_next_page is None
+                          else spec.feeder_next_page),
         res=str(spec.auto["resolution"]) if "resolution" in spec.auto else "",
         fmt=spec.auto.get("format", ""), size=spec.auto.get("size", ""),
         opened=_yes_no(spec.open_after_scan), existing=True, orig=spec.name)
 
 
-def blank_row(global_next_page: frozenset) -> Row:
-    return Row(next_page=global_next_page)
+def blank_row(global_next_page: frozenset,
+              global_feeder: frozenset = DEFAULT_FEEDER_NEXT_PAGE) -> Row:
+    return Row(next_page=global_next_page, feeder_next_page=global_feeder)
 
 
 def rows_from_form(form: dict[str, str]) -> list[Row]:
@@ -400,6 +409,7 @@ def rows_from_form(form: dict[str, str]) -> list[Row]:
         rows.append(Row(name=get("name").strip(), folder=get("folder").strip(),
                         type_folders={k: v for k, v in type_folders.items() if v},
                         next_page=frozenset(k for k in DOC_TYPES if get(f"np_{k}")),
+                        feeder_next_page=frozenset(k for k in DOC_TYPES if get(f"fnp_{k}")),
                         res=get("res"), fmt=get("fmt"), size=get("size"),
                         opened=get("open"),
                         delete=bool(get("del")), existing=get("existing") == "1",
@@ -425,13 +435,14 @@ def claim_locked(rows: list[Row], locked: dict[str, TargetSpec]) -> list[str | N
 
 def specs_from_rows(rows: list[Row], base: Path,
                     locked: dict[str, TargetSpec] | None = None,
-                    global_next_page: frozenset = DEFAULT_NEXT_PAGE
+                    global_next_page: frozenset = DEFAULT_NEXT_PAGE,
+                    global_feeder: frozenset = DEFAULT_FEEDER_NEXT_PAGE
                     ) -> tuple[list[TargetSpec], list[str]]:
     """Validate the rows like the config file does, and their folders with
     check_web_folder. A row standing for a read-only target (see
     claim_locked) keeps it exactly as in the config file, whatever the form
     sent; it can only be deleted. A row whose next page boxes equal the
-    global list gets next_page None. Returns (specs, errors)."""
+    global list gets next_page None (same for feeder_next_page). Returns (specs, errors)."""
     locked = locked or {}
     specs: list[TargetSpec] = []
     errors: list[str] = []
@@ -485,6 +496,8 @@ def specs_from_rows(rows: list[Row], base: Path,
             row.name, folder=folder,
             type_folders={k: row.type_folders[k] for k in DOC_TYPES if row.type_folders.get(k)},
             next_page=None if row.next_page == global_next_page else frozenset(row.next_page),
+            feeder_next_page=(None if row.feeder_next_page == global_feeder
+                              else frozenset(row.feeder_next_page)),
             auto=auto, open_after_scan={"yes": True, "no": False}.get(row.opened)))
     if not errors and not specs:
         errors.append("At least one target is required.")
@@ -504,7 +517,7 @@ def apply_targets(ctx: WebContext, rows: list[Row]) -> tuple[list[TargetSpec], l
     ConfigError/OSError; warnings are logged."""
     cfg = read_config(ctx)
     specs, errors = specs_from_rows(rows, ctx.folder, locked_specs(cfg, ctx.folder),
-                                    cfg.next_page_types())
+                                    cfg.next_page_types(), cfg.feeder_next_page_types())
     if errors:
         return specs, errors
     # The form has no file name field: keep a target's own template from the file.
@@ -534,9 +547,9 @@ BUILTIN = {"interval": f"{DEFAULT_INTERVAL:g}", "open_after_scan": "no",
            "auto_resolution": str(DEFAULT_AUTO["resolution"]),
            "auto_format": DEFAULT_AUTO["format"], "auto_size": DEFAULT_AUTO["size"],
            **{key: "0" for key in TRIM_KEYS}}
-# Keys of the settings form. next_page holds the ticked document types, comma
+# Keys of the settings form. next_page and feeder_next_page hold the ticked document types, comma
 # separated (empty = none); the other keys are "" when not set.
-SETTING_KEYS = ("interval", "next_page", "auto_resolution", "auto_format", "auto_size",
+SETTING_KEYS = ("interval", "next_page", "feeder_next_page", "auto_resolution", "auto_format", "auto_size",
                 "open_after_scan", "filename") + TRIM_KEYS
 NUMBER_KEYS = ("interval",) + TRIM_KEYS
 
@@ -545,6 +558,8 @@ def settings_values(cfg: Config) -> dict[str, str]:
     """Form values (strings) for the settings of a config; "" = not set."""
     values = {"interval": "" if cfg.interval is None else f"{cfg.interval:g}",
               "next_page": ",".join(k for k in DOC_TYPES if k in cfg.next_page_types()),
+              "feeder_next_page": ",".join(k for k in DOC_TYPES
+                                           if k in cfg.feeder_next_page_types()),
               "open_after_scan": ("" if cfg.open_after_scan is None
                                   else "true" if cfg.open_after_scan else "false"),
               "filename": cfg.filename or ""}
@@ -563,6 +578,8 @@ def settings_from_form(form: dict[str, str]) -> dict[str, str]:
     # Check boxes cannot say "not set": unticked is saved as false or as none.
     values["open_after_scan"] = "true" if form.get("open_after_scan") else "false"
     values["next_page"] = ",".join(k for k in DOC_TYPES if form.get(f"next_page_{k}"))
+    values["feeder_next_page"] = ",".join(k for k in DOC_TYPES
+                                          if form.get(f"feeder_next_page_{k}"))
     return values
 
 
@@ -575,8 +592,8 @@ def check_settings(values: dict[str, str]) -> tuple[Config | None, list[str]]:
     advanced: dict = {}
     trims: dict[str, dict] = {"trim": {}, "adf_trim": {}}
     for key, text in values.items():
-        if key == "next_page":
-            top["next_page"] = [k for k in text.split(",") if k]
+        if key in ("next_page", "feeder_next_page"):
+            top[key] = [k for k in text.split(",") if k]
             continue
         if not text:
             continue
@@ -626,7 +643,7 @@ def apply_settings(ctx: WebContext, values: dict[str, str]) -> list[str]:
     if errors:
         return errors
     cfg = read_config(ctx)
-    for key in ("interval", "next_page", "auto", "open_after_scan", "filename", "trim",
+    for key in ("interval", "next_page", "feeder_next_page", "auto", "open_after_scan", "filename", "trim",
                 "adf_trim"):
         setattr(cfg, key, getattr(new, key))
     write_config(ctx.config_path, dump_config(cfg))
@@ -1048,6 +1065,8 @@ def render_status(ctx: WebContext, csrf: str) -> bytes:
     long_names = False
     for t in snap["targets"]:
         eff = ctx.next_page if t.multipage is None else frozenset(t.multipage)
+        feff = (ctx.feeder_next_page if t.feeder_multipage is None
+                else frozenset(t.feeder_multipage))
         long = len(t.name) > VISIBLE_NAME_CHARS
         long_names = long_names or long
         folders = esc(t.outdir) + "".join(
@@ -1057,10 +1076,11 @@ def render_status(ctx: WebContext, csrf: str) -> bytes:
                     f'<td><span class="pill {"ok" if t.registered else "bad"}">'
                     f'{"yes" if t.registered else "no"}</span></td>'
                     f"<td>{esc(_preset_summary(t.preset, base_auto))}</td>"
-                    f"<td>{esc(_next_page_text(eff))}</td></tr>")
+                    f"<td>{esc(_next_page_text(eff))}</td>"
+                    f"<td>{esc(_next_page_text(feff))}</td></tr>")
     parts.append('<h2>Targets</h2><section class="scroll"><table><thead><tr><th>Name</th><th>Folder</th>'
-                 "<th>Registered</th><th>Auto scan settings</th><th>Next page</th></tr></thead><tbody>"
-                 + ("".join(rows) or '<tr><td colspan="5">none</td></tr>') + "</tbody></table></section>")
+                 "<th>Registered</th><th>Auto scan settings</th><th>Next page</th><th>Next page (feeder)</th></tr></thead><tbody>"
+                 + ("".join(rows) or '<tr><td colspan="6">none</td></tr>') + "</tbody></table></section>")
     if long_names:
         parts.append(f'<p class="muted">* The printer panel shows only the first '
                      f"{VISIBLE_NAME_CHARS} characters of this name.</p>")
@@ -1140,9 +1160,10 @@ def _card_foot(i: int, row: Row, disabled: bool) -> str:
 
 
 def _locked_row_html(i: int, count: int, row: Row, spec: TargetSpec, global_next_page: frozenset,
-                     base_auto: dict) -> str:
+                     base_auto: dict,
+                     global_feeder: frozenset = DEFAULT_FEEDER_NEXT_PAGE) -> str:
     """A target with a folder outside the base folder: read-only."""
-    shown = row_from_spec(spec, global_next_page)
+    shown = row_from_spec(spec, global_next_page, global_feeder)
     folder = spec.folder if spec.folder else f"(default: {safe_dirname(spec.name)})"
     others = "".join(f"<p>{esc(kind.capitalize())} folder: <code>{esc(path)}</code></p>"
                      for kind, path in spec.type_folders.items())
@@ -1161,7 +1182,8 @@ def _locked_row_html(i: int, count: int, row: Row, spec: TargetSpec, global_next
         f"unchanged.</p>"
         f"<p>Open after a scan: {esc(_yes_no(spec.open_after_scan) or 'default')}. "
         f"Auto scan settings: {esc(auto_text)}. Next page dialog: "
-        f"{esc(_next_page_text(shown.next_page))}.</p>"
+        f"{esc(_next_page_text(shown.next_page))}. Next page dialog after the feeder: "
+        f"{esc(_next_page_text(shown.feeder_next_page))}.</p>"
         "</div>" + _card_foot(i, row, False) + "</section>")
 
 
@@ -1189,6 +1211,9 @@ def _row_html(i: int, count: int, row: Row, disabled: bool,
     title = esc(row.name) if row.name else "New target"
     type_boxes = "".join(
         _check(f"np_{kind}_{i}", kind in row.next_page, DOC_TYPE_LABELS[kind], disabled)
+        for kind in DOC_TYPES)
+    feeder_boxes = "".join(
+        _check(f"fnp_{kind}_{i}", kind in row.feeder_next_page, DOC_TYPE_LABELS[kind], disabled)
         for kind in DOC_TYPES)
     type_folders = "".join(
         label(f"{esc(DOC_TYPE_LABELS[kind])}: folder", TYPE_FOLDER_KEYS[kind])
@@ -1219,7 +1244,10 @@ def _row_html(i: int, count: int, row: Row, disabled: bool,
         + sel("size", row.size, keep("auto_size") + [(s, s) for s in panel.REGIONS])
         + '</div></div><div class="group"><h3>Next page dialog</h3><p class="hint">'
         "For these panel document types a glass scan asks for further pages.</p>"
-        '<div class="checks">' + type_boxes + "</div></div>"
+        '<div class="checks">' + type_boxes + "</div>"
+        "<h3>Next page dialog after the feeder</h3><p class=\"hint\">"
+        "The same after a feeder scan (empty = none).</p>"
+        '<div class="checks">' + feeder_boxes + "</div></div>"
         + f'<details class="group"{open_type_folders}><summary>Other folder per document type'
         "</summary><p class=\"hint\">Empty = the folder above. Same rules as the folder above.</p>"
         '<div class="fields">' + type_folders + "</div></details>"
@@ -1266,9 +1294,10 @@ def render_targets(ctx: WebContext, csrf: str, rows: list[Row] | None = None,
                      f"{esc(exc)}</section>")
         return _page("Targets", "".join(parts), nav=_nav(ctx, csrf, "targets"))
     if rows is None:
-        rows = [row_from_spec(s, cfg.next_page_types()) for s in cfg.targets]
+        rows = [row_from_spec(s, cfg.next_page_types(), cfg.feeder_next_page_types())
+                for s in cfg.targets]
         if not rows:
-            rows = [blank_row(ctx.next_page)]
+            rows = [blank_row(ctx.next_page, ctx.feeder_next_page)]
     locked = locked_specs(cfg, ctx.folder)
     claims = claim_locked(rows, locked)
     n = len(rows)
@@ -1281,7 +1310,8 @@ def render_targets(ctx: WebContext, csrf: str, rows: list[Row] | None = None,
             f'value="{esc(csrf)}"><input type="hidden" name="rows" value="{n}">'
             '<button type="submit" name="op" value="save" class="sr-only" tabindex="-1" '
             'aria-hidden="true">Save</button>']
-    form += [_locked_row_html(i, n, r, locked[c], cfg.next_page_types(), cfg.auto_values())
+    form += [_locked_row_html(i, n, r, locked[c], cfg.next_page_types(), cfg.auto_values(),
+                          cfg.feeder_next_page_types())
              if c is not None else _row_html(i, n, r, False, defaults)
              for i, (r, c) in enumerate(zip(rows, claims))]
     form.append('<div class="savebar"><button type="submit" name="op" value="save">Save</button>'
@@ -1311,17 +1341,18 @@ def _setting_select(key: str, value: str, options: list[tuple[str, str]]) -> str
     return _select(key, value, unset + options, False)
 
 
-def _next_page_field(types: str) -> str:
+def _next_page_field(types: str, key: str = "next_page", label: str = "Next page dialog",
+                     help_text: str = "For these panel document types a glass scan asks for "
+                     "further pages (one multi-page file). Targets can set their own list."
+                     ) -> str:
     """One check box per panel document type. `types`: the ticked ones, comma separated."""
     ticked = set(types.split(","))
-    boxes = "".join(_check(f"next_page_{kind}", kind in ticked,
+    boxes = "".join(_check(f"{key}_{kind}", kind in ticked,
                            f'Document type "{DOC_TYPE_LABELS[kind]}"', False)
                     for kind in DOC_TYPES)
-    field = _field("Next page dialog", boxes, "next_page",
-                   "For these panel document types a glass scan asks for further pages "
-                   "(one multi-page file). Targets can set their own list.")
+    field = _field(label, boxes, key, help_text)
     # no single control to point the label at: name the group instead
-    return field.replace('<label for="f-next_page">', '<label id="f-next_page">', 1)
+    return field.replace(f'<label for="f-{key}">', f'<label id="f-{key}">', 1)
 
 
 def _printer_html(ctx: WebContext, csrf: str, scanners: list | None) -> str:
@@ -1441,6 +1472,10 @@ def render_settings(ctx: WebContext, csrf: str, values: dict[str, str] | None = 
         for side in TRIM_SIDES]
     behaviour = [
         _next_page_field(v("next_page")),
+        _next_page_field(v("feeder_next_page"), "feeder_next_page",
+                         "Next page dialog after the feeder",
+                         "The same for feeder scans. Empty by default, because the feeder "
+                         "usually holds the whole stack. Targets can set their own list."),
         _field("Poll interval (seconds)", _text_input("interval", v("interval"), BUILTIN["interval"]),
                "interval", "How often the printer is asked for scan requests. Must be "
                "greater than 0."),
@@ -1975,7 +2010,7 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(400, render_targets(
                     ctx, csrf, rows=rows, dirty=True,
                     errors=[f"At most {MAX_ROWS} targets are possible."]))
-            rows.append(blank_row(ctx.next_page))
+            rows.append(blank_row(ctx.next_page, ctx.feeder_next_page))
         elif match:
             kind, i = match.group(1), int(match.group(2))
             if i >= len(rows):

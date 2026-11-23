@@ -2,7 +2,9 @@
 
 Platen scans whose panel document type is in `multipage` (default:
 "document") use Canon's native protocol, which lets the panel ask for further
-pages (multi-page PDF). Everything else uses eSCL."""
+pages (multi-page PDF). Everything else uses eSCL. Feeder scans whose type is
+in `feeder_multipage` (default: none) are eSCL scans followed by the same
+dialog (NativeScanner.ask_next_page); every "more" scans the feeder again."""
 from __future__ import annotations
 
 import logging
@@ -20,6 +22,7 @@ from typing import Callable
 from . import crop, desktop, panel
 from .client import ChmpClient
 from .escl import EXTENSIONS, FORMATS, EsclClient, ScanSettings
+from . import native as native_mod
 from .native import NativeScanner, PageSettings
 from .pdf import jpegs_to_pdf
 from .platform_support import is_reserved_name
@@ -231,6 +234,9 @@ def safe_dirname(name: str) -> str:
 # scans unless the config says otherwise.
 DOC_TYPES = ("document", "auto", "photo")
 DEFAULT_NEXT_PAGE = frozenset({"document"})
+DEFAULT_FEEDER_NEXT_PAGE: frozenset[str] = frozenset()
+# Feeder rounds in a row without a page (empty feeder) before the job ends.
+MAX_EMPTY_FEEDER_ROUNDS = 3
 
 RESOLUTIONS = (75, 150, 300, 600)
 
@@ -246,12 +252,14 @@ class Target:
     height). They replace the global fallback, and with document type
     "auto scan" they also win over the panel.
     multipage: document types with the next page dialog; None = global setting.
+    feeder_multipage: the same for feeder scans; None = global setting.
     """
     name: str
     outdir: Path
     session: int | None = None
     preset: dict = field(default_factory=dict)
     multipage: frozenset[str] | None = None
+    feeder_multipage: frozenset[str] | None = None
     type_dirs: dict[str, Path] = field(default_factory=dict)
     filename: str | None = None  # file name template; None = the global one
     open_after_scan: bool | None = None   # None = the global one
@@ -281,7 +289,8 @@ class PushScanService:
                  use_panel: bool = True, native: NativeScanner | None = None,
                  multipage: frozenset[str] = DEFAULT_NEXT_PAGE,
                  trim: Trim | None = None, open_after_scan: bool = False,
-                 filename: str = DEFAULT_FILENAME, adf_trim: Trim | None = None):
+                 filename: str = DEFAULT_FILENAME, adf_trim: Trim | None = None,
+                 feeder_multipage: frozenset[str] = DEFAULT_FEEDER_NEXT_PAGE):
         self.trim = trim or Trim()
         self.adf_trim = adf_trim or Trim()
         self.filename = filename
@@ -300,6 +309,7 @@ class PushScanService:
         self.use_panel = use_panel
         self.native = native
         self.multipage = multipage
+        self.feeder_multipage = feeder_multipage
         self._last_keepalive = 0.0
         self.chmp = chmp
         self.escl = escl
@@ -359,8 +369,8 @@ class PushScanService:
         self.status.set_pending(False)
         log.info("targets updated: %s", ", ".join(new_names) or "none")
 
-    OPTIONS = ("settings", "interval", "auto_source", "use_panel", "multipage", "trim",
-               "adf_trim", "open_after_scan", "filename")
+    OPTIONS = ("settings", "interval", "auto_source", "use_panel", "multipage",
+               "feeder_multipage", "trim", "adf_trim", "open_after_scan", "filename")
 
     def update_options(self, **options) -> None:
         """Change scan options (names in OPTIONS). Call it from the poll loop
@@ -462,6 +472,16 @@ class PushScanService:
             return False
         return p.doc_type in modes
 
+    def use_feeder_dialog(self, settings: ScanSettings, interrupt: bytes,
+                          target: Target | None = None) -> bool:
+        """Next page dialog after a feeder scan, for the configured types."""
+        if (self.native is None or settings.source != "adf" or not interrupt
+                or not self.use_panel):
+            return False
+        modes = (self.feeder_multipage if target is None or target.feeder_multipage is None
+                 else target.feeder_multipage)
+        return panel.decode(interrupt).doc_type in modes
+
     def cut_mode(self, settings: ScanSettings, interrupt: bytes) -> str | None:
         """"single" or "multi" when the photos are to be cut out of the scan:
         panel size auto scan or auto multi scan on the glass, Pillow installed."""
@@ -531,6 +551,72 @@ class PushScanService:
                 log.warning("cannot build a PDF (%s), saving the pages as JPEG files", exc)
         return complete
 
+    def scan_feeder(self, settings: ScanSettings) -> list[bytes]:
+        """Feeder scan with the next page dialog after every round. Each
+        round is an eSCL feeder scan in JPEG; "Colour" or "Black and white"
+        on the panel scans the feeder again (the user puts the next sheets
+        in first), "Finish" ends the job. Returns the pages, as one PDF when
+        settings.fmt is "pdf"."""
+        pages: list[bytes] = []
+        current = replace(settings, fmt="jpeg")
+        empty = 0
+        while True:
+            docs = self._feeder_round(current, first=not pages)
+            complete = [d for d in docs if is_complete(d, "jpeg")]
+            if len(complete) != len(docs):
+                log.warning("discarded %d incomplete page(s)", len(docs) - len(complete))
+            if not pages and not complete:
+                return []          # first round cancelled: no dialog
+            pages += complete
+            self._pages = len(pages)
+            empty = 0 if complete else empty + 1
+            if empty >= MAX_EMPTY_FEEDER_ROUNDS:
+                log.warning("no pages in %d feeder rounds, finishing", empty)
+                break
+            if (len(pages) >= native_mod.MAX_PAGES
+                    or sum(map(len, pages)) >= native_mod.MAX_SCAN_BYTES):
+                log.warning("stopping after %d pages (size or page limit)", len(pages))
+                break
+            if self.stop_wanted():
+                break
+            log.info("%d page(s) so far, asking for more on the panel", len(pages))
+            try:
+                code = self.native.ask_next_page(current.color, self.keepalive,
+                                                 should_stop=self.stop_wanted)
+            except Exception as exc:
+                log.warning("next page dialog failed (%s), finishing", exc)
+                break
+            if code == native_mod.NEXT_COLOR:
+                current = replace(current, color="color")
+            elif code == native_mod.NEXT_GRAY:
+                current = replace(current, color="gray")
+            else:
+                if code != native_mod.NEXT_FINISH:
+                    log.info("panel answered 0x%02x, finishing", code)
+                break
+            log.info("next feeder round requested (%s)", current.color)
+        if settings.fmt == "pdf":
+            try:
+                return [jpegs_to_pdf(pages, settings.resolution)]
+            except ValueError as exc:
+                log.warning("cannot build a PDF (%s), saving the pages as JPEG files", exc)
+        return pages
+
+    def _feeder_round(self, settings: ScanSettings, first: bool) -> list[bytes]:
+        """One eSCL feeder scan. Later rounds look at the feeder first and
+        return nothing for an empty one or a failed scan, so the pages so
+        far are kept and the panel asks again."""
+        if first:
+            return self.scan_escl(settings)
+        try:
+            if not self.escl.adf_loaded():
+                log.warning("the feeder is empty; put the next sheets in before choosing")
+                return []
+            return self.scan_escl(settings)
+        except Exception as exc:
+            log.warning("feeder scan failed (%s), keeping the pages so far", exc)
+            return []
+
     @staticmethod
     def _photo_pdf(photo: bytes, dpi: int) -> bytes:
         try:
@@ -572,17 +658,21 @@ class PushScanService:
         outdir = render_folder(target.type_dirs.get(doc_type, target.outdir), target.name, now)
         settings = self.settings_for(interrupt, target)
         native = self.use_native(settings, interrupt, target)
-        cut = None if native else self.cut_mode(settings, interrupt)
+        feeder = not native and self.use_feeder_dialog(settings, interrupt, target)
+        cut = None if native or feeder else self.cut_mode(settings, interrupt)
         saved_fmt = settings.fmt
         if cut:
             settings = replace(settings, fmt="jpeg")   # cut out on the JPEG, then convert
+        method = ("native" if native else "eSCL, next page dialog" if feeder else "eSCL")
         log.info("scanning (%s): source=%s color=%s dpi=%d format=%s region=%dx%d",
-                 "native, multi-page" if native else "eSCL",
+                 "native, multi-page" if native else method,
                  settings.source, settings.color, settings.resolution, settings.fmt,
                  settings.width, settings.height)
-        self._method = "native" if native else "eSCL"
+        self._method = method
         if native:
             complete = self.scan_native(settings)
+        elif feeder:
+            complete = self.scan_feeder(settings)
         else:
             docs = self.scan_escl(settings)
             complete = [d for d in docs if is_complete(d, settings.fmt)]

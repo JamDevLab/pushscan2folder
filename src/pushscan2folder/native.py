@@ -26,7 +26,7 @@ import http.client
 import logging
 import struct
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime
 from typing import Callable
 
@@ -73,7 +73,7 @@ IMAGE_PAGE_END = 0x08     # page finished, no more data
 # Answers to OP_NEXT_PAGE (first data byte).
 NEXT_WAITING = 0x00
 NEXT_COLOR = 0x01         # "Colour" pressed: scan another page in colour
-NEXT_GRAY = 0x02          # "Black and white" pressed (*unconfirmed*)
+NEXT_GRAY = 0x02          # "Black and white" pressed
 NEXT_FINISH = 0xFF        # "Finish" pressed
 
 # Largest platen area in 1/300 inch (A4 / Letter).
@@ -134,6 +134,11 @@ class PageSettings:
     height: int = 3507        # 1/300 inch
     x_offset: int = 0         # 1/300 inch
     y_offset: int = 0         # 1/300 inch
+
+
+# Thrown-away page that makes the next page dialog possible after a feeder
+# scan (see NativeScanner.ask_next_page): 1x1 inch at 150 dpi, top left.
+DUMMY_PAGE = PageSettings(resolution=150, width=300, height=300)
 
 
 def pixels(settings: PageSettings) -> tuple[int, int, int, int]:
@@ -312,13 +317,8 @@ class NativeScanner:
         page fails or is cancelled, or if `should_stop` turns true while the
         panel waits for the next-page decision."""
         pages: list[bytes] = []
-        # The official software switches the mode once before starting the job.
-        self.xml(xml_mode_shift(" "))
-        self.command(OP_STATUS, 0x10)
-        self.xml(xml_start_job(job))
+        self._start_job(job)
         try:
-            self.xml(xml_mode_shift(job))
-            self.command(OP_START_SESSION, arg=2)
             while True:
                 try:
                     budget = MAX_SCAN_BYTES - sum(len(p) for p in pages)
@@ -355,10 +355,43 @@ class NativeScanner:
                     break
                 log.info("next page requested (%s)", settings.color)
         finally:
-            for body in (build_command(OP_END_SESSION), xml_end_job(job)):
-                try:
-                    self.exchange(body)
-                except Exception as exc:  # best effort
-                    log.warning("ending scan job failed: %s", exc)
-            self._close()
+            self._end_job(job)
         return pages
+
+    def ask_next_page(self, color: str = "color",
+                      keepalive: Callable[[], None] = lambda: None,
+                      job: str = "00000001",
+                      should_stop: Callable[[], bool] = lambda: False) -> int:
+        """Show the panel's next page dialog after a feeder (eSCL) scan and
+        return the decision (NEXT_COLOR, NEXT_GRAY, NEXT_FINISH).
+
+        The printer answers 0xEC20 with "cancelled" in a job without a
+        scanned page, so a tiny dummy page (DUMMY_PAGE, one inch square) is
+        scanned from the glass first and thrown away. The job is ended
+        before returning, so the feeder is free for the next eSCL scan."""
+        self._start_job(job)
+        try:
+            self._scan_page(replace(DUMMY_PAGE, color=color), keepalive, MAX_PAGE_BYTES)
+            return self._next_page(keepalive, should_stop)
+        finally:
+            self._end_job(job)
+
+    def _start_job(self, job: str) -> None:
+        # The official software switches the mode once before starting the job.
+        self.xml(xml_mode_shift(" "))
+        self.command(OP_STATUS, 0x10)
+        self.xml(xml_start_job(job))
+        try:
+            self.xml(xml_mode_shift(job))
+            self.command(OP_START_SESSION, arg=2)
+        except BaseException:
+            self._end_job(job)
+            raise
+
+    def _end_job(self, job: str) -> None:
+        for body in (build_command(OP_END_SESSION), xml_end_job(job)):
+            try:
+                self.exchange(body)
+            except Exception as exc:  # best effort
+                log.warning("ending scan job failed: %s", exc)
+        self._close()

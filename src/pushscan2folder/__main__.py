@@ -324,6 +324,7 @@ def service_options(args: argparse.Namespace, cfg: Config) -> dict:
                 interval=cfg.interval or 4.0,
                 auto_source=not scan or args.source == "auto",
                 multipage=cfg.next_page_types(),
+                feeder_multipage=cfg.feeder_next_page_types(),
                 trim=cfg.trim or Trim(),
                 adf_trim=cfg.adf_trim or Trim(),
                 open_after_scan=bool(cfg.open_after_scan),
@@ -402,6 +403,7 @@ class ConfigWatcher:
             ctx = self.ctx
             ctx.printer, ctx.folder = args.printer, args.folder
             ctx.next_page = cfg.next_page_types()
+            ctx.feeder_next_page = cfg.feeder_next_page_types()
             ctx.overrides = web_overrides(args, self.argv)
             ctx.printer_pending = None
         self.args = args
@@ -788,6 +790,7 @@ def check_lines(cfg: Config, config_path: Path | None, printer: str | None, fold
              f"base folder: {folder}",
              f"file names: {cfg.filename or DEFAULT_FILENAME}",
              f"next page dialog: {types(cfg.next_page_types())}",
+             f"next page dialog after the feeder: {types(cfg.feeder_next_page_types())}",
              f"document type Auto: {auto['resolution']} dpi, {auto['format']}, {auto['size']}",
              f"trim: glass {sides(trim)}; feeder {sides(adf_trim)}",
              f"open after scan: {'yes' if cfg.open_after_scan else 'no'}",
@@ -803,6 +806,8 @@ def check_lines(cfg: Config, config_path: Path | None, printer: str | None, fold
             lines.append(f"  {kind} scans: {render_folder(path, t.name, now)}")
         if spec.next_page is not None:
             lines.append(f"  next page dialog: {types(spec.next_page)}")
+        if spec.feeder_next_page is not None:
+            lines.append(f"  next page dialog after the feeder: {types(spec.feeder_next_page)}")
         if spec.auto:
             merged = {**auto, **spec.auto}
             lines.append(f"  document type Auto: {merged['resolution']} dpi, "
@@ -1196,6 +1201,7 @@ def _main(argv=None) -> int:
     logging.getLogger().addHandler(log_buffer)
     ctx = web.WebContext(service, log_buffer, args.printer, args.folder,
                          next_page=cfg.next_page_types(),
+                         feeder_next_page=cfg.feeder_next_page_types(),
                          config_path=config_path,
                          overrides=web_overrides(args, argv),
                          discover_fn=discovery.discover)

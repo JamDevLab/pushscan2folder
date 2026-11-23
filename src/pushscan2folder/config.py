@@ -2,16 +2,18 @@
 
 Layout (every key is optional):
 
-    printer, folder, filename, next_page, auto = {...}, open_after_scan
+    printer, folder, filename, next_page, feeder_next_page, auto = {...},
+                open_after_scan
     [advanced]  interval, verbose, trim = {...}, adf_trim = {...}
     [web]       enabled, bind, port, password_file
     [[target]]  name, folder, document_folder, auto_folder, photo_folder,
-                filename, next_page, auto = {...}, open_after_scan
+                filename, next_page, feeder_next_page, auto = {...}, open_after_scan
 
 The printer panel decides colour, source (the feeder when paper is in it)
 and, for the document types "Document" and "Photo", size, format and
 resolution. The file only sets what the panel does not: the folders, the
-file names, which document types get the "next page" dialog, and the
+file names, which document types get the "next page" dialog (on the glass
+and, if wanted, after the feeder), and the
 settings for document type "Auto".
 """
 from __future__ import annotations
@@ -29,7 +31,7 @@ from pathlib import Path
 from . import panel
 from .platform_support import replace_file
 from .protocol import check_name
-from .service import (DEFAULT_NEXT_PAGE, DOC_TYPES, RESOLUTIONS, TRIM_MAX_MM, Target, Trim,
+from .service import (DEFAULT_FEEDER_NEXT_PAGE, DEFAULT_NEXT_PAGE, DOC_TYPES, RESOLUTIONS, TRIM_MAX_MM, Target, Trim,
                       check_filename, check_folder, safe_dirname)
 
 
@@ -52,12 +54,12 @@ SAME_FOLDER = "."  # target folder: the base folder itself, no subfolder
 
 # Keys per table. A target folder key per document type: "photo_folder" ...
 TYPE_FOLDER_KEYS = {kind: f"{kind}_folder" for kind in DOC_TYPES}
-TOP_KEYS = ("printer", "folder", "filename", "next_page", "auto", "open_after_scan",
-            "advanced", "web", "target")
+TOP_KEYS = ("printer", "folder", "filename", "next_page", "feeder_next_page", "auto",
+            "open_after_scan", "advanced", "web", "target")
 ADVANCED_KEYS = ("interval", "verbose", "trim", "adf_trim")
 WEB_KEYS = ("enabled", "bind", "port", "password_file")
 TARGET_KEYS = (("name", "folder") + tuple(TYPE_FOLDER_KEYS.values())
-               + ("filename", "next_page", "auto", "open_after_scan"))
+               + ("filename", "next_page", "feeder_next_page", "auto", "open_after_scan"))
 
 
 @dataclass
@@ -73,6 +75,7 @@ class TargetSpec:
     type_folders: dict[str, str] = field(default_factory=dict)
     filename: str | None = None
     next_page: frozenset[str] | None = None
+    feeder_next_page: frozenset[str] | None = None
     auto: dict = field(default_factory=dict)
     open_after_scan: bool | None = None
 
@@ -89,6 +92,7 @@ class Config:
     folder: Path | None = None
     filename: str | None = None
     next_page: frozenset[str] | None = None
+    feeder_next_page: frozenset[str] | None = None
     auto: dict = field(default_factory=dict)
     open_after_scan: bool | None = None
     interval: float | None = None
@@ -108,15 +112,21 @@ class Config:
     def next_page_types(self) -> frozenset[str]:
         return DEFAULT_NEXT_PAGE if self.next_page is None else self.next_page
 
+    def feeder_next_page_types(self) -> frozenset[str]:
+        return (DEFAULT_FEEDER_NEXT_PAGE if self.feeder_next_page is None
+                else self.feeder_next_page)
+
     def build_targets(self, base: Path) -> list[Target]:
         """Targets for base folder `base`. Relative folders resolve against
-        it; an unset next_page keeps the global one (None)."""
+        it; an unset next_page or feeder_next_page keeps the global one (None)."""
         result = []
         for spec in self.targets:
             outdir = base / (spec.folder if spec.folder else safe_dirname(spec.name))
             type_dirs = {kind: base / path for kind, path in spec.type_folders.items()}
             result.append(Target(spec.name, outdir, preset=auto_preset(spec.auto),
-                                 multipage=spec.next_page, filename=spec.filename,
+                                 multipage=spec.next_page,
+                                 feeder_multipage=spec.feeder_next_page,
+                                 filename=spec.filename,
                                  open_after_scan=spec.open_after_scan, type_dirs=type_dirs))
         return result
 
@@ -278,6 +288,7 @@ def _target(table, index: int, fname: str) -> TargetSpec:
             type_folders[kind] = value
     return TargetSpec(name, folder=rd.folder("folder"), type_folders=type_folders,
                       filename=rd.filename("filename"), next_page=rd.next_page("next_page"),
+                      feeder_next_page=rd.next_page("feeder_next_page"),
                       auto=rd.auto("auto"), open_after_scan=rd.bool_("open_after_scan"))
 
 
@@ -315,6 +326,7 @@ def parse_config(data: dict, fname: str = "config.toml") -> Config:
     cfg = Config(printer=top.str_("printer"),
                  folder=Path(folder) if folder is not None else None,
                  filename=top.filename("filename"), next_page=top.next_page("next_page"),
+                 feeder_next_page=top.next_page("feeder_next_page"),
                  auto=top.auto("auto"), open_after_scan=top.bool_("open_after_scan"))
 
     adv = _Reader(top.table_("advanced") or {}, f"{fname}: [advanced]", ADVANCED_KEYS)
@@ -425,6 +437,8 @@ def dump_config(cfg: Config) -> str:
                    "base folder of all targets"))
     general = (_line("filename", cfg.filename, "fields {name} {date} {time} {now:%Y-%m-%d}")
                + _line("next_page", cfg.next_page, "document types with the next page dialog")
+               + _line("feeder_next_page", cfg.feeder_next_page,
+                       "the same after a feeder scan")
                + _line("auto", cfg.auto, 'panel type "Auto": resolution, format, size')
                + _line("open_after_scan", cfg.open_after_scan, "desktop PC only"))
     if not general:
@@ -447,6 +461,7 @@ def dump_config(cfg: Config) -> str:
         for kind in DOC_TYPES:
             block += _line(TYPE_FOLDER_KEYS[kind], spec.type_folders.get(kind))
         block += (_line("filename", spec.filename) + _line("next_page", spec.next_page)
+                  + _line("feeder_next_page", spec.feeder_next_page)
                   + _line("auto", spec.auto) + _line("open_after_scan", spec.open_after_scan))
         blocks.append(block)
     blocks.append([_EXAMPLE_TARGET])

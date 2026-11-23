@@ -715,6 +715,33 @@ class TargetEditorTests(WebTestBase):
         self.assertIn("At least one target", data)
 
 
+    def test_feeder_next_page_boxes(self):
+        self.logged_in()
+        csrf = self.client.csrf()
+        status, _, _ = self.client.request("POST", "/targets", self.form(
+            csrf,
+            {"name": "same"},                                           # = global (empty)
+            {"name": "docs", "fnp_document": "1", "fnp_auto": "1"},
+            {"name": "all", "fnp_document": "1", "fnp_auto": "1", "fnp_photo": "1"}))
+        self.assertEqual(status, 303)
+        cfg = load_config(self.config_path)
+        self.assertEqual([t.feeder_next_page for t in cfg.targets],
+                         [None, frozenset({"document", "auto"}), frozenset(DOC_TYPES)])
+        self.assertEqual([t.next_page for t in cfg.targets], [frozenset()] * 3)   # no np_ box ticked
+        page = self.client.request("GET", "/targets")[2]
+        self.assertIn("Next page dialog after the feeder", page)
+        self.assertEqual(page.count('name="fnp_document_1" value="1" checked'), 1)
+        self.assertEqual(page.count('name="fnp_photo_1" value="1" checked'), 0)
+        self.assertEqual(page.count('name="fnp_photo_2" value="1" checked'), 1)
+        self.assertEqual(page.count('name="fnp_document_0" value="1" checked'), 0)
+
+    def test_new_row_ticks_the_global_feeder_list(self):
+        self.ctx.feeder_next_page = frozenset({"auto"})
+        self.logged_in()
+        data = self.client.request("GET", "/targets")[2]
+        self.assertIn('name="fnp_auto_0" value="1" checked', data)
+        self.assertNotIn('name="fnp_document_0" value="1" checked', data)
+
     def test_new_row_ticks_the_global_next_page_list(self):
         self.ctx.next_page = frozenset({"document", "photo"})
         self.logged_in()
@@ -1203,6 +1230,18 @@ class SettingsTests(WebTestBase):
         self.assertIn('name="next_page_photo" value="1" checked', page)
         self.assertNotIn('name="next_page_auto" value="1" checked', page)
 
+    def test_feeder_next_page_boxes(self):
+        self.logged_in()
+        self.post(feeder_next_page_document="1", feeder_next_page_photo="1")
+        cfg = load_config(self.config_path)
+        self.assertEqual(cfg.feeder_next_page, frozenset({"document", "photo"}))
+        self.assertEqual(cfg.next_page, frozenset())
+        page = self.client.request("GET", "/settings")[2]
+        self.assertIn('name="feeder_next_page_document" value="1" checked', page)
+        self.assertNotIn('name="feeder_next_page_auto" value="1" checked', page)
+        self.post()
+        self.assertEqual(load_config(self.config_path).feeder_next_page, frozenset())
+
     def test_form_round_trip(self):
         cfg = load_config_text(
             'next_page = ["auto", "photo"]\nauto = { resolution = 150, format = "jpeg" }\n'
@@ -1211,6 +1250,7 @@ class SettingsTests(WebTestBase):
         values = web.settings_values(cfg)
         self.assertEqual(set(values), set(web.SETTING_KEYS))
         self.assertEqual(values["next_page"], "auto,photo")
+        self.assertEqual(values["feeder_next_page"], "")
         self.assertEqual((values["trim_bottom"], values["trim_left"], values["adf_trim_left"]),
                          ("2.5", "", "3"))
         new, errors = web.check_settings(values)
