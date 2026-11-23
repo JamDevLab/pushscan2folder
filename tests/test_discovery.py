@@ -93,7 +93,7 @@ class DiscoverTests(unittest.TestCase):
                            (b"garbage", ("192.168.1.9", 5353)),
                            (answer("Other", ""), ("192.168.1.7", 5353)),
                            (answer(), ("192.168.1.50", 5353))])       # repeated answer
-        found = discovery.discover(timeout=1, sock_factory=lambda: sock)
+        found = discovery.discover(timeout=1, sock_factory=lambda: sock, interfaces=[])
         self.assertEqual(sock.sent[0][1], discovery.MDNS_ADDR)
         self.assertEqual(found, [Scanner("192.168.1.7", "Other", ""),
                                  Scanner("192.168.1.50", "Canon TR8500 series",
@@ -135,7 +135,7 @@ class DiscoverTests(unittest.TestCase):
     def test_network_errors_give_an_empty_list(self):
         def broken():
             raise OSError("no network")
-        self.assertEqual(discovery.discover(timeout=0.1, sock_factory=broken), [])
+        self.assertEqual(discovery.discover(timeout=0.1, sock_factory=broken, interfaces=[]), [])
 
 
 if __name__ == "__main__":

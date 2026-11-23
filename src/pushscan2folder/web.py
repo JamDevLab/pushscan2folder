@@ -26,6 +26,7 @@ import logging
 import os
 import re
 import secrets
+import socketserver
 import sys
 import threading
 import time
@@ -1447,6 +1448,13 @@ def _printable(text: str) -> str:
 
 class WebServer(ThreadingHTTPServer):
     daemon_threads = True
+
+    def server_bind(self):
+        # HTTPServer.server_bind looks up this computer's full host name
+        # (socket.getfqdn), which takes about 35 seconds on a Mac whose name
+        # has no DNS entry, for example with bind 0.0.0.0. The name is unused.
+        socketserver.TCPServer.server_bind(self)
+        self.server_name, self.server_port = str(self.server_address[0]), self.server_address[1]
 
     def __init__(self, address, ctx: WebContext, password: str | None,
                  secure_cookie: bool = False):
