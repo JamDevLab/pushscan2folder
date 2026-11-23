@@ -845,13 +845,14 @@ class TargetEditorTests(WebTestBase):
             Target("b", Path("/s/b"), session=2)])
         self.logged_in()
         page = self.client.request("GET", "/")[2]
-        self.assertIn("/s/a", page)
-        self.assertIn("Photo: /s/Bilder", page)
+        self.assertIn(str(Path("/s/a")), page)            # a backslash path on Windows
+        self.assertIn(f"Photo: {Path('/s/Bilder')}", page)
         self.assertIn("600 dpi, jpeg, a4", page)
-        self.assertIn("Auto, Photo", page)
-        self.assertIn("<td>Document</td>", page)          # b: the global default
+        self.assertIn("<td>Auto, Photo</td><td>none</td>", page)   # a: glass, feeder
+        self.assertIn("<td>Document</td><td>none</td>", page)      # b: the global defaults
         self.ctx.next_page = frozenset()
-        self.assertIn("<td>none</td>", self.client.request("GET", "/")[2])
+        self.ctx.feeder_next_page = frozenset({"document"})
+        self.assertIn("<td>none</td><td>Document</td>", self.client.request("GET", "/")[2])
 
 
 class FieldClassificationTests(unittest.TestCase):

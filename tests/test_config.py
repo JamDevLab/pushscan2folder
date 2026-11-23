@@ -2,6 +2,7 @@
 import os
 import stat
 import tempfile
+import tomllib
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -240,8 +241,17 @@ class ParseTests(ConfigTestBase):
             load_config(bad)
 
     def test_multi_line_inline_table_gets_a_hint(self):
+        # TOML 1.1 (tomllib from Python 3.15 on) allows multi-line inline tables.
+        try:
+            tomllib.loads("a = {\n b = 1\n}\n")
+            multi_line_ok = True
+        except tomllib.TOMLDecodeError:
+            multi_line_ok = False
         for text in ('auto = {\n  resolution = 300\n}\n',
                      '[advanced]\ntrim = { right = 1,\n bottom = 2 }\n'):
+            if multi_line_ok:
+                load_config_text(text, "c.toml")
+                continue
             with self.assertRaises(ConfigError) as cm:
                 load_config_text(text, "c.toml")
             self.assertIn("invalid TOML", str(cm.exception))
